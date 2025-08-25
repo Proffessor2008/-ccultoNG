@@ -8,18 +8,22 @@ import tempfile
 import threading
 import time
 import tkinter as tk
+import zlib
 from tkinter import ttk, filedialog, messagebox, scrolledtext
-from typing import Tuple, Optional, List, Callable
+from typing import List
+from typing import Tuple
 
-import cv2
+import numba
 import numpy as np
-from PIL import Image, ImageTk
+from PIL import Image
+from PIL import ImageTk
+from scipy import ndimage
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 # ───────────────────────────────────────────────
 # 🎨 ГЛОБАЛЬНЫЕ НАСТРОЙКИ
 # ───────────────────────────────────────────────
-VERSION = "0.0.7"
+VERSION = "0.2.1"
 AUTHOR = "MustaNG"
 PASSWORD_HASH = "f6ee94ecb014f74f887b9dcc52daecf73ab3e3333320cadd98bcb59d895c52f5"
 
@@ -33,162 +37,162 @@ MAX_DATA_LEN = 100 * 1024 * 1024 * 8  # Максимальный размер д
 THEMES = {
     "Тёмная": {
         "name": "Тёмная",
-        "bg": "#0D1117",  # Очень тёмный фон (GitHub Dark)
-        "fg": "#E6EDF3",  # Светлый текст
-        "accent": "#58A6FF",  # Акцентный синий (GitHub Blue)
-        "accent_hover": "#79B8FF",  # Акцент при наведении
-        "accent_pressed": "#388BFD",  # Акцент при нажатии
-        "secondary": "#161B22",  # Вторичный фон (карточки)
-        "success": "#3FB950",  # Цвет успеха (зелёный)
-        "error": "#F85149",  # Цвет ошибки (красный)
-        "warning": "#D29922",  # Цвет предупреждения (оранжевый)
-        "card": "#161B22",  # Фон карточек
-        "border": "#30363D",  # Цвет границ
-        "text": "#E6EDF3",  # Основной текст
-        "text_secondary": "#8B949E",  # Вторичный текст
-        "disabled": "#484F58",  # Отключенные элементы
-        "scrollbar": "#30363D",  # Цвет полосы прокрутки
-        "highlight": "#1F6FEB",  # Цвет выделения
-        "shadow": "#010409",  # Цвет теней
-        "radius": 8,  # Радиус закругления
-        "padding": 10,  # Внутренние отступы
-        "border_width": 1  # Ширина границ
+        "bg": "#0B1220",
+        "fg": "#E6EDF6",
+        "accent": "#4C8DFF",
+        "accent_hover": "#6AA8FF",
+        "accent_pressed": "#3B7CF2",
+        "secondary": "#111827",
+        "success": "#3FDA87",
+        "error": "#FF6B6B",
+        "warning": "#F0B23E",
+        "card": "#0E1726",
+        "border": "#253044",
+        "text": "#E6EDF6",
+        "text_secondary": "#94A3B8",
+        "disabled": "#55637A",
+        "scrollbar": "#243244",
+        "highlight": "#1C273A",
+        "shadow": "#000000",
+        "radius": 12,
+        "padding": 12,
+        "border_width": 1
     },
     "Светлая": {
         "name": "Светлая",
-        "bg": "#FFFFFF",  # Белый фон
-        "fg": "#24292F",  # Тёмный текст
-        "accent": "#0969DA",  # Акцентный синий
-        "accent_hover": "#218BFF",  # Акцент при наведении
-        "accent_pressed": "#0652A5",  # Акцент при нажатии
-        "secondary": "#F6F8FA",  # Вторичный фон (карточки)
-        "success": "#1A7F37",  # Цвет успеха (зелёный)
-        "error": "#CF222E",  # Цвет ошибки (красный)
-        "warning": "#9A6700",  # Цвет предупреждения (оранжевый)
-        "card": "#FFFFFF",  # Фон карточек
-        "border": "#D0D7DE",  # Цвет границ
-        "text": "#24292F",  # Основной текст
-        "text_secondary": "#656D76",  # Вторичный текст
-        "disabled": "#ABBAC5",  # Отключенные элементы
-        "scrollbar": "#D0D7DE",  # Цвет полосы прокрутки
-        "highlight": "#D0EBFF",  # Цвет выделения
-        "shadow": "#D0D7DE",  # Цвет теней
-        "radius": 8,
-        "padding": 10,
+        "bg": "#F7F9FC",
+        "fg": "#0F172A",
+        "accent": "#2563EB",
+        "accent_hover": "#3B82F6",
+        "accent_pressed": "#1D4ED8",
+        "secondary": "#FFFFFF",
+        "success": "#16A34A",
+        "error": "#DC2626",
+        "warning": "#D97706",
+        "card": "#FFFFFF",
+        "border": "#E2E8F0",
+        "text": "#0F172A",
+        "text_secondary": "#64748B",
+        "disabled": "#A3AEC2",
+        "scrollbar": "#CBD5E1",
+        "highlight": "#E8F1FF",
+        "shadow": "#DDE3EC",
+        "radius": 12,
+        "padding": 12,
         "border_width": 1
     },
     "Космос": {
         "name": "Космос",
-        "bg": "#0A0A1A",  # Очень тёмный фон
-        "fg": "#A0D8F1",  # Светло-голубой текст
-        "accent": "#7B68EE",  # Акцентный фиолетовый
-        "accent_hover": "#9B8AFF",  # Акцент при наведении
-        "accent_pressed": "#5A4FCF",  # Акцент при нажатии
-        "secondary": "#16213E",  # Вторичный фон (карточки)
-        "success": "#00FFAA",  # Цвет успеха (зелёный)
-        "error": "#FF3366",  # Цвет ошибки (красный)
-        "warning": "#FFD166",  # Цвет предупреждения (жёлтый)
-        "card": "#10102A",  # Фон карточек
-        "border": "#3A3A8C",  # Цвет границ
-        "text": "#A0D8F1",  # Основной текст
-        "text_secondary": "#6A9CB5",  # Вторичный текст
-        "disabled": "#4A4A8C",  # Отключенные элементы
-        "scrollbar": "#2A2A5A",  # Цвет полосы прокрутки
-        "highlight": "#1A1A3A",  # Цвет выделения
-        "shadow": "#000000",  # Цвет теней
-        "radius": 10,
+        "bg": "#0B1020",
+        "fg": "#CDE7FF",
+        "accent": "#7C3AED",
+        "accent_hover": "#9D5CFF",
+        "accent_pressed": "#6D28D9",
+        "secondary": "#11162A",
+        "success": "#22D3EE",
+        "error": "#FB7185",
+        "warning": "#FBBF24",
+        "card": "#0F1530",
+        "border": "#232B47",
+        "text": "#D7EEFF",
+        "text_secondary": "#8393B2",
+        "disabled": "#3B4470",
+        "scrollbar": "#1C2446",
+        "highlight": "#1A2142",
+        "shadow": "#000000",
+        "radius": 12,
         "padding": 12,
         "border_width": 1
     },
     "Океан": {
         "name": "Океан",
-        "bg": "#001F3F",  # Очень тёмный фон
-        "fg": "#A2D5F2",  # Светло-голубой текст
-        "accent": "#0074D9",  # Акцентный синий
-        "accent_hover": "#339CFF",  # Акцент при наведении
-        "accent_pressed": "#0056A3",  # Акцент при нажатии
-        "secondary": "#003366",  # Вторичный фон (карточки)
-        "success": "#39FF14",  # Цвет успеха (зелёный)
-        "error": "#FF4136",  # Цвет ошибки (красный)
-        "warning": "#FFB74D",  # Цвет предупреждения (оранжевый)
-        "card": "#002B5B",  # Фон карточек
-        "border": "#0056B3",  # Цвет границ
-        "text": "#A2D5F2",  # Основной текст
-        "text_secondary": "#6A9CB5",  # Вторичный текст
-        "disabled": "#005588",  # Отключенные элементы
-        "scrollbar": "#004488",  # Цвет полосы прокрутки
-        "highlight": "#003A66",  # Цвет выделения
-        "shadow": "#000000",  # Цвет теней
-        "radius": 8,
-        "padding": 10,
+        "bg": "#021A2E",
+        "fg": "#CDEBFF",
+        "accent": "#0EA5E9",
+        "accent_hover": "#38BDF8",
+        "accent_pressed": "#0284C7",
+        "secondary": "#03243F",
+        "success": "#34D399",
+        "error": "#F87171",
+        "warning": "#F59E0B",
+        "card": "#062B4A",
+        "border": "#0B3B63",
+        "text": "#CDEBFF",
+        "text_secondary": "#8DB8D6",
+        "disabled": "#2A5877",
+        "scrollbar": "#0D3355",
+        "highlight": "#0A2F54",
+        "shadow": "#000000",
+        "radius": 12,
+        "padding": 12,
         "border_width": 1
     },
     "Лес": {
         "name": "Лес",
-        "bg": "#0D1F0A",  # Очень тёмный фон
-        "fg": "#C8E6C9",  # Светло-зелёный текст
-        "accent": "#4CAF50",  # Акцентный зелёный
-        "accent_hover": "#81C784",  # Акцент при наведении
-        "accent_pressed": "#388E3C",  # Акцент при нажатии
-        "secondary": "#1B3E19",  # Вторичный фон (карточки)
-        "success": "#8BC34A",  # Цвет успеха (зелёный)
-        "error": "#F44336",  # Цвет ошибки (красный)
-        "warning": "#FFB74D",  # Цвет предупреждения (оранжевый)
-        "card": "#142811",  # Фон карточек
-        "border": "#2E7D32",  # Цвет границ
-        "text": "#C8E6C9",  # Основной текст
-        "text_secondary": "#81C784",  # Вторичный текст
-        "disabled": "#4A6947",  # Отключенные элементы
-        "scrollbar": "#2E7D32",  # Цвет полосы прокрутки
-        "highlight": "#1E461C",  # Цвет выделения
-        "shadow": "#000000",  # Цвет теней
-        "radius": 10,
+        "bg": "#0D1A11",
+        "fg": "#D6F5DE",
+        "accent": "#22C55E",
+        "accent_hover": "#4ADE80",
+        "accent_pressed": "#16A34A",
+        "secondary": "#102418",
+        "success": "#84CC16",
+        "error": "#EF4444",
+        "warning": "#F59E0B",
+        "card": "#0F2616",
+        "border": "#224A2F",
+        "text": "#D8F7E0",
+        "text_secondary": "#91C3A2",
+        "disabled": "#416D54",
+        "scrollbar": "#1B3A2A",
+        "highlight": "#12301E",
+        "shadow": "#000000",
+        "radius": 12,
         "padding": 12,
         "border_width": 1
     },
     "Ночная Неонка": {
         "name": "Ночная Неонка",
-        "bg": "#0F0C29",  # Градиентный тёмный фон
-        "fg": "#F0F0F0",  # Светлый текст
-        "accent": "#FF00CC",  # Акцентный неоново-розовый
-        "accent_hover": "#FF66FF",  # Акцент при наведении
-        "accent_pressed": "#CC0099",  # Акцент при нажатии
-        "secondary": "#302B63",  # Вторичный фон (карточки)
-        "success": "#00FF9D",  # Цвет успеха (неоново-зелёный)
-        "error": "#FF3366",  # Цвет ошибки (неоново-красный)
-        "warning": "#FFD166",  # Цвет предупреждения (неоново-жёлтый)
-        "card": "#24243E",  # Фон карточек
-        "border": "#4A4A8C",  # Цвет границ
-        "text": "#F0F0F0",  # Основной текст
-        "text_secondary": "#B0B0B0",  # Вторичный текст
-        "disabled": "#6A6A8C",  # Отключенные элементы
-        "scrollbar": "#5A5A8C",  # Цвет полосы прокрутки
-        "highlight": "#3A3A5A",  # Цвет выделения
-        "shadow": "#000000",  # Цвет теней
-        "radius": 12,
-        "padding": 15,
+        "bg": "#0D0B21",
+        "fg": "#F7F7FF",
+        "accent": "#FF2EA8",
+        "accent_hover": "#FF64C3",
+        "accent_pressed": "#DB158E",
+        "secondary": "#1B1841",
+        "success": "#00E6A8",
+        "error": "#FF5A7A",
+        "warning": "#FFD166",
+        "card": "#221E56",
+        "border": "#3B3784",
+        "text": "#F7F7FF",
+        "text_secondary": "#C8C8F0",
+        "disabled": "#6A67B2",
+        "scrollbar": "#2B2770",
+        "highlight": "#2A2671",
+        "shadow": "#000000",
+        "radius": 14,
+        "padding": 14,
         "border_width": 1
     },
     "Солнечный Закат": {
         "name": "Солнечный Закат",
-        "bg": "#FFF8F0",  # Светлый фон
-        "fg": "#333333",  # Тёмный текст
-        "accent": "#FF6B6B",  # Акцентный оранжево-красный
-        "accent_hover": "#FF8E8E",  # Акцент при наведении
-        "accent_pressed": "#E55252",  # Акцент при нажатии
-        "secondary": "#FFEAA7",  # Вторичный фон (карточки)
-        "success": "#06D6A0",  # Цвет успеха (зелёный)
-        "error": "#EF476F",  # Цвет ошибки (красный)
-        "warning": "#FFD166",  # Цвет предупреждения (жёлтый)
-        "card": "#FFFFFF",  # Фон карточек
-        "border": "#DADADA",  # Цвет границ
-        "text": "#333333",  # Основной текст
-        "text_secondary": "#757575",  # Вторичный текст
-        "disabled": "#BDBDBD",  # Отключенные элементы
-        "scrollbar": "#CCCCCC",  # Цвет полосы прокрутки
-        "highlight": "#FFF2E8",  # Цвет выделения
-        "shadow": "#E0E0E0",  # Цвет теней
-        "radius": 10,
+        "bg": "#FFF9F4",
+        "fg": "#1F2937",
+        "accent": "#FB6A63",
+        "accent_hover": "#FF8B85",
+        "accent_pressed": "#E1544E",
+        "secondary": "#FFFFFF",
+        "success": "#10B981",
+        "error": "#EF4444",
+        "warning": "#F59E0B",
+        "card": "#FFFFFF",
+        "border": "#EAD7CC",
+        "text": "#1F2937",
+        "text_secondary": "#6B7280",
+        "disabled": "#B8BDC7",
+        "scrollbar": "#E5D7CD",
+        "highlight": "#FFEDE6",
+        "shadow": "#EAD7CC",
+        "radius": 12,
         "padding": 12,
         "border_width": 1
     }
@@ -198,7 +202,8 @@ SUPPORTED_FORMATS = [("Изображения", "*.png *.bmp *.tiff *.tga *.jpg 
 STEGANO_METHODS = {
     "lsb": "Классический LSB",
     "noise": "Adaptive-Noise",
-    "aelsb": "Adaptive-Edge-LSB"}
+    "aelsb": "Adaptive-Edge-LSB",
+    "hill": "HILL-CA LSB Matching"}
 SETTINGS_FILE = "stego_settings.json"
 HISTORY_FILE = "stego_history.json"
 MAX_HISTORY = 10
@@ -333,222 +338,260 @@ class ThemeManager:
 
     def _configure_styles(self) -> None:
         c = self.colors
-        radius = c.get("radius", 0)
-        padding = c.get("padding", 5)
+        radius = c.get("radius", 10)
+        padding = c.get("padding", 10)
         border_width = c.get("border_width", 1)
 
-        # Настройка основного окна
         self.root.configure(bg=c["bg"])
-
-        # Общие стили
         self.style.theme_use("clam")
-        self.style.configure(".", background=c["bg"], foreground=c["fg"], font=("Segoe UI", 10))
 
-        # Вкладки
+        # Базовые установки
+        self.style.configure(".", background=c["bg"], foreground=c["text"], font=("Segoe UI", 10))
+
+        # Notebook (вкладки)
         self.style.configure("TNotebook", background=c["bg"], borderwidth=0)
-        self.style.configure("TNotebook.Tab",
-                             background=c["secondary"],
-                             foreground=c["fg"],
-                             padding=(padding + 6, padding),
-                             font=("Segoe UI", 10, "bold"),
-                             relief="flat",
-                             borderwidth=0)
-        self.style.map("TNotebook.Tab",
-                       background=[("selected", c["accent"]), ("active", c["secondary"])],
-                       foreground=[("selected", "#ffffff"), ("active", c["accent"])])
+        self.style.configure(
+            "TNotebook.Tab",
+            background=c["secondary"],
+            foreground=c["text_secondary"],
+            padding=(padding, padding - 2),
+            font=("Segoe UI", 10, "bold"),
+            relief="flat"
+        )
+        self.style.map(
+            "TNotebook.Tab",
+            background=[("selected", c["card"]), ("active", c["highlight"])],
+            foreground=[("selected", c["text"]), ("active", c["text"])]
+        )
 
-        # Кнопки
-        self.style.configure("TButton",
-                             background=c["secondary"],
-                             foreground=c["fg"],
-                             font=("Segoe UI", 10),
-                             relief="flat",
-                             padding=(padding, padding),
-                             borderwidth=border_width,
-                             bordercolor=c["border"])
-        self.style.map("TButton",
-                       background=[("active", c["accent_hover"]), ("pressed", c["accent_pressed"])],
-                       foreground=[("active", "#ffffff"), ("pressed", "#ffffff")])
+        # Кнопки (обычные)
+        self.style.configure(
+            "TButton",
+            background=c["secondary"],
+            foreground=c["text"],
+            font=("Segoe UI", 10),
+            relief="flat",
+            padding=(padding, padding - 2),
+            borderwidth=border_width,
+            bordercolor=c["border"],
+            focusthickness=2,
+            focuscolor=c["accent"]
+        )
+        self.style.map(
+            "TButton",
+            background=[("active", c["highlight"]), ("pressed", c["accent_pressed"])],
+            foreground=[("disabled", c["disabled"]), ("pressed", "#ffffff")],
+            bordercolor=[("focus", c["accent"])]
+        )
 
-        # Акцентные кнопки
-        self.style.configure("Accent.TButton",
-                             background=c["accent"],
-                             foreground="#ffffff",
-                             font=("Segoe UI", 10, "bold"),
-                             padding=(padding + 2, padding),
-                             borderwidth=0,
-                             relief="flat")
-        self.style.map("Accent.TButton",
-                       background=[("active", c["accent_hover"]), ("pressed", c["accent_pressed"])])
+        # Кнопки (акцентные)
+        self.style.configure(
+            "Accent.TButton",
+            background=c["accent"],
+            foreground="#ffffff",
+            font=("Segoe UI", 10, "bold"),
+            padding=(padding + 2, padding - 1),
+            borderwidth=0,
+            relief="flat",
+            focusthickness=3,
+            focuscolor=c["accent_hover"]
+        )
+        self.style.map(
+            "Accent.TButton",
+            background=[("active", c["accent_hover"]), ("pressed", c["accent_pressed"])],
+            foreground=[("disabled", c["disabled"])]
+        )
+
+        # Кнопки-иконки (в шапке и рядом), чуть более «плоские»
+        self.style.configure(
+            "IconButton.TButton",
+            background=c["secondary"],
+            foreground=c["text"],
+            font=("Segoe UI", 10),
+            relief="flat",
+            padding=(padding - 3, padding - 5),
+            borderwidth=border_width,
+            bordercolor=c["border"]
+        )
+        self.style.map(
+            "IconButton.TButton",
+            background=[("active", c["highlight"]), ("pressed", c["accent"])],
+            foreground=[("pressed", "#ffffff")]
+        )
+
+        # Кнопки действий (извлечь/сохранить/копировать)
+        self.style.configure(
+            "Action.TButton",
+            background=c["secondary"],
+            foreground=c["text"],
+            font=("Segoe UI", 10),
+            relief="flat",
+            padding=(padding, padding - 2),
+            borderwidth=border_width,
+            bordercolor=c["border"],
+            focusthickness=2,
+            focuscolor=c["accent"]
+        )
+        self.style.map(
+            "Action.TButton",
+            background=[("active", c["highlight"]), ("pressed", c["accent_pressed"])],
+            foreground=[("pressed", "#ffffff")]
+        )
 
         # Карточки
         self.style.configure("Card.TFrame", background=c["card"])
-        self.style.configure("Card.TLabelframe",
-                             background=c["card"],
-                             borderwidth=border_width,
-                             relief="solid",
-                             bordercolor=c["border"],
-                             lightcolor=c["card"],
-                             darkcolor=c["card"])
-        self.style.configure("Card.TLabelframe.Label",
-                             background=c["card"],
-                             foreground=c["fg"],
-                             font=("Segoe UI", 10, "bold"))
-
-        # Прогресс-бар
-        self.style.configure("TProgressbar",
-                             background=c["accent"],
-                             troughcolor=c["secondary"],
-                             bordercolor=c["border"],
-                             lightcolor=c["accent"],
-                             darkcolor=c["accent"],
-                             thickness=12)
-
-        # Поля ввода
-        self.style.configure("TEntry",
-                             fieldbackground=c["card"],
-                             foreground=c["text"],
-                             insertcolor=c["fg"],
-                             bordercolor=c["border"],
-                             lightcolor=c["card"],
-                             darkcolor=c["card"],
-                             relief="flat",
-                             borderwidth=border_width,
-                             padding=(padding, padding))
-
-        # Выпадающие списки
-        self.style.configure("TCombobox",
-                             fieldbackground=c["card"],
-                             foreground=c["text"],
-                             selectbackground=c["accent"],
-                             selectforeground="#ffffff",
-                             relief="flat",
-                             borderwidth=border_width,
-                             arrowsize=12)
-        self.style.map("TCombobox",
-                       fieldbackground=[("readonly", c["card"])])
+        self.style.configure(
+            "Card.TLabelframe",
+            background=c["card"],
+            borderwidth=border_width,
+            relief="solid",
+            bordercolor=c["border"],
+            lightcolor=c["card"],
+            darkcolor=c["card"]
+        )
+        self.style.configure(
+            "Card.TLabelframe.Label",
+            background=c["card"],
+            foreground=c["text"],
+            font=("Segoe UI", 10, "bold"),
+            padding=(4, 0)
+        )
 
         # Метки
-        self.style.configure("TLabel",
-                             background=c["bg"],
-                             foreground=c["fg"],
-                             font=("Segoe UI", 10))
-
-        # Вторичные метки
-        self.style.configure("Secondary.TLabel",
-                             background=c["bg"],
-                             foreground=c["text_secondary"],
+        self.style.configure("TLabel", background=c["bg"], foreground=c["text"], font=("Segoe UI", 10))
+        self.style.configure("Secondary.TLabel", background=c["bg"], foreground=c["text_secondary"],
                              font=("Segoe UI", 9))
 
-        # Текстовая область
+        # Заголовки блоков
+        self.style.configure("GroupHeader.TLabel",
+                             background=c["bg"], foreground=c["accent"], font=("Segoe UI", 12, "bold"))
+
+        # Поля ввода
+        self.style.configure(
+            "TEntry",
+            fieldbackground=c["card"],
+            foreground=c["text"],
+            insertcolor=c["text"],
+            bordercolor=c["border"],
+            lightcolor=c["card"],
+            darkcolor=c["card"],
+            relief="flat",
+            borderwidth=border_width,
+            padding=(padding - 4, padding - 6)
+        )
+        self.style.map(
+            "TEntry",
+            bordercolor=[("focus", c["accent"])],
+            lightcolor=[("focus", c["card"])],
+            darkcolor=[("focus", c["card"])]
+        )
+
+        # Выпадающие списки
+        self.style.configure(
+            "TCombobox",
+            fieldbackground=c["card"],
+            foreground=c["text"],
+            selectbackground=c["accent"],
+            selectforeground="#ffffff",
+            relief="flat",
+            borderwidth=border_width,
+            padding=(padding - 6, padding - 6),
+            arrowsize=13,
+            bordercolor=c["border"]
+        )
+        self.style.map(
+            "TCombobox",
+            fieldbackground=[("readonly", c["card"])],
+            bordercolor=[("focus", c["accent"])]
+        )
+
+        # Текстовые поля (ScrolledText)
         self.style.configure("TText",
                              background=c["card"],
                              foreground=c["text"],
-                             insertbackground=c["fg"],
+                             insertbackground=c["text"],
                              selectbackground=c["accent"],
                              selectforeground="#ffffff",
                              relief="flat",
                              borderwidth=border_width)
 
-        # Радиокнопки
-        self.style.configure("TRadiobutton",
-                             background=c["bg"],
-                             foreground=c["fg"],
-                             font=("Segoe UI", 10),
-                             padding=(0, padding))
+        # Прогресс-бар
+        self.style.configure(
+            "TProgressbar",
+            background=c["accent"],
+            troughcolor=c["secondary"],
+            bordercolor=c["border"],
+            lightcolor=c["accent"],
+            darkcolor=c["accent"],
+            thickness=14
+        )
 
-        # Чекбоксы
-        self.style.configure("TCheckbutton",
-                             background=c["bg"],
-                             foreground=c["fg"],
-                             font=("Segoe UI", 10),
-                             padding=(0, padding))
+        # Скроллбар
+        self.style.configure(
+            "TScrollbar",
+            background=c["scrollbar"],
+            troughcolor=c["secondary"],
+            bordercolor=c["border"],
+            arrowcolor=c["text_secondary"]
+        )
+        self.style.map(
+            "TScrollbar",
+            background=[("active", c["highlight"])]
+        )
 
-        # Стиль для области перетаскивания
-        self.style.configure("DropZone.TFrame",
-                             background=c["card"],
-                             relief="groove",
-                             borderwidth=border_width,
-                             bordercolor=c["border"])
+        # История
+        self.style.configure(
+            "History.TLabel",
+            background=c["card"],
+            foreground=c["text_secondary"],
+            font=("Segoe UI", 9),
+            padding=(padding, padding // 2)
+        )
+        self.style.map(
+            "History.TLabel",
+            background=[("active", c["highlight"])],
+            foreground=[("active", c["accent"])]
+        )
 
-        # Стиль для заголовков групп
-        self.style.configure("GroupHeader.TLabel",
-                             background=c["bg"],
-                             foreground=c["accent"],
-                             font=("Segoe UI", 12, "bold"))
+        # Предпросмотр
+        self.style.configure(
+            "Preview.TFrame",
+            background=c["card"],
+            relief="solid",
+            borderwidth=border_width,
+            bordercolor=c["border"]
+        )
 
-        # Стиль для кнопок с иконками
-        self.style.configure("IconButton.TButton",
-                             background=c["secondary"],
-                             foreground=c["fg"],
-                             font=("Segoe UI", 10),
-                             relief="flat",
-                             padding=(padding - 2, padding - 4),
-                             borderwidth=border_width,
-                             bordercolor=c["border"])
-        self.style.map("IconButton.TButton",
-                       background=[("active", c["highlight"]), ("pressed", c["accent"])])
+        # Тексты статуса/ошибок/успеха/варнингов
+        self.style.configure("Error.TLabel", background=c["bg"], foreground=c["error"], font=("Segoe UI", 10))
+        self.style.configure("Success.TLabel", background=c["bg"], foreground=c["success"], font=("Segoe UI", 10))
+        self.style.configure("Warning.TLabel", background=c["bg"], foreground=c["warning"], font=("Segoe UI", 10))
 
-        # Стиль для кнопок действий (извлечь, сохранить, копировать)
-        self.style.configure("Action.TButton",
-                             background=c["secondary"],
-                             foreground=c["fg"],
-                             font=("Segoe UI", 10),
-                             relief="flat",
-                             padding=(padding, padding),
-                             borderwidth=border_width,
-                             bordercolor=c["border"])
-        self.style.map("Action.TButton",
-                       background=[("active", c["highlight"]), ("pressed", c["accent_pressed"])])
+        # Дроп-зона — теперь отдельным стилем метки
+        self.style.configure(
+            "DropLabel.TLabel",
+            background=c["card"],
+            foreground=c["text_secondary"],
+            font=("Segoe UI", 11, "bold"),
+            padding=(padding * 2, padding * 2),
+            borderwidth=0
+        )
+        self.style.configure(
+            "DropLabelActive.TLabel",
+            background=c["highlight"],
+            foreground=c["text"],
+            font=("Segoe UI", 11, "bold"),
+            padding=(padding * 2, padding * 2),
+            borderwidth=0
+        )
 
-        # Стиль для статус-бара
-        self.style.configure("StatusBar.TFrame",
-                             background=c["secondary"])
+        # Статусная панель
+        self.style.configure("StatusBar.TFrame", background=c["secondary"])
 
-        # Стиль для всплывающих уведомлений
+        # Тосты
         self.style.configure("Toast.TLabel",
-                             background="#333333",
-                             foreground="#ffffff",
-                             font=("Segoe UI", 10),
-                             relief="solid",
+                             background="#333333", foreground="#ffffff", font=("Segoe UI", 10), relief="solid",
                              borderwidth=1)
-
-        # Стиль для элементов истории
-        self.style.configure("History.TLabel",
-                             background=c["card"],
-                             foreground=c["text_secondary"],
-                             font=("Segoe UI", 9),
-                             relief="flat",
-                             borderwidth=0,
-                             padding=(padding, padding // 2))
-        self.style.map("History.TLabel",
-                       background=[("active", c["highlight"])],
-                       foreground=[("active", c["accent"])])
-
-        # Стиль для области предпросмотра изображений
-        self.style.configure("Preview.TFrame",
-                             background=c["card"],
-                             relief="solid",
-                             borderwidth=border_width,
-                             bordercolor=c["border"])
-
-        # Стиль для текста ошибок
-        self.style.configure("Error.TLabel",
-                             background=c["bg"],
-                             foreground=c["error"],
-                             font=("Segoe UI", 10))
-
-        # Стиль для текста успеха
-        self.style.configure("Success.TLabel",
-                             background=c["bg"],
-                             foreground=c["success"],
-                             font=("Segoe UI", 10))
-
-        # Стиль для текста предупреждений
-        self.style.configure("Warning.TLabel",
-                             background=c["bg"],
-                             foreground=c["warning"],
-                             font=("Segoe UI", 10))
 
     @staticmethod
     def _adjust_color(hex_color: str, amount: int) -> str:
@@ -560,6 +603,601 @@ class ThemeManager:
             c = max(0, min(255, c + amount))  # Ограничиваем значения от 0 до 255
             adjusted.append(c)
         return f"#{adjusted[0]:02x}{adjusted[1]:02x}{adjusted[2]:02x}"
+
+
+MAGIC_BYTES = b'ONG'  # OccultoNG
+HEADER_MAGIC_LEN = len(MAGIC_BYTES)
+HEADER_CHECKSUM_LEN = 4  # CRC32
+HEADER_DATALEN_LEN = 4  # Длина данных
+HEADER_FULL_LEN = HEADER_MAGIC_LEN + HEADER_CHECKSUM_LEN + HEADER_DATALEN_LEN
+
+
+# Функция-помощник для генерации RNG
+def _generate_rng(password: str, method: str) -> np.random.Generator:
+    """Генерирует отдельный rng для каждого метода."""
+    seed_str = f"{password}{method}".encode()
+    key = hashlib.sha256(seed_str).digest()
+    return np.random.default_rng(np.frombuffer(key, dtype=np.uint64))
+
+
+# ───────────────────────────────────────────────
+# 🧠 КЛАСС ПРОДВИНУТЫХ СТЕГО-МЕТОДОВ
+# ───────────────────────────────────────────────
+class AdvancedStego:
+
+    # ---------- Вспомогательные методы для работы с данными и заголовками ----------
+    @staticmethod
+    def _pack_data_with_header(data: bytes) -> bytes:
+        checksum = zlib.crc32(data).to_bytes(HEADER_CHECKSUM_LEN, 'big')
+        data_len = len(data).to_bytes(HEADER_DATALEN_LEN, 'big')
+        return MAGIC_BYTES + checksum + data_len + data
+
+    @staticmethod
+    def _unpack_data_with_header(full_bytes: bytes) -> bytes:
+        if len(full_bytes) < HEADER_FULL_LEN:
+            raise ValueError("Недостаточно данных для заголовка.")
+        magic = full_bytes[:HEADER_MAGIC_LEN]
+        if magic != MAGIC_BYTES:
+            raise ValueError("Неверные магические байты. Данные не найдены или повреждены.")
+        header_end = HEADER_MAGIC_LEN + HEADER_CHECKSUM_LEN + HEADER_DATALEN_LEN
+        stored_checksum = int.from_bytes(full_bytes[HEADER_MAGIC_LEN:HEADER_MAGIC_LEN + HEADER_CHECKSUM_LEN], 'big')
+        data_len = int.from_bytes(full_bytes[HEADER_MAGIC_LEN + HEADER_CHECKSUM_LEN:header_end], 'big')
+        data_start, data_end = header_end, header_end + data_len
+        if len(full_bytes) < data_end:
+            raise ValueError("Данные обрезаны, фактическая длина меньше заявленной в заголовке.")
+        data = full_bytes[data_start:data_end]
+        calculated_checksum = zlib.crc32(data)
+        if calculated_checksum != stored_checksum:
+            raise ValueError("Ошибка контрольной суммы. Данные повреждены.")
+        return data
+
+    @staticmethod
+    def _embed_with_parity(pixel_value: int, bit_to_embed: int) -> int:
+        if (pixel_value % 2) != bit_to_embed:
+            return pixel_value - 1 if pixel_value % 2 != 0 and pixel_value > 0 else pixel_value + 1
+        return pixel_value
+
+    @staticmethod
+    @numba.jit(nopython=True)
+    def _embed_bits_numba(pixels_flat, indices, bits):
+        """
+        Компилируемая Numba-функция для быстрой вставки битов.
+        Заменяет медленный Python-цикл.
+        """
+        for i in range(len(indices)):
+            idx = indices[i]
+            bit_to_embed = bits[i]
+            pixel_val = pixels_flat[idx]
+
+            # Логика _embed_with_parity
+            if (pixel_val % 2) != bit_to_embed:
+                if pixel_val > 0 and (pixel_val % 2) != 0:
+                    pixels_flat[idx] -= 1
+                elif pixel_val < 255:
+                    pixels_flat[idx] += 1
+                else:  # Если pixel_val == 255
+                    pixels_flat[idx] -= 1
+        return pixels_flat
+
+    # Numba-функция для AELSB
+    @staticmethod
+    @numba.jit(nopython=True)
+    def _embed_bits_aelsb_numba(pixels_flat_rgb, pixel_indices, channel_indices, data_bits):
+        """
+        Компилируемая Numba-функция для быстрой вставки битов в AELSB.
+        """
+        for i in range(len(pixel_indices)):
+            pixel_idx = pixel_indices[i]
+            channel = channel_indices[i]
+            bit = data_bits[i]
+
+            pixel_val = pixels_flat_rgb[pixel_idx, channel]
+
+            if (pixel_val % 2) != bit:
+                if pixel_val > 0 and (pixel_val % 2) != 0:
+                    pixels_flat_rgb[pixel_idx, channel] -= 1
+                elif pixel_val < 255:
+                    pixels_flat_rgb[pixel_idx, channel] += 1
+                else:
+                    pixels_flat_rgb[pixel_idx, channel] -= 1
+
+    # ---------- LSB (Максимальная вместимость) ----------
+    @staticmethod
+    def hide_lsb(container_path: str, data: bytes, password: str, output_path: str,
+                 progress_callback=None, cancel_event=None):
+        try:
+            with Image.open(container_path) as img:
+                if img.mode not in ['RGB', 'RGBA']:
+                    img = img.convert('RGB')
+                pixels = np.array(img, dtype=np.uint8)
+                height, width, _ = pixels.shape
+                full_data = AdvancedStego._pack_data_with_header(data)
+                total_bits_needed = len(full_data) * 8
+                available_bits = height * width * 3
+                if total_bits_needed > available_bits:
+                    raise ValueError(f"Данные слишком велики для изображения. Максимум: {available_bits // 8} байт")
+                data_bits = np.unpackbits(np.frombuffer(full_data, dtype=np.uint8))
+                pixels_flat = pixels.reshape(-1)
+                pixels_flat[:total_bits_needed] = (pixels_flat[:total_bits_needed] & 0xFE) | data_bits
+
+                for i in range(0, total_bits_needed, 1000):
+                    if progress_callback:
+                        progress_callback((i / total_bits_needed) * 100)
+                    if cancel_event and cancel_event.is_set():
+                        raise InterruptedError("Операция отменена пользователем")
+
+                result_img = Image.fromarray(pixels)
+                result_img.save(output_path, format='PNG', optimize=True)
+                if progress_callback: progress_callback(100.0)
+        except Exception as e:
+            raise e
+
+    @staticmethod
+    def extract_lsb(image_path: str, password: str, progress_callback=None, cancel_event=None) -> bytes:
+        try:
+            with Image.open(image_path) as img:
+                if img.mode not in ['RGB', 'RGBA']:
+                    img = img.convert('RGB')
+                pixels = np.array(img)
+                pixels_flat = pixels.reshape(-1)
+                header_bits_needed = HEADER_FULL_LEN * 8
+                if pixels_flat.size < header_bits_needed:
+                    raise ValueError("Недостаточно данных для заголовка.")
+
+                header_bits = (pixels_flat[:header_bits_needed] & 1)
+                header_bytes = np.packbits(header_bits).tobytes()
+
+                if header_bytes[:HEADER_MAGIC_LEN] != MAGIC_BYTES:
+                    raise ValueError("Магические байты не найдены.")
+                data_len = int.from_bytes(header_bytes[HEADER_MAGIC_LEN + HEADER_CHECKSUM_LEN:HEADER_FULL_LEN], 'big')
+                if not (0 <= data_len <= (pixels.size // 8)):
+                    raise ValueError("Некорректная длина данных в заголовке.")
+
+                total_bits_to_extract = (HEADER_FULL_LEN + data_len) * 8
+                if pixels_flat.size < total_bits_to_extract:
+                    raise ValueError("Недостаточно данных для извлечения полного сообщения.")
+
+                all_bits = (pixels_flat[:total_bits_to_extract] & 1)
+                full_bytes = np.packbits(all_bits).tobytes()
+
+                if progress_callback: progress_callback(100.0)
+                return AdvancedStego._unpack_data_with_header(full_bytes)
+        except Exception as e:
+            raise e
+
+    # ---------- Adaptive-Noise ----------
+    @staticmethod
+    def hide_noise(container_path: str, data: bytes, password: str, output_path: str,
+                   progress_callback=None, cancel_event=None):
+        try:
+            rng = _generate_rng(password, "noise")
+            with Image.open(container_path) as img:
+                if img.mode not in ['RGB', 'RGBA']:
+                    img = img.convert('RGB')
+                pixels = np.array(img, dtype=np.uint8)
+                full_data = AdvancedStego._pack_data_with_header(data)
+                total_bits_needed = len(full_data) * 8
+                if total_bits_needed > pixels.size:
+                    raise ValueError("Данные слишком велики для этого изображения.")
+                data_bits = np.unpackbits(np.frombuffer(full_data, dtype=np.uint8))
+
+                indices = np.arange(pixels.size)
+                rng.shuffle(indices)
+                selected_indices = indices[:total_bits_needed]
+
+                pixels_flat = pixels.reshape(-1)
+
+                # *** ОПТИМИЗАЦИЯ: Вызов Numba-функции вместо цикла ***
+                AdvancedStego._embed_bits_numba(pixels_flat, selected_indices, data_bits)
+
+                # Обновление прогресса можно оставить, т.к. основная работа сделана
+                if progress_callback: progress_callback(100.0)
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Операция отменена пользователем")
+
+                result_img = Image.fromarray(pixels)
+                # Для скорости можно использовать compress_level=1
+                result_img.save(output_path, format='PNG', compress_level=1)
+        except Exception as e:
+            raise e
+
+    @staticmethod
+    def extract_noise(image_path: str, password: str, progress_callback=None, cancel_event=None) -> bytes:
+        try:
+            rng = _generate_rng(password, "noise")
+            with Image.open(image_path) as img:
+                if img.mode not in ['RGB', 'RGBA']:
+                    img = img.convert('RGB')
+                pixels = np.array(img)
+                indices = np.arange(pixels.size)
+                rng.shuffle(indices)
+                pixels_flat = pixels.reshape(-1)
+
+                header_bits_needed = HEADER_FULL_LEN * 8
+                header_indices = indices[:header_bits_needed]
+
+                # *** ОПТИМИЗАЦИЯ: Векторизованное извлечение ***
+                header_bits = (pixels_flat[header_indices] & 1)
+                header_bytes = np.packbits(header_bits).tobytes()
+
+                if header_bytes[:HEADER_MAGIC_LEN] != MAGIC_BYTES:
+                    raise ValueError("Магические байты не найдены.")
+                data_len = int.from_bytes(header_bytes[HEADER_MAGIC_LEN + HEADER_CHECKSUM_LEN:HEADER_FULL_LEN], 'big')
+                if not (0 <= data_len <= (pixels.size // 8)):
+                    raise ValueError("Некорректная длина данных.")
+
+                total_bits_needed = (HEADER_FULL_LEN + data_len) * 8
+                all_indices = indices[:total_bits_needed]
+
+                # *** ОПТИМИЗАЦИЯ: Векторизованное извлечение ***
+                extracted_bits = (pixels_flat[all_indices] & 1)
+
+                full_bytes = np.packbits(extracted_bits).tobytes()
+                if progress_callback: progress_callback(100.0)
+                return AdvancedStego._unpack_data_with_header(full_bytes)
+        except Exception as e:
+            raise e
+
+    # ---------- AELSB++ (Content-Adaptive + Hamming(7,3) + LSB matching) ----------
+    @staticmethod
+    def _hill_cost_map(img: Image.Image) -> np.ndarray:
+        """
+        HILL-подобная карта 'стоимости' изменений.
+        Чем меньше cost, тем лучше место для скрытия.
+        Строим на 'санированном' изображении (LSB обнулены) для детерминизма.
+        """
+        # Санируем LSB, чтобы и при скрытии, и при извлечении
+        # карта стоимости была абсолютно одинаковой.
+        rgb = np.array(img, dtype=np.uint8)
+        # Отбрасываем LSB с помощью побитового AND с 0xFE (...11111110)
+        sanitized = (rgb & 0xFE).astype(np.uint8)
+        gray = Image.fromarray(sanitized).convert('L')
+        g = np.array(gray, dtype=np.float32)
+
+        # Высокочастотный фильтр (по мотивам HILL)
+        hp = np.array([[-1, 2, -1],
+                       [2, -4, 2],
+                       [-1, 2, -1]], dtype=np.float32)
+
+        res = ndimage.convolve(g, hp, mode='reflect')
+        mag = np.abs(res)
+
+        # Небольшое сглаживание, чтобы получить устойчивую карту
+        smooth = ndimage.uniform_filter(mag, size=5, mode='reflect')
+        # Чем выше текстурность, тем меньше стоимость (и наоборот)
+        cost = 1.0 / (smooth + 1.0)
+        return cost  # нормализация не обязательна, важен относительный порядок
+
+    @staticmethod
+    def _prepare_calsb_indices(pixels: np.ndarray, base_cost: np.ndarray,
+                               rng: np.random.Generator, needed_elements: int) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Новая версия: порядок зависит только от RNG.
+        Это гарантирует идентичный порядок на скрытии и извлечении.
+        """
+        # Берём только первые 3 канала на всякий случай
+        if pixels.ndim != 3 or pixels.shape[2] < 3:
+            raise ValueError("Ожидается изображение RGB.")
+        h, w, _ = pixels.shape
+        total = h * w * 3
+        if needed_elements > total:
+            raise ValueError("Недостаточно позиций для встраивания.")
+
+        indices = np.arange(total, dtype=np.int64)
+        rng.shuffle(indices)
+        chosen = indices[:needed_elements]
+        pixel_idx = (chosen // 3).astype(np.int64)
+        channel_idx = (chosen % 3).astype(np.int64)
+        return pixel_idx, channel_idx
+
+    @staticmethod
+    @numba.jit(nopython=True)
+    def _embed_hamming73_numba(pixels_flat_rgb, pixel_indices, channel_indices, bits, groups):
+        bits_len = bits.shape[0]
+        for g in range(groups):
+            base = g * 7
+
+            v0 = pixels_flat_rgb[pixel_indices[base + 0], channel_indices[base + 0]] & 1
+            v1 = pixels_flat_rgb[pixel_indices[base + 1], channel_indices[base + 1]] & 1
+            v2 = pixels_flat_rgb[pixel_indices[base + 2], channel_indices[base + 2]] & 1
+            v3 = pixels_flat_rgb[pixel_indices[base + 3], channel_indices[base + 3]] & 1
+            v4 = pixels_flat_rgb[pixel_indices[base + 4], channel_indices[base + 4]] & 1
+            v5 = pixels_flat_rgb[pixel_indices[base + 5], channel_indices[base + 5]] & 1
+            v6 = pixels_flat_rgb[pixel_indices[base + 6], channel_indices[base + 6]] & 1
+
+            s0 = (v0 + v2 + v4 + v6) & 1
+            s1 = (v1 + v2 + v5 + v6) & 1
+            s2 = (v3 + v4 + v5 + v6) & 1
+
+            b0_idx = g * 3
+            m0 = bits[b0_idx] if b0_idx < bits_len else 0
+            b1_idx = b0_idx + 1
+            m1 = bits[b1_idx] if b1_idx < bits_len else 0
+            b2_idx = b0_idx + 2
+            m2 = bits[b2_idx] if b2_idx < bits_len else 0
+
+            ds0 = s0 ^ m0
+            ds1 = s1 ^ m1
+            ds2 = s2 ^ m2
+            syn = ds0 + (ds1 << 1) + (ds2 << 2)  # 0..7
+
+            if syn != 0:
+                j = syn - 1
+                idx_p = pixel_indices[base + j]
+                idx_c = channel_indices[base + j]
+
+                val = pixels_flat_rgb[idx_p, idx_c]
+
+                # ─── ИСПРАВЛЕННАЯ ЛОГИКА ИЗМЕНЕНИЯ ПИКСЕЛЯ (LSB Matching) ───
+                # Эта новая логика гарантирует, что LSB будет изменен корректно
+                # для всех значений от 0 до 255, устраняя ошибку контрольной суммы.
+                if val == 0:
+                    # Если 0, можно изменить только на 1
+                    pixels_flat_rgb[idx_p, idx_c] = 1
+                elif val == 255:
+                    # Если 255, можно изменить только на 254
+                    pixels_flat_rgb[idx_p, idx_c] = 254
+                else:
+                    # Для всех остальных случаев меняем на +1 или -1.
+                    # Эта простая операция всегда меняет четность (LSB).
+                    if val % 2 == 1:  # Если нечетное, делаем четным
+                        pixels_flat_rgb[idx_p, idx_c] = val - 1
+                    else:  # Если четное, делаем нечетным
+                        pixels_flat_rgb[idx_p, idx_c] = val + 1
+                # ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    @numba.jit(nopython=True)
+    def _extract_hamming73_numba(pixels_flat_rgb, pixel_indices, channel_indices, groups, bits_len):
+        """
+        Декодирование Hamming(7,3): возвращает массив битов длиной bits_len.
+        """
+        out = np.zeros(bits_len, dtype=np.uint8)
+        for g in range(groups):
+            base = g * 7
+            v0 = pixels_flat_rgb[pixel_indices[base + 0], channel_indices[base + 0]] & 1
+            v1 = pixels_flat_rgb[pixel_indices[base + 1], channel_indices[base + 1]] & 1
+            v2 = pixels_flat_rgb[pixel_indices[base + 2], channel_indices[base + 2]] & 1
+            v3 = pixels_flat_rgb[pixel_indices[base + 3], channel_indices[base + 3]] & 1
+            v4 = pixels_flat_rgb[pixel_indices[base + 4], channel_indices[base + 4]] & 1
+            v5 = pixels_flat_rgb[pixel_indices[base + 5], channel_indices[base + 5]] & 1
+            v6 = pixels_flat_rgb[pixel_indices[base + 6], channel_indices[base + 6]] & 1
+
+            s0 = (v0 + v2 + v4 + v6) & 1
+            s1 = (v1 + v2 + v5 + v6) & 1
+            s2 = (v3 + v4 + v5 + v6) & 1
+
+            pos = g * 3
+            if pos < bits_len:
+                out[pos] = s0
+            if pos + 1 < bits_len:
+                out[pos + 1] = s1
+            if pos + 2 < bits_len:
+                out[pos + 2] = s2
+        return out
+
+    @staticmethod
+    def hide_aelsb(container_path: str, data: bytes, password: str, output_path: str,
+                   progress_callback=None, cancel_event=None):
+        try:
+            rng_order = _generate_rng(password or "", "aelsbpp_order")
+
+            with Image.open(container_path) as img:
+                # Всегда RGB
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                pixels = np.array(img, dtype=np.uint8)
+
+                full_data = AdvancedStego._pack_data_with_header(data)
+                data_bits = np.unpackbits(np.frombuffer(full_data, dtype=np.uint8)).astype(np.uint8)
+
+                r, n = 3, 7
+                groups = (len(data_bits) + r - 1) // r
+                needed_elements = groups * n
+
+                # Новый детерминированный порядок
+                pix_idx, ch_idx = AdvancedStego._prepare_calsb_indices(pixels, None, rng_order, needed_elements)
+
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Операция отменена пользователем")
+
+                # Явно работаем с RGB
+                flat_rgb = pixels.reshape(-1, 3)
+                AdvancedStego._embed_hamming73_numba(flat_rgb, pix_idx, ch_idx, data_bits, groups)
+
+                if progress_callback:
+                    progress_callback(100.0)
+
+                result_img = Image.fromarray(pixels)
+                result_img.save(output_path, format='PNG', optimize=True)
+
+        except Exception as e:
+            raise e
+
+    @staticmethod
+    def extract_aelsb(image_path: str, password: str, progress_callback=None, cancel_event=None) -> bytes:
+        try:
+            rng_order = _generate_rng(password or "", "aelsbpp_order")
+            with Image.open(image_path) as img:
+                # Всегда RGB
+                if img.mode != 'RGB':
+                    img = img.convert('RGB')
+                pixels = np.array(img, dtype=np.uint8)
+                flat_rgb = pixels.reshape(-1, 3)
+
+                header_bits_needed = HEADER_FULL_LEN * 8
+                r, n = 3, 7
+                header_groups = (header_bits_needed + r - 1) // r
+                header_elements = header_groups * n
+
+                # Индексы для заголовка
+                pix_idx_hdr, ch_idx_hdr = AdvancedStego._prepare_calsb_indices(pixels, None, rng_order, header_elements)
+
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Операция отменена пользователем")
+
+                header_bits = AdvancedStego._extract_hamming73_numba(flat_rgb, pix_idx_hdr, ch_idx_hdr,
+                                                                     header_groups, header_bits_needed)
+                header_bytes = np.packbits(header_bits).tobytes()
+
+                if header_bytes[:HEADER_MAGIC_LEN] != MAGIC_BYTES:
+                    raise ValueError("Магические байты не найдены.")
+                data_len = int.from_bytes(header_bytes[HEADER_MAGIC_LEN + HEADER_CHECKSUM_LEN:HEADER_FULL_LEN], 'big')
+                if not (0 <= data_len <= (pixels.size // 8)):
+                    raise ValueError("Некорректная длина данных.")
+
+                total_bits_needed = (HEADER_FULL_LEN + data_len) * 8
+                total_groups = (total_bits_needed + r - 1) // r
+                total_elements = total_groups * n
+
+                # Для полного сообщения заново пересоздаём RNG,
+                # чтобы порядок был тем же (префикс совпадёт с заголовком)
+                rng_order = _generate_rng(password or "", "aelsbpp_order")
+                pix_idx_all, ch_idx_all = AdvancedStego._prepare_calsb_indices(pixels, None, rng_order, total_elements)
+
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Операция отменена пользователем")
+
+                bits = AdvancedStego._extract_hamming73_numba(flat_rgb, pix_idx_all, ch_idx_all,
+                                                              total_groups, total_bits_needed)
+                full_bytes = np.packbits(bits).tobytes()
+
+                if progress_callback:
+                    progress_callback(100.0)
+                return AdvancedStego._unpack_data_with_header(full_bytes)
+        except Exception as e:
+            raise e
+
+    @staticmethod
+    def _rank_indices_by_hill(img: Image.Image,
+                              rng: np.random.Generator,
+                              needed_elements: int) -> Tuple[np.ndarray, np.ndarray]:
+        """
+        Дает. порядок позиций по HILL: квантуем cost в int и используем целочисленный tie-break.
+        Гарантирует идентичный порядок на скрытии/извлечении.
+        """
+        img_rgb = img.convert('RGB')  # строго RGB
+        pixels = np.array(img_rgb, dtype=np.uint8)
+        h, w, _ = pixels.shape
+        total = h * w * 3
+        if needed_elements > total:
+            raise ValueError("Недостаточно места для встраивания (HILL).")
+
+        # HILL-карта на санированной картинке (LSB=0)
+        cost_map = AdvancedStego._hill_cost_map(img_rgb)  # (h, w) float32
+        # Квантуем, чтобы исключить микроскопические float-расхождения
+        cost_q = np.round(cost_map * 1e7).astype(np.int64)  # (h, w) int64
+
+        # Повтор на каналы
+        cost_flat = np.repeat(cost_q.reshape(-1), 3)  # (h*w*3,) int64
+
+        # Целочисленный тай-брейк от RNG — строго детерминирован
+        tie = rng.integers(0, np.iinfo(np.int64).max, size=cost_flat.size, dtype=np.int64)
+
+        # np.lexsort: последний ключ — первичный
+        order = np.lexsort((tie, cost_flat))  # сначала cost, потом tie
+
+        chosen = order[:needed_elements]
+        pixel_idx = (chosen // 3).astype(np.int64)
+        channel_idx = (chosen % 3).astype(np.int64)
+        return pixel_idx, channel_idx
+
+    @staticmethod
+    def hide_hill(container_path: str, data: bytes, password: str, output_path: str,
+                  progress_callback=None, cancel_event=None):
+        """
+        HILL-CA LSB Matching + Hamming(7,3)
+        """
+        try:
+            rng_order = _generate_rng(password or "", "hill_order")
+
+            with Image.open(container_path) as img:
+                img_rgb = img.convert('RGB')
+                pixels = np.array(img_rgb, dtype=np.uint8)
+
+                full_data = AdvancedStego._pack_data_with_header(data)
+                data_bits = np.unpackbits(np.frombuffer(full_data, dtype=np.uint8)).astype(np.uint8)
+
+                r, n = 3, 7
+                groups = (len(data_bits) + r - 1) // r
+                needed_elements = groups * n
+
+                # Индексы по HILL
+                pix_idx, ch_idx = AdvancedStego._rank_indices_by_hill(img_rgb, rng_order, needed_elements)
+
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Операция отменена пользователем")
+
+                flat_rgb = pixels.reshape(-1, 3)
+                AdvancedStego._embed_hamming73_numba(flat_rgb, pix_idx, ch_idx, data_bits, groups)
+
+                if progress_callback:
+                    progress_callback(100.0)
+
+                result_img = Image.fromarray(pixels)
+                result_img.save(output_path, format='PNG', optimize=True)
+        except Exception as e:
+            raise e
+
+    @staticmethod
+    def extract_hill(image_path: str, password: str, progress_callback=None, cancel_event=None) -> bytes:
+        """
+        Извлечение: тот же порядок по HILL.
+        """
+        try:
+            rng_order = _generate_rng(password or "", "hill_order")
+
+            with Image.open(image_path) as img:
+                img_rgb = img.convert('RGB')
+                pixels = np.array(img_rgb, dtype=np.uint8)
+                flat_rgb = pixels.reshape(-1, 3)
+
+                header_bits_needed = HEADER_FULL_LEN * 8
+                r, n = 3, 7
+                header_groups = (header_bits_needed + r - 1) // r
+                header_elements = header_groups * n
+
+                # Индексы для заголовка
+                pix_idx_hdr, ch_idx_hdr = AdvancedStego._rank_indices_by_hill(img_rgb, rng_order, header_elements)
+
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Операция отменена пользователем")
+
+                header_bits = AdvancedStego._extract_hamming73_numba(
+                    flat_rgb, pix_idx_hdr, ch_idx_hdr, header_groups, header_bits_needed
+                )
+                header_bytes = np.packbits(header_bits).tobytes()
+
+                if header_bytes[:HEADER_MAGIC_LEN] != MAGIC_BYTES:
+                    raise ValueError("Магические байты не найдены.")
+
+                data_len = int.from_bytes(
+                    header_bytes[HEADER_MAGIC_LEN + HEADER_CHECKSUM_LEN:HEADER_FULL_LEN], 'big'
+                )
+                if not (0 <= data_len <= (pixels.size // 8)):
+                    raise ValueError("Некорректная длина данных.")
+
+                total_bits_needed = (HEADER_FULL_LEN + data_len) * 8
+                total_groups = (total_bits_needed + r - 1) // r
+                total_elements = total_groups * n
+
+                # Переинициализируем RNG — порядок должен совпасть полностью
+                rng_order = _generate_rng(password or "", "hill_order")
+                pix_idx_all, ch_idx_all = AdvancedStego._rank_indices_by_hill(img_rgb, rng_order, total_elements)
+
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Операция отменена пользователем")
+
+                bits = AdvancedStego._extract_hamming73_numba(
+                    flat_rgb, pix_idx_all, ch_idx_all, total_groups, total_bits_needed
+                )
+                full_bytes = np.packbits(bits).tobytes()
+
+                if progress_callback:
+                    progress_callback(100.0)
+                return AdvancedStego._unpack_data_with_header(full_bytes)
+        except Exception as e:
+            raise e
 
 
 # ───────────────────────────────────────────────
@@ -574,10 +1212,7 @@ class ImageProcessor:
                 if img.mode not in ['RGB', 'RGBA']:
                     img = img.convert('RGB')
                 w, h = img.size
-                channels = len(img.getbands())  # Получаем количество каналов
-                # Для RGBA учитываем только RGB каналы (3), для RGB тоже 3
-                available_channels = channels  # RGB или RGBA «как есть»
-                return w, h, w * h * available_channels
+                return w, h, w * h * 3  # 3 канала RGB
         except Exception as e:
             raise ValueError(f"Ошибка загрузки изображения: {str(e)}")
 
@@ -586,7 +1221,7 @@ class ImageProcessor:
         """Создает миниатюру изображения для предпросмотра"""
         try:
             with Image.open(path) as img:
-                img.thumbnail(max_size, Image.Resampling.LANCZOS)
+                img.thumbnail(max_size, Image.Resampling.BOX)
                 if img.mode == 'RGBA':
                     background = Image.new('RGB', img.size, (255, 255, 255))
                     background.paste(img, mask=img.split()[3])
@@ -595,204 +1230,122 @@ class ImageProcessor:
         except Exception as e:
             raise ValueError(f"Ошибка создания миниатюры: {str(e)}")
 
-    # ── 1.  НЕВИДИМОЕ СКРЫТИЕ (безопасная версия) ──
     @staticmethod
-    def hide_data(container_path: str,
-                  data: bytes,
-                  password: str,
-                  output_path: str,
-                  method: str = "lsb",
-                  compression_level: int = 9,
-                  progress_callback: Optional[Callable[[float], None]] = None,
-                  cancel_event: Optional[threading.Event] = None) -> None:
-        def update(pct, msg):
-            if progress_callback:
-                progress_callback(pct)
-            if cancel_event and cancel_event.is_set():
-                raise Exception("Операция отменена")
+    def get_capacity_by_method(total_pixels: int, method: str) -> int:
+        """
+        Рассчитывает теоретическую вместимость ПОЛЕЗНЫХ ДАННЫХ в битах для заданного метода.
+        Уже учитывает и вычитает размер заголовка.
+        """
+        total_lsb_bits = total_pixels * 3  # RGB
 
-        update(0, "Загрузка изображения")
-        with Image.open(container_path) as img:
-            if img.mode not in ("RGB", "RGBA"):
-                img = img.convert("RGB")
-            img_array = np.array(img, dtype=np.int16)  # int16 чтобы не было uint8-переполнения
-
-        if method == "noise":
-            # --- Adaptive-Noise---
-            key = hashlib.sha512(password.encode()).digest()
-            rng = np.random.default_rng(np.frombuffer(key, dtype=np.uint64))
-            header = len(data).to_bytes(4, "big")
-            payload = header + data
-            bits = ''.join(f"{b:08b}" for b in payload)
-            work = img_array[:, :, :3]
-            flat = work.reshape(-1)
-            # Canny без ошибки
-            gray = cv2.cvtColor(img_array[:, :, :3].astype(np.uint8), cv2.COLOR_RGB2GRAY)
-            edges = cv2.Canny(gray, 40, 80).reshape(-1)
-            safe = np.where(edges == 0)[0]
-            if len(safe) < len(bits):
-                raise ValueError("Изображение слишком мало для невидимого метода")
-            positions = rng.choice(safe, size=len(bits), replace=False)
-            for i, bit_chr in enumerate(bits):
-                if i % 2000 == 0:
-                    update(100 * i / len(bits), "Скрытие…")
-                pos = positions[i]
-                bit = int(bit_chr)
-                val = flat[pos]
-                lsb = val & 1
-                if lsb != bit:
-                    delta = rng.choice([-1, 1])
-                    new = val + delta
-                    new = np.clip(new, 0, 255)  # ← защита от uint8-переполнения
-                    flat[pos] = new
-            stego_array = flat.reshape(work.shape).astype(np.uint8)
-            if img_array.shape[-1] == 4:
-                stego_array = np.dstack([stego_array, img_array[:, :, 3]])
-        if method == "aelsb":
-            # -------- Adaptive-Edge-LSB --------
-            if img_array.shape[-1] == 4:
-                work = img_array[:, :, :3]
-            else:
-                work = img_array
-            gray = cv2.cvtColor(work.astype(np.uint8), cv2.COLOR_RGB2GRAY)
-            edges = cv2.Canny(gray, 50, 100)  # пороги можно подстроить
-            safe_mask = (edges == 0)  # только «гладкие» пиксели
-            flat = work.reshape(-1)
-            safe_idx = np.where(safe_mask.reshape(-1))[0]
-
-            header = len(data).to_bytes(4, "big")
-            payload = header + data
-            bits_needed = len(payload) * 8
-            if bits_needed > len(safe_idx):
-                raise ValueError("Изображение слишком мало для AELSB")
-
-            key = hashlib.sha256(password.encode()).digest()
-            rng = np.random.default_rng(np.frombuffer(key, dtype=np.uint32))
-            positions = rng.choice(safe_idx, size=bits_needed, replace=False)
-
-            bitstream = ''.join(f"{b:08b}" for b in payload)
-            for i, bit_chr in enumerate(bitstream):
-                if i % 2000 == 0:
-                    update(100 * i / len(bitstream), "Скрытие (AELSB)...")
-                pos = positions[i]
-                bit = int(bit_chr)
-                val = flat[pos] & ~1 | bit
-                flat[pos] = np.clip(val, 0, 255)
-
-            stego_array = flat.reshape(img_array.shape)
+        if method in ("lsb", "noise"):
+            # Эти методы используют все доступные LSB
+            capacity_bits = total_lsb_bits
+        elif method in ("aelsb", "hill"):
+            # Код Хэмминга (7,3) использует 7 LSB для 3 бит данных
+            capacity_bits = int(total_lsb_bits * (3 / 7))
         else:
-            # --- Классический LSB (без изменений) ---
-            if img_array.shape[-1] == 4:
-                img_array = img_array[:, :, :3]
-            flat = img_array.reshape(-1)
-            header = len(data).to_bytes(4, "big")
-            payload = header + data
-            bits_needed = len(payload) * 8
-            if bits_needed > len(flat):
-                raise ValueError("Изображение слишком мало")
-            key = hashlib.sha256(password.encode()).digest()
-            rng = np.random.default_rng(np.frombuffer(key, dtype=np.uint32))
-            positions = rng.permutation(len(flat))[:bits_needed]
-            bitstream = ''.join(f"{b:08b}" for b in payload)
-            for i, bit_chr in enumerate(bitstream):
-                if i % 2000 == 0:
-                    update(100 * i / len(bitstream), "Скрытие…")
-                pos = positions[i]
-                bit = int(bit_chr)
-                val = flat[pos] & ~1 | bit
-                flat[pos] = np.clip(val, 0, 255)  # ← защита
-            stego_array = flat.reshape(img_array.shape)
+            return 0  # Неизвестный метод
 
-        update(100, "Сохранение")
-        Image.fromarray(stego_array.astype(np.uint8)).save(output_path, "PNG", compress_level=compression_level)
+        # Вычитаем размер фиксированного заголовка, чтобы получить полезную ёмкость
+        data_capacity_bits = max(0, capacity_bits - (HEADER_FULL_LEN * 8))
+        return data_capacity_bits
 
-    # ── 2.  ИЗВЛЕЧЕНИЕ -------------------------------------------------------
+    # ── 1. НЕВИДИМОЕ СКРЫТИЕ ──
     @staticmethod
-    def extract_data(image_path: str,
-                     password: str,
-                     method: str = "lsb",  # ← новый параметр
-                     progress_callback: Optional[Callable[[float], None]] = None,
-                     cancel_event: Optional[threading.Event] = None) -> bytes:
-        def update(pct, msg):
-            if progress_callback:
-                progress_callback(pct)
-            if cancel_event and cancel_event.is_set():
-                raise Exception("Операция отменена")
-
-        update(0, "Загрузка изображения")
-        with Image.open(image_path) as img:
-            if img.mode not in ("RGB", "RGBA"):
-                img = img.convert("RGB")
-            img_array = np.array(img, dtype=np.int16)  # ← int16
-
-        # ---------- 1.  выбор метода ----------
-        if method == "noise":
-            # --- 1.1  Adaptive-Noise---
-            key = hashlib.sha512(password.encode()).digest()
-            rng = np.random.default_rng(np.frombuffer(key, dtype=np.uint64))
-            work = img_array[:, :, :3].astype(np.int16)
-            flat = work.reshape(-1)
-            gray = cv2.cvtColor(img_array[:, :, :3], cv2.COLOR_RGB2GRAY)
-            edges = cv2.Canny(gray, 40, 80).reshape(-1)
-            safe = np.where(edges == 0)[0]
-            # читаем заголовок (4 байта = 32 бита)
-            positions = rng.choice(safe, size=32, replace=False)
-            header_bits = [str(flat[p] & 1) for p in sorted(positions)]
-            data_len = int(''.join(header_bits), 2)
-            if data_len <= 0 or data_len > 50 * 1024 * 1024:
-                raise ValueError("Некорректная длина данных")
-            total_bits = 32 + data_len * 8
-            positions = rng.choice(safe, size=total_bits, replace=False)
-            data_bits = [str(flat[p] & 1) for p in sorted(positions)][32:]
-            data = bytes(int(''.join(data_bits[i:i + 8]), 2)
-                         for i in range(0, len(data_bits), 8))
-        elif method == "aelsb":
-            # -------- Adaptive-Edge-LSB extraction --------
-            if img_array.shape[-1] == 4:
-                work = img_array[:, :, :3]
+    def hide_data(container_path: str, data: bytes, password: str, output_path: str,
+                  method: str = "aelsb", compression_level: int = 9,
+                  progress_callback=None, cancel_event=None) -> None:
+        """Универсальный метод скрытия данных"""
+        try:
+            if method == "lsb":
+                AdvancedStego.hide_lsb(
+                    container_path, data, password, output_path,
+                    progress_callback, cancel_event
+                )
+            elif method == "noise":
+                AdvancedStego.hide_noise(
+                    container_path, data, password, output_path,
+                    progress_callback, cancel_event
+                )
+            elif method == "aelsb":
+                AdvancedStego.hide_aelsb(
+                    container_path, data, password, output_path,
+                    progress_callback, cancel_event
+                )
+            elif method == "hill":
+                AdvancedStego.hide_hill(
+                    container_path, data, password, output_path,
+                    progress_callback, cancel_event
+                )
             else:
-                work = img_array
-            gray = cv2.cvtColor(work.astype(np.uint8), cv2.COLOR_RGB2GRAY)
-            edges = cv2.Canny(gray, 50, 100)
-            safe_mask = (edges == 0)
-            flat = work.reshape(-1)
-            safe_idx = np.where(safe_mask.reshape(-1))[0]
+                raise ValueError(f"Неизвестный метод скрытия: {method}")
+        except Exception as e:
+            raise e
 
-            key = hashlib.sha256(password.encode()).digest()
-            rng = np.random.default_rng(np.frombuffer(key, dtype=np.uint32))
+    @staticmethod
+    def extract_data(image_path: str, password: str, method: str = None,
+                     progress_callback=None, cancel_event=None) -> bytes:
+        """Универсальный метод извлечения данных с автоматическим определением метода."""
 
-            # читаем заголовок
-            positions32 = rng.choice(safe_idx, size=32, replace=False)
-            header_bits = [str(flat[p] & 1) for p in sorted(positions32)]
-            data_len = int(''.join(header_bits), 2)
-            if data_len <= 0 or data_len > 50 * 1024 * 1024:
-                raise ValueError("Некорректная длина данных (AELSB)")
+        if method:
+            methods_to_try = [method]
+        else:
+            # Пробуем все по очереди, включая HILL
+            methods_to_try = ["lsb", "noise", "aelsb", "hill"]
 
-            total_bits = 32 + data_len * 8
-            positions = rng.choice(safe_idx, size=total_bits, replace=False)
-            data_bits = [str(flat[p] & 1) for p in sorted(positions)][32:]
-            data = bytes(int(''.join(data_bits[i:i + 8]), 2)
-                         for i in range(0, len(data_bits), 8))
-        else:  # classic LSB
-            # --- 1.2  классический LSB ---
-            if img_array.shape[-1] == 4:
-                img_array = img_array[:, :, :3]
-            flat = img_array.reshape(-1)
-            key = hashlib.sha256(password.encode()).digest()
-            rng = np.random.default_rng(np.frombuffer(key, dtype=np.uint32))
-            positions = rng.permutation(len(flat))
-            # header
-            header_bits = [str(flat[p] & 1) for p in positions[:32]]
-            data_len = int(''.join(header_bits), 2)
-            if data_len <= 0 or data_len > 50 * 1024 * 1024:
-                raise ValueError("Некорректная длина данных")
-            total_bits = 32 + data_len * 8
-            data_bits = [str(flat[p] & 1) for p in positions[32:total_bits]]
-            data = bytes(int(''.join(data_bits[i:i + 8]), 2)
-                         for i in range(0, len(data_bits), 8))
+        last_error = None
 
-        update(100, "Готово")
-        return data
+        for method_name in methods_to_try:
+            try:
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Операция отменена пользователем")
+
+                if progress_callback:
+                    progress_callback(0, f"Проверка метода: {STEGANO_METHODS.get(method_name, method_name)}...")
+
+                if method_name == "lsb":
+                    extractor = AdvancedStego.extract_lsb
+                elif method_name == "noise":
+                    extractor = AdvancedStego.extract_noise
+                elif method_name == "aelsb":
+                    extractor = AdvancedStego.extract_aelsb
+                elif method_name == "hill":
+                    extractor = AdvancedStego.extract_hill
+                else:
+                    continue
+
+                # Внутренняя функция для передачи прогресса
+                def internal_progress(p):
+                    if progress_callback:
+                        # Масштабируем прогресс, чтобы показать проверку каждого метода
+                        base_progress = methods_to_try.index(method_name) * (100 / len(methods_to_try))
+                        scaled_progress = p / len(methods_to_try)
+                        progress_callback(base_progress + scaled_progress)
+
+                # Пробуем извлечь
+                data = extractor(image_path, password, internal_progress, cancel_event)
+
+                # Если мы здесь, значит, извлечение удалось и чексумма верна
+                if progress_callback:
+                    progress_callback(100.0,
+                                      f"Данные найдены методом: {STEGANO_METHODS.get(method_name, method_name)}!")
+                return data
+
+            except (ValueError, IndexError, InterruptedError) as e:
+                # Эти ошибки ожидаемы, если метод не тот или данные повреждены
+                last_error = e
+                # Просто переходим к следующему методу
+                continue
+
+        # Если ни один метод не сработал
+        if isinstance(last_error, InterruptedError):
+            raise last_error
+        if last_error:
+            raise ValueError(
+                f"Не удалось извлечь данные. Возможно, изображение не содержит скрытой информации или данные повреждены. Последняя ошибка: {last_error}")
+        else:
+            raise ValueError("Не удалось извлечь данные. Ни один из поддерживаемых методов не подошел.")
 
 
 # ───────────────────────────────────────────────
@@ -912,6 +1465,7 @@ class SteganographyUltimate:
 
         # Переменные
         self.img_path = tk.StringVar()
+        self.last_progress_update_time = 0
         self.extract_img_path = tk.StringVar()
         self.data_type = tk.StringVar(value=self.settings.get("data_type", "text"))
         self.method_var = tk.StringVar(value=self.settings.get("method", "lsb"))
@@ -930,7 +1484,9 @@ class SteganographyUltimate:
         self.progress_bar = None
         self.status_label = None
         self.history_labels = []
-        self.size_info = None
+        self.size_info_frame = None
+        self.required_size_label = None
+        self.capacity_labels = {}
 
         # Для отмены операций
         self.cancel_event = threading.Event()
@@ -1125,9 +1681,9 @@ class SteganographyUltimate:
             drop_frame,
             text="📁 Перетащите изображение сюда или нажмите для выбора",
             anchor="center",
-            font=("Segoe UI", 11),
+            font=("Segoe UI", 12, "bold"),
             cursor="hand2",
-            style="Secondary.TLabel"
+            style="DropLabel.TLabel"
         )
         self.drop_label.pack(fill=tk.BOTH, expand=True, padx=20, pady=20)
         self.drop_label.bind("<Button-1>", lambda e: self.select_image())
@@ -1229,6 +1785,7 @@ class SteganographyUltimate:
             style="TCombobox"
         )
         method_combo.pack(side=tk.LEFT, padx=5)
+        method_combo.bind("<<ComboboxSelected>>", lambda e: self.update_size_info())
 
         # Степень сжатия PNG
         compression_frame = ttk.Frame(options_frame, style="Card.TFrame")
@@ -1254,7 +1811,24 @@ class SteganographyUltimate:
             foreground=self.colors["text_secondary"]
         )
         self.size_info.pack(pady=(15, 5))  # 👈 подняли выше
+        self.size_info_frame = ttk.LabelFrame(
+            frame,
+            text="Анализ вместимости",
+            padding=10,
+            style="Card.TLabelframe"
+        )
+        self.size_info_frame.pack(fill=tk.X, pady=(15, 5))
 
+        self.required_size_label = ttk.Label(self.size_info_frame, text="Требуется: -", style="TLabel")
+        self.required_size_label.pack(anchor="w", padx=5)
+
+        ttk.Separator(self.size_info_frame, orient="horizontal").pack(fill=tk.X, pady=5)
+
+        self.capacity_labels = {}
+        for method_key, method_name in STEGANO_METHODS.items():
+            lbl = ttk.Label(self.size_info_frame, text=f"{method_name}: -", style="Secondary.TLabel")
+            lbl.pack(anchor="w", padx=5)
+            self.capacity_labels[method_key] = lbl
         # 📌 Кнопка скрытия — теперь под шкалой
         self.hide_button = ttk.Button(
             frame,
@@ -1502,11 +2076,11 @@ class SteganographyUltimate:
         ØccultoNG v{VERSION}  •  Made with 🖤 by {AUTHOR}
 
         Состав «магического зелья»:
-        • Python 3.10+ – мозг и нервная система  
-        • Pillow – глаза для работы с изображениями  
-        • OpenCV – аналитик, ищущий «тихие» пиксели  
-        • NumPy – скорость, миллионы операций за мгновение  
-        • Tkinter + tkdnd2 – лицо и руки, удобный drag-and-drop  
+        • Python 3.10+ – мозг и нервная система
+        • Pillow – глаза для работы с изображениями
+        • OpenCV – аналитик, ищущий «тихие» пиксели
+        • NumPy – скорость, миллионы операций за мгновение
+        • Tkinter + tkdnd2 – лицо и руки, удобный drag-and-drop
 
         Лицензия: MIT – используй, модифицируй, делись свободно.
         """
@@ -1591,15 +2165,23 @@ class SteganographyUltimate:
         self.toast_label.place_forget()
         self.toast_timer = None
 
+    def on_drag_enter(self, event):
+        # Акцентируем дроп-зону
+        self.drop_label.configure(style="DropLabelActive.TLabel")
+
+    def on_drag_leave(self, event):
+        # Возвращаем спокойный вид
+        self.drop_label.configure(style="DropLabel.TLabel")
+
     def animate_drop(self) -> None:
-        """Анимация при перетаскивании"""
         original_text = self.drop_label.cget("text")
-        self.drop_label.config(text="✅ Файл загружен!", foreground=self.colors["success"])
-        self.root.after(1500,
-                        lambda: self.drop_label.config(text=original_text, foreground=self.colors["text_secondary"]))
+        self.drop_label.configure(text="✅ Файл загружен!", style="DropLabelActive.TLabel")
+        self.root.after(1500, lambda: self.drop_label.configure(text=original_text, style="DropLabel.TLabel"))
 
     def bind_drag_drop(self) -> None:
         self.drop_label.drop_target_register(DND_FILES)
+        self.drop_label.dnd_bind('<<DragEnter>>', self.on_drag_enter)
+        self.drop_label.dnd_bind('<<DragLeave>>', self.on_drag_leave)
         self.drop_label.dnd_bind('<<Drop>>', self.on_drop_image)
 
     def on_drop_image(self, event: tk.Event) -> None:
@@ -1698,60 +2280,85 @@ class SteganographyUltimate:
 
     def update_size_info(self) -> None:
         current_time = time.time()
-        if current_time - self.last_update_time < 0.5:  # Ограничение частоты обновлений
+        if current_time - self.last_update_time < 0.2:  # Ограничение частоты обновлений
             return
         self.last_update_time = current_time
+
+        # Сначала очищаем все метки
+        self.required_size_label.config(text="Требуется: -")
+        for method_key, lbl in self.capacity_labels.items():
+            lbl.config(text=f"{STEGANO_METHODS[method_key]}: -", style="Secondary.TLabel")
 
         try:
             img_path = self.img_path.get()
             if not img_path or not os.path.exists(img_path):
-                self.size_info.config(text="Изображение не выбрано", style="Error.TLabel")
+                self.required_size_label.config(text="Изображение не выбрано", style="Error.TLabel")
                 return
 
-            w, h, total_bits = ImageProcessor.get_image_info(img_path)
-            used_bits = HEADER_SIZE_BITS  # Заголовок
+            w, h, _ = ImageProcessor.get_image_info(img_path)
+            total_pixels = w * h
 
+            # Определяем требуемый размер данных
+            required_data_bytes = 0
             if self.data_type.get() == "text":
                 text = self.text_input.get("1.0", tk.END).strip()
                 if not text:
-                    self.size_info.config(text="Текст не введён", style="Error.TLabel")
+                    self.required_size_label.config(text="Текст не введён", style="Warning.TLabel")
                     return
-                raw_data = text.encode('utf-8')
+                required_data_bytes = len(text.encode('utf-8'))
             else:
                 file_path = self.file_path_var.get()
                 if not os.path.exists(file_path):
-                    self.size_info.config(text="Файл не выбран", style="Error.TLabel")
+                    self.required_size_label.config(text="Файл не выбран", style="Warning.TLabel")
                     return
-                with open(file_path, 'rb') as f:
-                    raw_data = f.read()
+                required_data_bytes = os.path.getsize(file_path)
 
-            # Учёт шифрования (теперь просто используем данные как есть)
-            encrypted = raw_data
-            used_bits += len(encrypted) * 8
-
-            usage = (used_bits / total_bits) * 100
-
-            if usage < 70:
-                style = "Success.TLabel"
-            elif usage < 90:
-                style = "Warning.TLabel"
-            else:
-                style = "Error.TLabel"
-
-            self.size_info.config(
-                text=f"Размер изображения: {w}x{h} | Доступно: {Utils.format_size(total_bits / 8)} | " +
-                     f"Требуется: {Utils.format_size(used_bits / 8)} ({usage:.1f}%)",
-                style=style
+            total_required_bits = (required_data_bytes + HEADER_FULL_LEN) * 8
+            self.required_size_label.config(
+                text=f"Требуется для данных: {Utils.format_size(required_data_bytes)}",
+                style="TLabel"
             )
 
+            # Рассчитываем и отображаем вместимость для каждого метода
+            selected_method = self.method_var.get()
+
+            for method_key, lbl in self.capacity_labels.items():
+                # Получаем полезную вместимость в битах (заголовок уже вычтен)
+                available_data_bits = ImageProcessor.get_capacity_by_method(total_pixels, method_key)
+                available_data_bytes = available_data_bits / 8
+
+                if available_data_bits <= 0:
+                    lbl.config(text=f"{STEGANO_METHODS[method_key]}: 0 B", style="Error.TLabel")
+                    continue
+
+                # Процент использования от ПОЛЕЗНОЙ вместимости метода
+                usage_percent = (
+                                        required_data_bytes * 8 / available_data_bits) * 100 if available_data_bits > 0 else 999
+
+                if usage_percent <= 70:
+                    style = "Success.TLabel"
+                elif usage_percent <= 100:
+                    style = "Warning.TLabel"
+                else:
+                    style = "Error.TLabel"
+
+                # Добавляем маркер для выбранного метода
+                prefix = "▶ " if method_key == selected_method else "  "
+
+                info_text = (f"{prefix}{STEGANO_METHODS[method_key]}: "
+                             f"{Utils.format_size(available_data_bytes)} "
+                             f"({usage_percent:.1f}%)")
+
+                lbl.config(text=info_text, style=style)
+
         except Exception as e:
-            self.size_info.config(text=f"Ошибка: {str(e)}", style="Error.TLabel")
+            self.required_size_label.config(text=f"Ошибка: {Utils.truncate_path(str(e), 50)}", style="Error.TLabel")
 
     def update_thumbnail(self, path: str, target_label: tk.Widget) -> None:
         """Создаёт и показывает миниатюру 200×200 в указанной метке."""
         try:
             with Image.open(path) as img:
-                img.thumbnail((200, 200), Image.Resampling.LANCZOS)
+                img.thumbnail((200, 200), Image.Resampling.BOX)
                 if img.mode == 'RGBA':
                     background = Image.new('RGB', img.size, (255, 255, 255))
                     background.paste(img, mask=img.split()[3])
@@ -1843,13 +2450,18 @@ class SteganographyUltimate:
                 raise ValueError(
                     f"Недостаточно свободного места на диске. Требуется: {Utils.format_size(required_space_mb * 1024 * 1024)}, Доступно: {Utils.format_size(free_space_mb * 1024 * 1024)}")
 
-            # Скрытие данных
             start_time = time.time()
 
             def progress_callback(progress: float) -> None:
                 if self.cancel_event.is_set():
                     raise Exception("Операция отменена пользователем")
-                elapsed_time = time.time() - start_time
+
+                current_time = time.time()
+                if current_time - self.last_progress_update_time < 0.1 and progress < 100:  # Обновлять не чаще 10 раз/сек
+                    return
+                self.last_progress_update_time = current_time
+
+                elapsed_time = current_time - start_time
                 speed = progress / 100 * len(data) / elapsed_time if elapsed_time > 0 else 0
                 self.root.after(0, lambda: self.progress_var.set(progress))
                 self.root.after(0, lambda: self.status_label.config(
@@ -1859,8 +2471,9 @@ class SteganographyUltimate:
             ImageProcessor.hide_data(
                 img_path,
                 data,
-                "",  # Пустой пароль, так как шифрование отключено
+                "",  # Пустой пароль
                 output,
+                method=self.method_var.get(),
                 compression_level=self.compression_level.get(),
                 progress_callback=progress_callback,
                 cancel_event=self.cancel_event
@@ -1910,25 +2523,32 @@ class SteganographyUltimate:
             path = self.extract_img_path.get()
             if not path or not os.path.exists(path):
                 raise ValueError("Файл не выбран или не существует")
-            # Извлечение данных
+
+            # Извлечение данных с автоматическим определением метода
             start_time = time.time()
 
-            def progress_callback(progress: float) -> None:
+            def progress_callback(progress, message=None):
                 if self.cancel_event.is_set():
                     raise Exception("Операция отменена пользователем")
-                elapsed_time = time.time() - start_time
-                # Для извлечения сложно рассчитать скорость, так как мы не знаем размер данных заранее
-                self.root.after(0, lambda: self.progress_var.set(progress))
-                self.root.after(0, lambda: self.status_label.config(
-                    text=f"Извлечение данных... {progress:.1f}% | {elapsed_time:.1f}s"
-                ))
 
+                current_time = time.time()
+                if current_time - self.last_progress_update_time < 0.1 and progress < 100:
+                    return
+                self.last_progress_update_time = current_time
+
+                self.root.after(0, lambda: self.progress_var.set(progress))
+                status_text = message if message else f"Извлечение данных... {progress:.1f}%"
+                self.root.after(0, lambda: self.status_label.config(text=status_text))
+
+            # Передаем None для автоматического определения метода
             extracted = ImageProcessor.extract_data(
                 path,
-                "",  # Пустой пароль, так как шифрование отключено
+                "",  # Пустой пароль
+                None,  # Автоматическое определение метода
                 progress_callback,
-                cancel_event=self.cancel_event
+                self.cancel_event
             )
+
             # Определение типа данных и сохранение во временный файл при необходимости
             try:
                 text = extracted.decode('utf-8')
@@ -1963,6 +2583,7 @@ class SteganographyUltimate:
                 self.root.after(0, lambda: self.result_text.config(state='disabled'))
             # Добавление в историю
             self.save_to_history(path)
+
         except Exception as e:
             if str(e) == "Операция отменена пользователем":
                 self.root.after(0, lambda: messagebox.showinfo("Отмена", "Операция извлечения данных была отменена."))
@@ -2159,102 +2780,92 @@ class SteganographyUltimate:
                 messagebox.showerror("Ошибка", f"Не удалось сбросить настройки: {e}")
 
     def show_help(self) -> None:
-        # ───────────────────────────────────────────────
-        # 🆕 ОБНОВЛЁННОЕ ПОЛЬЗОВАТЕЛЬСКОЕ РУКОВОДСТВО
-        # ───────────────────────────────────────────────
-        # 1. Скопируйте этот блок в метод show_help() класса SteganographyUltimate
-        # 2. Замените переменную help_text = f""" … """ на содержимое ниже
-        # 3. Сохраните и перезапустите приложение – вкладка «Помощь» станет живой и понятной.
-        # ───────────────────────────────────────────────
-
         help_text = f"""
         ╔══════════════════════════════════════════════════════════════╗
-        ║                 ØccultoNG v{VERSION} – Полное руководство               ║
-        ║        «Скрывай данные как профи, извлекай как детектив»      ║
+        ║            ØccultoNG v{VERSION} – Полное руководство               ║
+        ║        «Скрывай данные как профи, извлекай как детектив»     ║
         ╚══════════════════════════════════════════════════════════════╝
 
         📌 Что это такое?
-        ØccultoNG – это стеганографический «швейцарский нож» для изображений.  
-        Он позволяет НЕЗАМЕТНО прятать внутри любой картинки:
-        • текстовые сообщения, пароли, коды;  
-        • любые файлы (PDF, ZIP, EXE, видео) до 50 МБ.  
+        ØccultoNG – это современный стеганографический «швейцарский нож».
+        Он позволяет НЕЗАМЕТНО прятать внутри обычных изображений:
+        • Секретные тексты, пароли, исходный код, ключи.
+        • Любые файлы (PDF, ZIP, EXE, видео) размером до 50 МБ.
 
-        🔐 Всё, что вы спрячете, останется невидимым для глаза и большинства
-        анализаторов. Главное – не теряйте исходное изображение и помните пароль!
-
-        ──────────────────────────────────────────────────────────────
-        🧩 Три метода скрытия: когда какой выбирать
-        ──────────────────────────────────────────────────────────────
-        1️⃣ LSB (Least Significant Bits) – «Классика»  
-           • Просто подменяет последний бит каждого цветового канала.  
-           • Плюсы: максимальная вместимость (≈ 12,5 % от размера картинки).  
-           • Минусы: легко обнаружить специальными сканерами.  
-           • Когда использовать: для быстрой передачи, когда важен объём, а не скрытность.
-
-        2️⃣ Adaptive-Noise – «Невидимка»  
-           • Добавляет/убирает ±1 к пикселю ТОЛЬКО в «гладких» областях (без рёбер).  
-           • Плюсы: практически невозможно заметить визуально и статистически.  
-           • Минусы: вместимость меньше (~30-50 % от LSB).  
-           • Когда использовать: когда нужна максимальная незаметность.
-
-        3️⃣ Adaptive-Edge-LSB (AELSB) – «Компромисс»  
-           • Использует LSB, но только в пикселях, где нет резких перепадов цвета.  
-           • Плюсы: баланс между вместимостью и скрытностью.  
-           • Минусы: немного сложнее в реализации, требует CPU.  
-           • Когда использовать: когда нужно «и много, и тихо».
-
-        💡 Правило большого пальца  
-        • Маленькая картинка + много данных → LSB.  
-        • Соцсети/публикация → Adaptive-Noise.  
-        • Всё остальное → AELSB.
+        🔐 Всё, что вы спрячете, останется невидимым для глаза. После скрытия
+        вы получаете новый PNG-файл, который выглядит как оригинал, но несёт
+        в себе ваши данные.
 
         ──────────────────────────────────────────────────────────────
-        🎮 Быстрый старт. 4 шага за 30 секунд
+        🧩 Четыре метода. Четыре уровня скрытности.
         ──────────────────────────────────────────────────────────────
-        1. Откройте вкладку «Скрыть данные».  
-        2. Перетащите или выберите картинку-контейнер.  
-        3. Вставьте текст или выберите файл.  
-        4. Выберите метод (см. выше), нажмите «🔐 Скрыть» → сохраните PNG.
+        1️⃣ Классический LSB (Least Significant Bit)
+           • Как работает: Последовательно заменяет самый незначительный бит
+             в каждом цветовом канале (R, G, B) на бит ваших данных.
+             Это как писать карандашом на последней странице каждой книги в библиотеке.
+           • Плюсы: Максимальная вместимость (до 12.5% от размера файла). Очень быстро.
+           • Минусы: Легко обнаруживается статистическим анализом (стеганализом).
+           • Когда использовать: Когда скорость и объём важнее скрытности.
+             Идеально для личных архивов, где никто не будет искать подвох.
 
-        Готово! Ваша картинка выглядит так же, но внутри – ваш секрет.
+        2️⃣ Adaptive-Noise
+           • Как работает: "Разбрасывает" биты ваших данных по пикселям изображения
+             в псевдослучайном порядке. Порядок определяется паролем (даже если он пустой).
+             Это как вырвать страницы из книги и спрятать их в случайных местах по всей библиотеке.
+           • Плюсы: Гораздо устойчивее к простому стеганализу, чем LSB.
+           • Минусы: Та же вместимость, что и у LSB, но чуть медленнее.
+           • Когда использовать: Хороший баланс между скоростью и безопасностью.
+             Затрудняет обнаружение данных без знания "карты" (пароля).
+
+        3️⃣ Adaptive-Edge-LSB (AELSB)
+           • Как работает: Этот метод использует код Хэмминга (7,3). Он берёт 3 бита
+             ваших данных и кодирует их с помощью 7 битов в изображении.
+             Это добавляет избыточность, которая помогает выявить и исправить ошибки.
+           • Плюсы: Повышенная устойчивость к случайным помехам и незначительным искажениям.
+           • Минусы: Вместимость значительно ниже (примерно 3/7 или ~42% от LSB).
+           • Когда использовать: Когда целостность данных важнее максимального объёма.
+
+        4️⃣ HILL-CA LSB Matching (Content-Adaptive)
+           • Как работает: Самый продвинутый метод. Сначала алгоритм HILL анализирует
+             изображение и находит самые "шумные", текстурированные области (трава, волосы,
+             рябь на воде). Затем он встраивает данные с помощью кода Хэмминга (как в AELSB),
+             но только в эти, наименее заметные для глаза, места.
+           • Плюсы: Максимальный уровень скрытности. Чрезвычайно трудно обнаружить
+             как визуально, так и с помощью программ-анализаторов.
+           • Минусы: Самая низкая вместимость и самая низкая скорость работы.
+           • Когда использовать: Когда скрытность — абсолютный приоритет. Идеально для
+             публикации в открытых источниках, где изображение могут изучать.
 
         ──────────────────────────────────────────────────────────────
-        🔍 Извлечение данных
-        ───────────────────────────────────────────────────────────
-        1. Перейдите во вкладку «Извлечь данные».  
-        2. Укажите ту же картинку, которую получили на шаге 4.  
-        3. Нажмите «🔍 Извлечь».  
-        4. Сохраните или скопируйте результат.
+        🎮 Быстрый старт: Скрыть за 30 секунд
+        ──────────────────────────────────────────────────────────────
+        1. Вкладка «Скрыть»: перетащите или выберите картинку-контейнер.
+        2. Введите текст или выберите файл для скрытия.
+        3. Выберите подходящий метод из списка выше.
+        4. Нажмите «🔐 Скрыть» и сохраните новый PNG-файл.
+
+        Готово! Ваша картинка визуально не изменилась, но внутри – ваш секрет.
 
         ──────────────────────────────────────────────────────────────
-        🎨 Темы и внешний вид
+        🔍 Извлечение данных: Еще проще
         ──────────────────────────────────────────────────────────────
-        • Тёмная – официальный стиль GitHub Dark.  
-        • Светлая – глаз не устаёт при дневном свете.  
-        • Космос / Океан / Лес / Неонка / Закат – для настроения.  
-        Переключайтесь во вкладке «Настройки». Все изменения сохраняются автоматически.
+        1. Вкладка «Извлечь»: выберите изображение со скрытыми данными.
+        2. Нажмите «🔍 Извлечь».
+
+        Программа сама переберёт все методы и найдёт данные, если они есть.
+        Если извлечён файл, его можно сразу сохранить. Если текст — скопировать.
 
         ──────────────────────────────────────────────────────────────
-        📊 Как читать строку «Размер/Доступно/Требуется»
+        🛠️ Продвинутые советы
         ──────────────────────────────────────────────────────────────
-        • Размер изображения – фактические пиксели.  
-        • Доступно – сколько байт можно спрятать (зависит от метода).  
-        • Требуется – сколько занимут ваши данные + заголовок.  
-        Цвет подскажет:  
-        🟢 <70 % – всё ок.  
-        🟡 70-90 % – риск заметности.  
-        🔴 >90 % – выберите больше картинку или другой метод.
+        • Используйте PNG без сжатия (или другие lossless-форматы) как контейнер.
+          JPG-изображения тоже можно, но их артефакты сжатия могут мешать.
+        • Сохранённый файл всегда будет в формате PNG, чтобы избежать потерь данных.
+        • Строка статуса «Требуется/Доступно» поможет оценить, поместятся ли ваши
+          данные. Зелёный – отлично, жёлтый – приемлемо, красный – риск быть замеченным.
+        • Кнопка «Отмена» прервёт любую долгую операцию.
 
-        ──────────────────────────────────────────────────────────────
-        🛠️ Подсказки продвинутого пользователя
-        ──────────────────────────────────────────────────────────────
-        • PNG → PNG – идеальный путь без потерь.  
-        • JPG → PNG – можно, но избегайте повторного JPG-сжатия (данные удалятся).  
-        • Масштабируйте картинку «вниз» после скрытия – данные останутся.  
-        • История последних файлов – кликайте по строке, чтобы быстро загрузить.  
-        • Кнопка «Отмена» прервёт длинную операцию без потерь.
-
-        Автор: {AUTHOR}  
+        Автор: {AUTHOR}
 
         Удачных тайных дел! 🕵️‍♂️
         """
