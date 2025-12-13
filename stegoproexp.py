@@ -16,17 +16,19 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from typing import List
 from typing import Tuple
 
+import cv2
 import numba
 import numpy as np
 from PIL import Image
 from PIL import ImageTk
 from scipy import ndimage
+from scipy.fftpack import dct, idct
 from tkinterdnd2 import DND_FILES, TkinterDnD
 
 # ───────────────────────────────────────────────
 # 🎨 ГЛОБАЛЬНЫЕ НАСТРОЙКИ (УЛУЧШЕННЫЕ)
 # ───────────────────────────────────────────────
-VERSION = "1.9.0"
+VERSION = "2.0.0"
 AUTHOR = "MustaNG"
 BUILD_DATE = time.strftime("%Y-%m-%d")
 
@@ -272,7 +274,8 @@ STEGANO_METHODS = {
     "noise": "Adaptive-Noise (Баланс вместимости/скрытности)",
     "aelsb": "Adaptive-Edge-LSB + Hamming (Устойчивость к ошибкам)",
     "hill": "HILL-CA LSB Matching (Макс. скрытность)",
-    "audio_lsb": "WAV LSB (Аудио контейнеры)"
+    "audio_lsb": "WAV LSB (Аудио-WAV контейнеры)",
+    "jpeg_dct": "JPEG DCT"
 }
 
 SETTINGS_FILE = "stego_settings_pro.json"
@@ -2869,6 +2872,281 @@ class AdvancedStego:
             raise e
 
 
+# ───────────────────────────────────────────────
+# 📸 КЛАСС ДЛЯ JPEG DCT СТЕГАНОГРАФИИ
+# ───────────────────────────────────────────────
+class JPEGStego:
+    """
+    Класс для стеганографии в JPEG изображениях методом DCT (Дискретное Косинусное Преобразование).
+    Особенности:
+    - Использует канал Y (яркость) цветового пространства YCbCr
+    - Работает с блоками 8x8 пикселей (стандарт JPEG)
+    - Встраивает данные в среднечастотные коэффициенты DCT
+    - Обеспечивает устойчивость к JPEG-сжатию
+    """
+
+    @staticmethod
+    def _pack_data_with_header(data: bytes) -> bytes:
+        """Упаковывает данные с заголовком (магия, длина, контрольная сумма)"""
+        checksum = zlib.crc32(data).to_bytes(4, 'big')
+        data_len = len(data).to_bytes(4, 'big')
+        magic = b'JPEG'  # Магические байты для JPEG DCT
+        return magic + checksum + data_len + data
+
+    @staticmethod
+    def _unpack_data_with_header(full_bytes: bytes) -> bytes:
+        """Распаковывает данные с проверкой заголовка"""
+        if len(full_bytes) < 12:  # 4 (magic) + 4 (checksum) + 4 (length)
+            raise ValueError("Недостаточно данных для заголовка")
+
+        magic = full_bytes[:4]
+        if magic != b'JPEG':
+            raise ValueError("Неверные магические байты")
+
+        stored_checksum = int.from_bytes(full_bytes[4:8], 'big')
+        data_len = int.from_bytes(full_bytes[8:12], 'big')
+
+        if len(full_bytes) < 12 + data_len:
+            raise ValueError("Данные обрезаны")
+
+        data = full_bytes[12:12 + data_len]
+        calculated_checksum = zlib.crc32(data)
+
+        if calculated_checksum != stored_checksum:
+            raise ValueError("Ошибка контрольной суммы")
+
+        return data
+
+    @staticmethod
+    def hide_dct(container_path: str, data: bytes, password: str, output_path: str,
+                 progress_callback=None, cancel_event=None) -> None:
+        """
+        Скрывает данные в JPEG изображении методом DCT.
+
+        Физический смысл:
+        1. Блоки 8x8 - JPEG использует разбиение на такие блоки для независимой обработки
+        2. DCT преобразует пространственную информацию в частотную
+        3. Среднечастотные коэффициенты лучше подходят для скрытия - они менее заметны для глаза
+           и менее подвержены сжатию
+        """
+        try:
+            # Загружаем изображение
+            img = cv2.imread(container_path)
+            if img is None:
+                raise ValueError("Не удалось загрузить изображение")
+
+            # Преобразуем в YCbCr (цветовое пространство JPEG)
+            img_ycbcr = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
+
+            # Используем канал Y (яркость)
+            # Глаз менее чувствителен к изменениям яркости в высокочастотных компонентах
+            y_channel = img_ycbcr[:, :, 0].astype(np.float32)
+
+            # Получаем размеры
+            h, w = y_channel.shape
+
+            # Разбиваем на блоки 8x8
+            h_blocks = h // 8
+            w_blocks = w // 8
+
+            # Упаковываем данные с заголовком
+            full_data = JPEGStego._pack_data_with_header(data)
+            data_bits = np.unpackbits(np.frombuffer(full_data, dtype=np.uint8))
+
+            # Проверяем вместимость
+            # В каждом блоке можно встроить 1 бит в один из среднечастотных коэффициентов
+            max_capacity = h_blocks * w_blocks
+
+            if len(data_bits) > max_capacity:
+                raise ValueError(
+                    f"Данные слишком велики для изображения. "
+                    f"Максимум: {max_capacity // 8} байт, требуется: {len(full_data)} байт"
+                )
+
+            # Коэффициенты DCT для встраивания (средние частоты)
+            # Выбираем коэффициенты (4,4) и (5,5) - они устойчивы к сжатию
+            embed_positions = [(4, 4), (5, 5), (4, 5), (5, 4)]
+
+            bit_index = 0
+            total_bits = len(data_bits)
+
+            # Проходим по всем блокам
+            for i in range(h_blocks):
+                for j in range(w_blocks):
+                    if cancel_event and cancel_event.is_set():
+                        raise InterruptedError("Операция отменена пользователем")
+
+                    # Берём блок 8x8
+                    block = y_channel[i * 8:(i + 1) * 8, j * 8:(j + 1) * 8]
+
+                    # Применяем DCT (2D DCT через два 1D DCT)
+                    dct_block = dct(dct(block.T, norm='ortho').T, norm='ortho')
+
+                    # Встраиваем данные если ещё есть биты
+                    if bit_index < total_bits:
+                        # Выбираем позицию для встраивания (чередуем для равномерности)
+                        pos_idx = (i * w_blocks + j) % len(embed_positions)
+                        u, v = embed_positions[pos_idx]
+
+                        # Получаем текущее значение коэффициента
+                        coeff = dct_block[u, v]
+
+                        # Встраиваем бит методом LSB
+                        bit = data_bits[bit_index]
+                        if bit == 1:
+                            # Устанавливаем младший бит в 1
+                            if int(coeff) % 2 == 0:
+                                dct_block[u, v] = coeff + 1 if coeff >= 0 else coeff - 1
+                        else:
+                            # Устанавливаем младший бит в 0
+                            if int(coeff) % 2 == 1:
+                                dct_block[u, v] = coeff - 1 if coeff >= 0 else coeff + 1
+
+                        bit_index += 1
+
+                    # Обратное DCT
+                    idct_block = idct(idct(dct_block.T, norm='ortho').T, norm='ortho')
+
+                    # Возвращаем блок на место
+                    y_channel[i * 8:(i + 1) * 8, j * 8:(j + 1) * 8] = idct_block
+
+                    # Обновляем прогресс
+                    if progress_callback and (i * w_blocks + j) % 100 == 0:
+                        progress = (i * w_blocks + j) / (h_blocks * w_blocks) * 100
+                        progress_callback(progress, f"Обработано блоков: {i * w_blocks + j}/{h_blocks * w_blocks}")
+
+            # Обрезаем значения до допустимого диапазона
+            y_channel = np.clip(y_channel, 0, 255)
+
+            # Обновляем канал Y
+            img_ycbcr[:, :, 0] = y_channel.astype(np.uint8)
+
+            # Конвертируем обратно в BGR
+            img_stego = cv2.cvtColor(img_ycbcr, cv2.COLOR_YCrCb2BGR)
+
+            # Сохраняем с минимальным JPEG сжатием для сохранения данных
+            cv2.imwrite(output_path, img_stego, [cv2.IMWRITE_JPEG_QUALITY, 95])
+
+            if progress_callback:
+                progress_callback(100.0, "✅ Данные успешно скрыты")
+
+        except Exception as e:
+            raise Exception(f"Ошибка при скрытии данных JPEG DCT: {str(e)}")
+
+    @staticmethod
+    def extract_dct(stego_path: str, password: str, progress_callback=None, cancel_event=None) -> bytes:
+        """
+        Извлекает данные из JPEG изображения, скрытые методом DCT.
+
+        Процесс:
+        1. Разбиение на блоки 8x8
+        2. Применение DCT к каждому блоку
+        3. Чтение битов из тех же коэффициентов
+        4. Сбор данных и проверка целостности
+        """
+        try:
+            # Загружаем изображение
+            img = cv2.imread(stego_path)
+            if img is None:
+                raise ValueError("Не удалось загрузить изображение")
+
+            # Преобразуем в YCbCr
+            img_ycbcr = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
+            y_channel = img_ycbcr[:, :, 0].astype(np.float32)
+
+            # Размеры
+            h, w = y_channel.shape
+            h_blocks = h // 8
+            w_blocks = w // 8
+
+            # Коэффициенты для извлечения (должны совпадать с встраиванием)
+            embed_positions = [(4, 4), (5, 5), (4, 5), (5, 4)]
+
+            # Максимальное количество бит, которое можно извлечь
+            max_bits = h_blocks * w_blocks
+
+            # Собираем биты
+            extracted_bits = []
+
+            for i in range(h_blocks):
+                for j in range(w_blocks):
+                    if cancel_event and cancel_event.is_set():
+                        raise InterruptedError("Операция отменена пользователем")
+
+                    # Блок 8x8
+                    block = y_channel[i * 8:(i + 1) * 8, j * 8:(j + 1) * 8]
+
+                    # DCT
+                    dct_block = dct(dct(block.T, norm='ortho').T, norm='ortho')
+
+                    # Выбираем ту же позицию
+                    pos_idx = (i * w_blocks + j) % len(embed_positions)
+                    u, v = embed_positions[pos_idx]
+
+                    # Извлекаем бит (младший бит коэффициента)
+                    coeff = dct_block[u, v]
+                    bit = 1 if int(coeff) % 2 == 1 else 0
+                    extracted_bits.append(bit)
+
+                    # Обновляем прогресс
+                    if progress_callback and (i * w_blocks + j) % 100 == 0:
+                        progress = (i * w_blocks + j) / (h_blocks * w_blocks) * 100
+                        progress_callback(progress, f"Извлечение блоков: {i * w_blocks + j}/{h_blocks * w_blocks}")
+
+            # Преобразуем биты в байты
+            extracted_bytes = np.packbits(extracted_bits).tobytes()
+
+            # Пытаемся распаковать данные
+            # Ищем заголовок в извлеченных данных
+            try:
+                # Пробуем разные смещения на случай ошибок синхронизации
+                for offset in range(0, min(100, len(extracted_bytes) - 12)):
+                    try:
+                        data = JPEGStego._unpack_data_with_header(extracted_bytes[offset:])
+                        if progress_callback:
+                            progress_callback(100.0, "✅ Данные успешно извлечены")
+                        return data
+                    except:
+                        continue
+
+                raise ValueError("Не удалось найти валидные данные")
+
+            except Exception as e:
+                raise ValueError(f"Ошибка при распаковке данных: {str(e)}")
+
+        except Exception as e:
+            raise Exception(f"Ошибка при извлечении данных JPEG DCT: {str(e)}")
+
+    @staticmethod
+    def calculate_capacity(image_path: str) -> int:
+        """
+        Рассчитывает максимальную вместимость в байтах для JPEG DCT метода.
+
+        Формула:
+        Вместимость = (ширина // 8) * (высота // 8) // 8 - заголовок
+        (по 1 биту на блок 8x8)
+        """
+        try:
+            img = cv2.imread(image_path)
+            if img is None:
+                return 0
+
+            h, w = img.shape[:2]
+            blocks = (h // 8) * (w // 8)
+
+            # По 1 биту на блок, минус заголовок (12 байт)
+            capacity_bits = blocks
+            capacity_bytes = capacity_bits // 8
+
+            # Минус заголовок
+            if capacity_bytes > 12:
+                return capacity_bytes - 12
+            return 0
+
+        except:
+            return 0
+
+
 AUDIO_MAGIC_BYTES = b'AWNG'
 AUDIO_HEADER_CHECKSUM_LEN = 4
 AUDIO_HEADER_DATALEN_LEN = 4
@@ -2944,21 +3222,35 @@ class ImageProcessor:
     @staticmethod
     def get_image_info(path: str) -> Tuple[int, int, int]:
         """
-        Возвращает (ширина, высота, доступные биты) для изображения или (0, 0, sample_count) для WAV.
+        Возвращает (ширина, высота, доступные биты) для изображения.
+        Обновлено для поддержки JPEG DCT.
         """
         ext = os.path.splitext(path)[1].lower()
+
         if ext == '.wav':
             with wave.open(path, 'rb') as wav:
                 frames = wav.getnframes()
-            # Вместимость — по количеству сэмплов (1 бит на сэмпл, минус заголовок)
             return (0, 0, frames)
+
         else:
             try:
+                # Для JPEG используем OpenCV для получения размеров
+                if ext in ['.jpg', '.jpeg']:
+                    img = cv2.imread(path)
+                    if img is not None:
+                        h, w = img.shape[:2]
+                        # Для JPEG DCT вместимость рассчитывается по блокам
+                        blocks = (h // 8) * (w // 8)
+                        capacity_bits = blocks  # 1 бит на блок
+                        return w, h, capacity_bits
+
+                # Для других форматов используем PIL
                 with Image.open(path) as img:
                     if img.mode not in ['RGB', 'RGBA']:
                         img = img.convert('RGB')
                     w, h = img.size
                     return w, h, w * h * 3
+
             except Exception as e:
                 raise ValueError(f"Ошибка загрузки изображения: {str(e)}")
 
@@ -2977,22 +3269,37 @@ class ImageProcessor:
             raise ValueError(f"Ошибка создания миниатюры: {str(e)}")
 
     @staticmethod
-    def get_capacity_by_method(total_pixels: int, method: str) -> int:
+    def get_capacity_by_method(total_pixels: int, method: str, width=0, height=0) -> int:
         """
         Рассчитывает теоретическую вместимость ПОЛЕЗНЫХ ДАННЫХ в битах для заданного метода.
-        Уже учитывает и вычитает размер заголовка.
+        Обновлено для JPEG DCT.
         """
-        total_lsb_bits = total_pixels * 3  # RGB
-        if method in ("lsb", "noise"):
-            capacity_bits = total_lsb_bits
+        if method == "jpeg_dct":
+            # Для JPEG DCT: каждый блок 8x8 даёт 1 бит
+            if width > 0 and height > 0:
+                blocks = (width // 8) * (height // 8)
+                capacity_bits = blocks
+            else:
+                # Оценка на основе total_pixels (приблизительно)
+                capacity_bits = total_pixels // 64
+        elif method in ("lsb", "noise"):
+            capacity_bits = total_pixels * 3
         elif method in ("aelsb", "hill"):
-            capacity_bits = int(total_lsb_bits * (3 / 7))
+            capacity_bits = int(total_pixels * (3 / 7))
+        elif method == "audio_lsb":
+            capacity_bits = total_pixels
         else:
             return 0
-        data_capacity_bits = max(0, capacity_bits - (HEADER_FULL_LEN * 8))
+
+        # Вычитаем заголовок (размер зависит от метода)
+        if method == "jpeg_dct":
+            header_bits = 12 * 8  # 12 байт заголовок для JPEG DCT
+        else:
+            header_bits = HEADER_FULL_LEN * 8
+
+        data_capacity_bits = max(0, capacity_bits - header_bits)
         return data_capacity_bits
 
-    # ── 1. НЕВИДИМОЕ СКРЫТИЕ ──
     @staticmethod
     def hide_data(container_path: str, data: bytes, password: str, output_path: str,
                   method: str = "noise", compression_level: int = 9,
@@ -3002,6 +3309,16 @@ class ImageProcessor:
             if method == "audio_lsb":
                 AudioStego.hide_lsb_wav(container_path, data, output_path)
                 return
+
+            # Добавьте обработку JPEG DCT
+            if method == "jpeg_dct":
+                JPEGStego.hide_dct(
+                    container_path, data, password, output_path,
+                    progress_callback, cancel_event
+                )
+                return
+
+            # Существующие методы...
             if method == "lsb":
                 AdvancedStego.hide_lsb(
                     container_path, data, password, output_path,
@@ -3030,20 +3347,37 @@ class ImageProcessor:
     @staticmethod
     def extract_data(image_path: str, password: str, method: str = None,
                      progress_callback=None, cancel_event=None) -> bytes:
-        """Универсальный метод извлечения данных с автоматическим определением метода."""
+        """Универсальный метод извлечения данных"""
+
+        # Сначала проверяем JPEG DCT, если файл JPEG
+        ext = os.path.splitext(image_path)[1].lower()
+        if ext in ['.jpg', '.jpeg'] and (method is None or method == "jpeg_dct"):
+            try:
+                return JPEGStego.extract_dct(
+                    image_path, password, progress_callback, cancel_event
+                )
+            except Exception as e:
+                if method == "jpeg_dct":  # Если метод указан явно
+                    raise e
+                # Иначе пробуем другие методы
+
         if method == "audio_lsb":
             return AudioStego.extract_lsb_wav(image_path)
+
         if method:
             methods_to_try = [method]
         else:
             methods_to_try = ["lsb", "noise", "aelsb", "hill"]
+
         last_error = None
         for method_name in methods_to_try:
             try:
                 if cancel_event and cancel_event.is_set():
                     raise InterruptedError("Операция отменена пользователем")
+
                 if progress_callback:
                     progress_callback(0, f"Проверка метода: {STEGANO_METHODS.get(method_name, method_name)}...")
+
                 if method_name == "lsb":
                     extractor = AdvancedStego.extract_lsb
                 elif method_name == "noise":
@@ -3066,15 +3400,18 @@ class ImageProcessor:
                     progress_callback(100.0,
                                       f"✅ Данные успешно найдены методом: {STEGANO_METHODS.get(method_name, method_name)}!")
                 return data
+
             except (ValueError, IndexError, InterruptedError) as e:
                 last_error = e
                 continue
+
         if isinstance(last_error, InterruptedError):
             raise last_error
         if last_error:
             raise ValueError(
                 f"❌ Не удалось извлечь данные. Возможно, файл не содержит скрытой информации или данные повреждены.\
-Последняя ошибка: {last_error}")
+Последняя ошибка: {last_error}"
+            )
         else:
             raise ValueError("❌ Не удалось извлечь данные. Ни один из поддерживаемых методов не подошел.")
 
@@ -4530,8 +4867,8 @@ class SteganographyUltimatePro:
         help_text = f"""
 🎯 Добро пожаловать в ØccultoNG Pro!
 
-ØccultoNG Pro — это профессиональный инструмент для стеганографии, 
-позволяющий скрывать тексты и файлы внутри изображений и аудиофайлов 
+ØccultoNG Pro — это профессиональный инструмент для стеганографии,
+позволяющий скрывать тексты и файлы внутри изображений и аудиофайлов
 без потерь, с автоматическим извлечением и проверкой целостности.
 
 🔑 Основные возможности:
@@ -4545,7 +4882,7 @@ class SteganographyUltimatePro:
 🚀 Начните с выбора вкладки "Скрыть данные" или "Извлечь данные"
 в верхней части окна.
 
-💡 Совет: Используйте вкладку "Статистика" для отслеживания 
+💡 Совет: Используйте вкладку "Статистика" для отслеживания
 вашей активности и "Достижения" для мотивации!
 """
         self.display_help_text(help_text)
@@ -4580,6 +4917,12 @@ class SteganographyUltimatePro:
 • Плюсы: простота и прозрачность на слух при 1 LSB/сэмпл
 • Минусы: уязвимость к сжатию/пересэмплированию
 • Рекомендуется для: аудиофайлов, когда важна аудио-качество
+
+6) 🖼️ JPEG DCT (Стойкость к сжатию)
+• Идея: изменение среднечастотных коэффициентов DCT в блоках 8x8
+• Плюсы: устойчивость к JPEG-сжатию, незаметность изменений
+• Минусы: низкая вместимость (≈1 бит на блок 8x8)
+• Рекомендуется для: JPEG изображений, когда важна совместимость
 """
         self.display_help_text(help_text)
 
@@ -4942,25 +5285,33 @@ A: Если включено автоматическое создание ре�
             self.animate_drop()
             self.show_toast("✅ Контейнер загружен")
             self.update_thumbnail(path, self.preview_img)
-            # Управление методами
-            method_combo = None
-            for child in self.root.winfo_children():
-                for subchild in child.winfo_children():
-                    if isinstance(subchild, ttk.Combobox) and subchild.cget("width") == 30:
-                        method_combo = subchild
-                        break
+
+            # Автоматический выбор метода в зависимости от формата
             if path.lower().endswith(".wav"):
                 self.method_var.set("audio_lsb")
-                if method_combo:
-                    method_combo['values'] = ["audio_lsb"]
-                    method_combo.config(state="disabled")
+                self.update_method_combo_state("disabled")
+            elif path.lower().endswith((".jpg", ".jpeg")):
+                # Для JPEG предлагаем DCT метод
+                self.method_var.set("jpeg_dct")
+                self.update_method_combo_state("readonly")
             else:
                 self.method_var.set(self.settings.get("method", "lsb"))
-                if method_combo:
-                    method_combo['values'] = list(STEGANO_METHODS.keys())
-                    method_combo.config(state="readonly")
+                self.update_method_combo_state("readonly")
         else:
             messagebox.showwarning("❌ Неверный формат", "Допускаются файлы: PNG, BMP, TIFF, TGA, JPG, JPEG, WAV")
+
+    def update_method_combo_state(self, state: str):
+        """Обновляет состояние комбобокса методов"""
+        for child in self.root.winfo_children():
+            for subchild in child.winfo_children():
+                if isinstance(subchild, ttk.Combobox) and subchild.cget("width") == 30:
+                    if state == "disabled":
+                        subchild['values'] = ["jpeg_dct"] if self.img_path.get().lower().endswith(
+                            (".jpg", ".jpeg")) else ["audio_lsb"]
+                    else:
+                        subchild['values'] = list(STEGANO_METHODS.keys())
+                    subchild.config(state=state)
+                    break
 
     def on_drop_extract_image(self, event: tk.Event) -> None:
         path = event.data.strip('{}')
@@ -5165,8 +5516,10 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         self.update_size_info()
 
     def update_size_info(self) -> None:
+        """Обновляет информацию о размере с учётом JPEG DCT"""
         import os
         import time
+
         current_time = time.time()
         if current_time - self.last_update_time < 0.2:
             return
@@ -5176,6 +5529,7 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         self.required_size_label.config(text="📏 Требуется: выберите данные", style="TLabel")
         for _, lbl in self.capacity_labels.items():
             lbl.config(text=f"{lbl.cget('text').split(':')[0]}: ожидание...", style="Secondary.TLabel")
+
         if self.usage_label:
             self.usage_label.config(text="📈 Заполнение выбранного метода: не рассчитано")
         if self.usage_bar:
@@ -5184,148 +5538,118 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
 
         try:
             img_path = self.img_path.get()
-            q = os.path.splitext(img_path)[1].lower()
             if not img_path or not os.path.exists(img_path):
-                if q == ".wav":
+                ext = os.path.splitext(img_path)[1].lower() if img_path else ""
+                if ext == '.wav':
                     self.required_size_label.config(text="❌ Аудиофайл-контейнер не выбран", style="Error.TLabel")
                 else:
                     self.required_size_label.config(text="❌ Изображение-контейнер не выбран", style="Error.TLabel")
                 return
 
-            ext = os.path.splitext(img_path)[1].lower()
+            # Получаем информацию о файле
+            w, h, available_bits = ImageProcessor.get_image_info(img_path)
 
-            # WAV-ветка: отдельный расчёт вместимости
-            if ext == ".wav":
-                import wave
-                try:
-                    with wave.open(img_path, 'rb') as wav:
-                        frame_count = wav.getnframes()
-                    WAV_HEADER_BITS = (44 + 12) * 8
-                    available_data_bits = max(0, frame_count - WAV_HEADER_BITS)
-                    available_data_bytes = available_data_bits // 8
-
-                    # Размер данных для скрытия
-                    if self.data_type.get() == "text":
-                        text = self.text_input.get("1.0", tk.END).strip()
-                        required_data_bytes = len(text.encode('utf-8')) if text else 0
-                    else:
-                        file_path = self.file_path_var.get()
-                        required_data_bytes = os.path.getsize(file_path) if os.path.exists(file_path) else 0
-
-                    self.required_size_label.config(
-                        text=f"📏 Требуется: {Utils.format_size(required_data_bytes)}",
-                        style="TLabel"
-                    )
-
-                    info_text = f"💿 WAV: {Utils.format_size(available_data_bytes)} ({(required_data_bytes / available_data_bytes * 100 if available_data_bytes else 0):.1f}%)"
-                    for lbl in self.capacity_labels.values():
-                        lbl.config(text=info_text, style="Secondary.TLabel")
-
-                    usage_percent = (
-                            required_data_bytes * 8 / available_data_bits * 100) if available_data_bits > 0 else 999
-                    if self.usage_label:
-                        self.usage_label.config(text=f"📈 Заполнение WAV: {usage_percent:.1f}%")
-                    if self.usage_bar:
-                        self.usage_var.set(min(100.0, usage_percent if usage_percent >= 0 else 0))
-                        if usage_percent <= 70:
-                            self.usage_bar.config(style="UsageGreen.Horizontal.TProgressbar")
-                        elif usage_percent <= 100:
-                            self.usage_bar.config(style="UsageYellow.Horizontal.TProgressbar")
-                        else:
-                            self.usage_bar.config(style="UsageRed.Horizontal.TProgressbar")
-                    return
-                except Exception as e:
-                    self.required_size_label.config(text=f"❌ Ошибка WAV: {Utils.truncate_path(str(e), 50)}",
-                                                    style="Error.TLabel")
-                    return
-
-            # Обычная ветка для изображений
-            w, h, _ = ImageProcessor.get_image_info(img_path)
-            total_pixels = w * h
-
+            # Рассчитываем требуемый размер данных
             if self.data_type.get() == "text":
-                text = self.text_input.get("1.0", tk.END).strip()
-                if not text:
-                    self.required_size_label.config(text="⚠️ Текст не введён", style="Warning.TLabel")
-                    return
-                required_data_bytes = len(text.encode('utf-8'))
+                data_text = self.text_input.get("1.0", tk.END).strip()
+                if not data_text:
+                    required_bits = 0
+                    required_text = "0 B"
+                else:
+                    # Добавляем заголовок
+                    header_size = 12 if self.method_var.get() == "jpeg_dct" else HEADER_FULL_LEN
+                    required_bytes = len(data_text.encode('utf-8')) + header_size
+                    required_bits = required_bytes * 8
+                    required_text = Utils.format_size(required_bytes)
             else:
                 file_path = self.file_path_var.get()
-                if not os.path.exists(file_path):
-                    self.required_size_label.config(text="⚠️ Файл не выбран", style="Warning.TLabel")
-                    return
-                required_data_bytes = os.path.getsize(file_path)
+                if not file_path or not os.path.exists(file_path):
+                    required_bits = 0
+                    required_text = "0 B"
+                else:
+                    file_size = os.path.getsize(file_path)
+                    header_size = 12 if self.method_var.get() == "jpeg_dct" else HEADER_FULL_LEN
+                    required_bytes = file_size + header_size
+                    required_bits = required_bytes * 8
+                    required_text = Utils.format_size(required_bytes)
 
+            # Обновляем информацию о требуемом размере
             self.required_size_label.config(
-                text=f"📏 Требуется для данных: {Utils.format_size(required_data_bytes)}",
-                style="TLabel"
+                text=f"📏 Требуется: {required_text} ({required_bits} бит)",
+                style="TLabel" if required_bits > 0 else "Warning.TLabel"
             )
 
-            capacity_pairs = [
-                (["lsb", "noise"], "🟢 LSB/Adaptive-Noise"),
-                (["aelsb", "hill"], "🔵 AELSB/HILL")
-            ]
-
-            for methods, label_text in capacity_pairs:
-                method = methods[0]
-                available_data_bits = ImageProcessor.get_capacity_by_method(total_pixels, method)
-                available_data_bytes = available_data_bits / 8
-
-                if available_data_bits <= 0:
-                    self.capacity_labels[method].config(
-                        text=f"{label_text}: 0 B",
-                        style="Error.TLabel"
+            # Обновляем информацию о вместимости для каждого метода
+            for method, label in self.capacity_labels.items():
+                try:
+                    capacity_bits = ImageProcessor.get_capacity_by_method(
+                        available_bits, method, w, h
                     )
-                    continue
+                    capacity_bytes = capacity_bits // 8
 
-                usage_percent = (
-                                        required_data_bytes * 8 / available_data_bits) * 100 if available_data_bits > 0 else 999
+                    if method == "jpeg_dct":
+                        method_name = "JPEG DCT"
+                    else:
+                        method_name = STEGANO_METHODS.get(method, method)
 
-                if usage_percent <= 70:
-                    style = "Success.TLabel"
-                elif usage_percent <= 100:
-                    style = "Warning.TLabel"
-                else:
-                    style = "Error.TLabel"
+                    if capacity_bytes > 0:
+                        label.config(
+                            text=f"{method_name}: {Utils.format_size(capacity_bytes)} ({capacity_bits} бит)",
+                            style="Success.TLabel" if capacity_bits >= required_bits else "Error.TLabel"
+                        )
+                    else:
+                        label.config(
+                            text=f"{method_name}: нет данных",
+                            style="Error.TLabel"
+                        )
+                except Exception as e:
+                    print(f"Ошибка расчёта для метода {method}: {e}")
 
-                selected_marker = ""
-                for m in methods:
-                    if m == self.method_var.get():
-                        selected_marker = "▶ "
-                        break
-
-                info_text = (f"{selected_marker}{label_text}: "
-                             f"{Utils.format_size(available_data_bytes)} "
-                             f"({usage_percent:.1f}%)")
-
-                for m in methods:
-                    self.capacity_labels[m].config(text=info_text, style=style)
-
-            # Индикатор заполнения для выбранного метода
+            # Обновляем индикатор заполнения для выбранного метода
             selected_method = self.method_var.get()
-            sel_bits = ImageProcessor.get_capacity_by_method(total_pixels, selected_method)
+            capacity_bits = ImageProcessor.get_capacity_by_method(
+                available_bits, selected_method, w, h
+            )
 
-            if sel_bits > 0:
-                sel_usage = min(999.0, (required_data_bytes * 8 / sel_bits) * 100)
-                self.usage_var.set(min(100.0, sel_usage if sel_usage >= 0 else 0))
+            if capacity_bits > 0 and required_bits > 0:
+                usage_percent = min(100, (required_bits / capacity_bits) * 100)
+                self.usage_var.set(usage_percent)
 
-                if sel_usage <= 70:
-                    self.usage_bar.config(style="UsageGreen.Horizontal.TProgressbar")
-                elif sel_usage <= 100:
-                    self.usage_bar.config(style="UsageYellow.Horizontal.TProgressbar")
+                # Выбираем цвет в зависимости от заполнения
+                if usage_percent <= 70:
+                    style = "UsageGreen.Horizontal.TProgressbar"
+                    color_text = "🟢 Норма"
+                elif usage_percent <= 90:
+                    style = "UsageYellow.Horizontal.TProgressbar"
+                    color_text = "🟡 Внимание"
                 else:
-                    self.usage_bar.config(style="UsageRed.Horizontal.TProgressbar")
+                    style = "UsageRed.Horizontal.TProgressbar"
+                    color_text = "🔴 Переполнение"
 
-                self.usage_label.config(text=f"📈 Заполнение выбранного метода: {sel_usage:.1f}%")
+                self.usage_bar.config(style=style)
+                self.usage_label.config(
+                    text=f"📈 Заполнение: {usage_percent:.1f}% ({color_text})",
+                    style="Success.TLabel" if usage_percent <= 70 else
+                    "Warning.TLabel" if usage_percent <= 90 else "Error.TLabel"
+                )
+            else:
+                self.usage_var.set(0)
+                self.usage_label.config(
+                    text="📈 Заполнение: не рассчитано",
+                    style="Secondary.TLabel"
+                )
 
         except Exception as e:
-            self.required_size_label.config(text=f"❌ Ошибка: {Utils.truncate_path(str(e), 50)}", style="Error.TLabel")
+            print(f"Ошибка обновления информации о размере: {e}")
+            self.required_size_label.config(
+                text="❌ Ошибка расчёта размера",
+                style="Error.TLabel"
+            )
 
     def update_thumbnail(self, path: str, target_label: tk.Widget) -> None:
         ext = os.path.splitext(path)[1].lower()
         if ext == ".wav":
-            target_label.configure(image='', text='🎵 WAV аудиофайл\
-(предпросмотр невозможен)')
+            target_label.configure(image='', text='🎵 WAV аудиофайл(предпросмотр невозможен)')
             target_label.image = None
             return
 
