@@ -28,7 +28,7 @@ from tkinterdnd2 import DND_FILES, TkinterDnD
 # ───────────────────────────────────────────────
 # 🎨 ГЛОБАЛЬНЫЕ НАСТРОЙКИ (УЛУЧШЕННЫЕ)
 # ───────────────────────────────────────────────
-VERSION = "2.0.0"
+VERSION = "2.1.0"
 AUTHOR = "MustaNG"
 BUILD_DATE = time.strftime("%Y-%m-%d")
 
@@ -1882,10 +1882,1473 @@ class HistoryLog:
 
 
 # ───────────────────────────────────────────────
+# 📦 КЛАСС ПАКЕТНОЙ ОБРАБОТКИ (BATCH PROCESSING)
+# ───────────────────────────────────────────────
+class BatchProcessor:
+    """Класс для пакетной обработки файлов"""
+
+    def __init__(self, app):
+        self.app = app
+        self.batch_queue = []
+        self.processing = False
+        self.current_index = 0
+        self.total_files = 0
+        self.success_count = 0
+        self.fail_count = 0
+        self.cancel_requested = False
+        self.results = []
+
+    def add_to_batch(self, file_paths, operation_type, params):
+        """Добавляет файлы в очередь на обработку"""
+        for file_path in file_paths:
+            task = {
+                'path': file_path,
+                'operation': operation_type,
+                'params': params.copy(),
+                'status': 'pending',
+                'result': None,
+                'error': None
+            }
+            self.batch_queue.append(task)
+
+    def clear_batch(self):
+        """Очищает очередь пакетной обработки"""
+        self.batch_queue = []
+        self.results = []
+        self.current_index = 0
+        self.success_count = 0
+        self.fail_count = 0
+
+    def get_batch_info(self):
+        """Возвращает информацию о текущей пакетной задаче"""
+        return {
+            'total': len(self.batch_queue),
+            'pending': len([t for t in self.batch_queue if t['status'] == 'pending']),
+            'processing': len([t for t in self.batch_queue if t['status'] == 'processing']),
+            'completed': len([t for t in self.batch_queue if t['status'] == 'completed']),
+            'failed': len([t for t in self.batch_queue if t['status'] == 'failed']),
+            'success_count': self.success_count,
+            'fail_count': self.fail_count,
+            'current_index': self.current_index
+        }
+
+    # В классе BatchProcessor обновите метод process_batch:
+    def process_batch(self, progress_callback=None, completion_callback=None):
+        """Обрабатывает очередь файлов"""
+        if self.processing:
+            raise Exception("Пакетная обработка уже выполняется")
+
+        self.processing = True
+        self.cancel_requested = False
+        self.total_files = len(self.batch_queue)
+        self.success_count = 0
+        self.fail_count = 0
+        self.current_index = 0  # Сбрасываем индекс
+
+        def process_next():
+            try:
+                if self.cancel_requested or self.current_index >= len(self.batch_queue):
+                    self.processing = False
+                    if completion_callback:
+                        completion_callback(self.results)
+                    return
+
+                task = self.batch_queue[self.current_index]
+                task['status'] = 'processing'
+
+                try:
+                    if progress_callback:
+                        progress = (self.current_index / self.total_files) * 100
+                        progress_callback(progress, f"Обработка файла {self.current_index + 1} из {self.total_files}")
+
+                    result = self.process_single_task(task)
+
+                    if result['success']:
+                        task['status'] = 'completed'
+                        task['result'] = result['data']
+                        self.success_count += 1
+                    else:
+                        task['status'] = 'failed'
+                        task['error'] = result['error']
+                        self.fail_count += 1
+
+                    self.results.append(result)
+
+                except Exception as e:
+                    task['status'] = 'failed'
+                    task['error'] = str(e)
+                    self.fail_count += 1
+                    self.results.append({
+                        'success': False,
+                        'error': str(e),
+                        'file': task['path']
+                    })
+
+                self.current_index += 1
+
+                # Продолжаем обработку с небольшой задержкой
+                if not self.cancel_requested:
+                    self.app.root.after(10, process_next)
+                else:
+                    self.processing = False
+                    if completion_callback:
+                        completion_callback(self.results)
+
+            except Exception as e:
+                # Гарантируем вызов completion_callback даже при ошибке
+                self.processing = False
+                self.results.append({
+                    'success': False,
+                    'error': f"Критическая ошибка в процессе: {str(e)}",
+                    'file': 'system'
+                })
+                if completion_callback:
+                    completion_callback(self.results)
+
+        # Запускаем асинхронную обработку
+        try:
+            self.app.root.after(100, process_next)
+        except Exception as e:
+            self.processing = False
+            if completion_callback:
+                completion_callback([{
+                    'success': False,
+                    'error': f"Не удалось запустить обработку: {str(e)}",
+                    'file': 'system'
+                }])
+
+    def process_single_task(self, task):
+        """Обрабатывает одну задачу"""
+        file_path = task['path']
+        operation = task['operation']
+        params = task['params']
+
+        try:
+            if operation == 'hide':
+                return self.process_hide(file_path, params)
+            elif operation == 'extract':
+                return self.process_extract(file_path, params)
+            elif operation == 'analyze':
+                return self.process_analyze(file_path, params)
+            else:
+                raise ValueError(f"Неизвестная операция: {operation}")
+
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e),
+                'file': file_path,
+                'operation': operation
+            }
+
+    def process_hide(self, container_path, params):
+        """Обрабатывает операцию скрытия"""
+        # Проверка существования файла
+        if not os.path.exists(container_path):
+            raise FileNotFoundError(f"Файл не найден: {container_path}")
+
+        # Проверка поддерживаемого формата
+        if not Utils.is_supported_container(container_path):
+            raise ValueError(f"Неподдерживаемый формат файла: {container_path}")
+
+        # Подготовка данных
+        data = params.get('data')
+        if data is None:
+            raise ValueError("Данные для скрытия не указаны")
+
+        # Подготовка выходного пути
+        output_dir = params.get('output_dir', os.path.dirname(container_path))
+        output_name = params.get('output_name',
+                                 f"{os.path.splitext(os.path.basename(container_path))[0]}_stego.png")
+        output_path = os.path.join(output_dir, output_name)
+
+        # Проверка перезаписи
+        if os.path.exists(output_path) and not params.get('overwrite', False):
+            counter = 1
+            while os.path.exists(output_path):
+                name, ext = os.path.splitext(output_name)
+                output_path = os.path.join(output_dir, f"{name}_{counter}{ext}")
+                counter += 1
+
+        # Выполнение скрытия
+        method = params.get('method', 'lsb')
+        password = params.get('password', '')
+
+        # Определяем правильный класс для обработки
+        if container_path.lower().endswith('.wav'):
+            # Аудио обработка
+            AudioStego.hide_lsb_wav(container_path, data, output_path)
+        elif container_path.lower().endswith(('.jpg', '.jpeg')) and method == 'jpeg_dct':
+            # JPEG DCT обработка
+            JPEGStego.hide_dct(container_path, data, password, output_path)
+        else:
+            # Обычная обработка изображений
+            ImageProcessor.hide_data(
+                container_path, data, password, output_path,
+                method=method,
+                compression_level=params.get('compression_level', 9)
+            )
+
+        return {
+            'success': True,
+            'file': container_path,
+            'output': output_path,
+            'operation': 'hide',
+            'method': method,
+            'size': os.path.getsize(output_path)
+        }
+
+    # В классе BatchProcessor исправьте метод process_extract:
+    def process_extract(self, stego_path, params):
+        """Обрабатывает операцию извлечения - ИСПРАВЛЕННЫЙ"""
+        # Проверка существования файла
+        if not os.path.exists(stego_path):
+            raise FileNotFoundError(f"Файл не найден: {stego_path}")
+
+        # Подготовка выходного пути
+        output_dir = params.get('output_dir', os.path.dirname(stego_path))
+        os.makedirs(output_dir, exist_ok=True)
+
+        # Генерируем уникальное имя файла
+        base_name = os.path.splitext(os.path.basename(stego_path))[0]
+        output_name = f"extracted_{base_name}"
+
+        # Проверяем, является ли файл аудио
+        ext = os.path.splitext(stego_path)[1].lower()
+        if ext == '.wav':
+            # Для аудио файлов
+            extracted_data = AudioStego.extract_lsb_wav(stego_path)
+        else:
+            # Для изображений
+            method = params.get('method')
+            password = params.get('password', '')
+
+            try:
+                # Пробуем извлечь данные
+                extracted_data = ImageProcessor.extract_data(
+                    stego_path,
+                    password,
+                    method
+                )
+            except Exception as e:
+                # Если не получилось с указанным методом, пробуем автоопределение
+                if method:
+                    try:
+                        extracted_data = ImageProcessor.extract_data(stego_path, password)
+                    except:
+                        raise e
+                else:
+                    raise e
+
+        # Определяем тип данных и расширение
+        data_type = self.guess_data_type(extracted_data[:100])  # Проверяем первые 100 байт
+
+        extensions = {
+            'text': '.txt',
+            'json': '.json',
+            'png': '.png',
+            'jpeg': '.jpg',
+            'jpg': '.jpg',
+            'gif': '.gif',
+            'bmp': '.bmp',
+            'zip': '.zip',
+            'rar': '.rar',
+            'pdf': '.pdf',
+            'binary': '.bin'
+        }
+
+        ext = extensions.get(data_type, '.bin')
+        output_path = os.path.join(output_dir, f"{output_name}{ext}")
+
+        # Сохранение данных
+        if params.get('auto_save', True):
+            # Проверяем, не существует ли уже файл
+            counter = 1
+            original_output_path = output_path
+            while os.path.exists(output_path) and not params.get('overwrite', False):
+                name, ext = os.path.splitext(original_output_path)
+                output_path = f"{name}_{counter}{ext}"
+                counter += 1
+
+            with open(output_path, 'wb') as f:
+                f.write(extracted_data)
+
+        # Анализ данных
+        data_info = self.analyze_extracted_data(extracted_data)
+
+        return {
+            'success': True,
+            'file': stego_path,
+            'output': output_path if params.get('auto_save', True) else None,
+            'data': extracted_data,
+            'data_info': data_info,
+            'size': len(extracted_data),
+            'operation': 'extract',
+            'data_type': data_type
+        }
+
+    def process_analyze(self, file_path, params):
+        """Анализирует файл"""
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"Файл не найден: {file_path}")
+
+        # Получаем информацию о файле
+        file_info = Utils.get_file_info(file_path)
+
+        # Проверяем на наличие скрытых данных
+        has_stego = False
+        stego_info = None
+
+        try:
+            # Пробуем извлечь данные (только проверка)
+            test_data = ImageProcessor.extract_data(file_path, '')
+            has_stego = True
+            stego_info = {
+                'size': len(test_data),
+                'method': 'detected',
+                'data_type': self.guess_data_type(test_data)
+            }
+        except:
+            pass
+
+        # Проверяем вместимость
+        capacity_info = {}
+        if file_info['type'] == 'image':
+            w, h, bits = ImageProcessor.get_image_info(file_path)
+            for method in ['lsb', 'noise', 'aelsb', 'hill']:
+                capacity = ImageProcessor.get_capacity_by_method(bits, method, w, h)
+                capacity_info[method] = capacity
+
+        return {
+            'success': True,
+            'file': file_path,
+            'file_info': file_info,
+            'has_stego': has_stego,
+            'stego_info': stego_info,
+            'capacity_info': capacity_info,
+            'operation': 'analyze'
+        }
+
+    def analyze_extracted_data(self, data):
+        """Анализирует извлеченные данные"""
+        if not data:
+            return {'type': 'empty', 'size': 0}
+
+        # Пытаемся определить тип данных
+        try:
+            # Проверка на текст
+            text = data.decode('utf-8', errors='ignore')
+            if len(text) > len(data) * 0.7:  # Большая часть данных - текст
+                return {
+                    'type': 'text',
+                    'size': len(data),
+                    'preview': text[:100],
+                    'is_utf8': True
+                }
+        except:
+            pass
+
+        # Проверка на JSON
+        try:
+            json.loads(data.decode('utf-8'))
+            return {'type': 'json', 'size': len(data)}
+        except:
+            pass
+
+        # Проверка на изображение
+        try:
+            from PIL import Image
+            import io
+            img = Image.open(io.BytesIO(data))
+            return {
+                'type': 'image',
+                'size': len(data),
+                'format': img.format,
+                'dimensions': f"{img.width}x{img.height}"
+            }
+        except:
+            pass
+
+        # Проверка на архив
+        if data[:4] in [b'PK\x03\x04', b'Rar!', b'7z\xBC\xAF']:
+            return {'type': 'archive', 'size': len(data)}
+
+        # По умолчанию - бинарные данные
+        return {'type': 'binary', 'size': len(data)}
+
+    def guess_data_type(self, data):
+        """Пытается определить тип данных"""
+        if not data:
+            return 'unknown'
+
+        # Проверка на текст
+        try:
+            text = data.decode('utf-8', errors='ignore')
+            text_ratio = len(text) / len(data)
+            if text_ratio > 0.8:
+                return 'text'
+            elif text_ratio > 0.5:
+                return 'mixed'
+        except:
+            pass
+
+        # Проверка магических чисел
+        magic_numbers = {
+            b'\x89PNG\r\n\x1a\n': 'png',
+            b'\xff\xd8\xff': 'jpeg',
+            b'GIF': 'gif',
+            b'BM': 'bmp',
+            b'PK\x03\x04': 'zip',
+            b'Rar!': 'rar',
+            b'%PDF': 'pdf'
+        }
+
+        for magic, filetype in magic_numbers.items():
+            if data.startswith(magic):
+                return filetype
+
+        return 'binary'
+
+    def cancel_processing(self):
+        """Отменяет текущую пакетную обработку"""
+        self.cancel_requested = True
+
+    def export_results(self, output_path):
+        """Экспортирует результаты обработки в JSON"""
+        results_summary = {
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'total_files': self.total_files,
+            'successful': self.success_count,
+            'failed': self.fail_count,
+            'success_rate': (self.success_count / self.total_files * 100) if self.total_files > 0 else 0,
+            'results': self.results
+        }
+
+        try:
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(results_summary, f, indent=2, ensure_ascii=False, default=str)
+            return True
+        except Exception as e:
+            print(f"Ошибка экспорта результатов: {e}")
+            return False
+
+
+# ───────────────────────────────────────────────
+# 🎯 КЛАСС ИНТЕРФЕЙСА ПАКЕТНОЙ ОБРАБОТКИ
+# ───────────────────────────────────────────────
+class BatchProcessingUI:
+    """Интерфейс для пакетной обработки с прокруткой"""
+
+    def __init__(self, parent, app):
+        self.parent = parent
+        self.app = app
+        self.batch_processor = BatchProcessor(app)
+
+        # Переменные
+        self.selected_files = []
+        self.selected_extract_files = []
+        self.selected_analyze_files = []
+
+        self.output_dir = tk.StringVar(value=os.path.expanduser("~"))
+        self.operation_type = tk.StringVar(value="hide")
+        self.method_var = tk.StringVar(value="lsb")
+        self.overwrite_var = tk.BooleanVar(value=False)
+        self.auto_save_var = tk.BooleanVar(value=True)
+        self.hide_data_type = tk.StringVar(value="text")
+        self.hide_file_path = tk.StringVar()
+        self.hide_password = tk.StringVar()
+        self.extract_password = tk.StringVar()
+        self.extract_method = tk.StringVar()
+        self.extract_output_dir = tk.StringVar(value=os.path.expanduser("~"))
+
+        self.setup_ui()
+
+    # В классе BatchProcessingUI добавьте метод очистки состояния:
+    def reset_processing_state(self):
+        """Сбрасывает состояние обработки"""
+        self.batch_processor.clear_batch()
+        self.batch_status_label.config(text="✅ Готов к обработке")
+        self.batch_progress_var.set(0)
+        self.disable_buttons(False)
+
+        # Сброс статистики
+        self.stats_processed.config(text="Обработано: 0")
+        self.stats_success.config(text="Успешно: 0")
+        self.stats_failed.config(text="Ошибки: 0")
+
+    def setup_ui(self):
+        """Создает интерфейс пакетной обработки с прокруткой"""
+        # Основной контейнер с прокруткой
+        main_container = ttk.Frame(self.parent)
+        main_container.pack(fill=tk.BOTH, expand=True)
+
+        # Canvas для прокрутки
+        self.canvas = tk.Canvas(main_container, bg=self.app.colors["bg"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(main_container, orient="vertical", command=self.canvas.yview)
+
+        # Прокручиваемый фрейм
+        self.scrollable_frame = ttk.Frame(self.canvas, style="Card.TFrame")
+
+        # Настройка прокрутки
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+        )
+
+        # Создаем окно на canvas
+        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Размещаем элементы
+        self.canvas.pack(side="left", fill="both", expand=True, padx=1)
+        scrollbar.pack(side="right", fill="y")
+
+        # Связываем колесо мыши
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+
+        # Создаем контент
+        self.create_content()
+
+    def _on_mousewheel(self, event):
+        """Обработка колеса мыши для прокрутки"""
+        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def create_content(self):
+        """Создает содержимое интерфейса"""
+        # Заголовок
+        ttk.Label(
+            self.scrollable_frame,
+            text="📦 Пакетная обработка файлов",
+            font=("Segoe UI", 18, "bold"),
+            style="Title.TLabel"
+        ).pack(pady=(20, 10))
+
+        ttk.Label(
+            self.scrollable_frame,
+            text="Одновременная обработка до 5 файлов",
+            font=("Segoe UI", 11),
+            style="Subtitle.TLabel"
+        ).pack(pady=(0, 20))
+
+        # Создаем Notebook для разных операций
+        self.batch_notebook = ttk.Notebook(self.scrollable_frame)
+        self.batch_notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 10))
+
+        # Вкладка скрытия
+        self.hide_tab = self.create_hide_tab()
+        self.batch_notebook.add(self.hide_tab, text="📤 Скрытие")
+
+        # Вкладка извлечения
+        self.extract_tab = self.create_extract_tab()
+        self.batch_notebook.add(self.extract_tab, text="📥 Извлечение")
+
+        # Вкладка анализа
+        self.analyze_tab = self.create_analyze_tab()
+        self.batch_notebook.add(self.analyze_tab, text="🔍 Анализ")
+
+        # Статусная панель
+        self.create_status_panel()
+
+        # Кнопки управления внизу
+        self.create_bottom_buttons()
+
+    def create_hide_tab(self):
+        """Создает вкладку для пакетного скрытия"""
+        tab = ttk.Frame(self.batch_notebook, style="Card.TFrame")
+
+        # Используем сетку для компактности
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_columnconfigure(1, weight=1)
+
+        row = 0
+
+        # Выбор файлов
+        files_frame = ttk.LabelFrame(tab, text="📁 Выбор контейнеров (до 5)", padding=10)
+        files_frame.grid(row=row, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        files_frame.grid_columnconfigure(0, weight=1)
+
+        # Список файлов с прокруткой
+        list_frame = ttk.Frame(files_frame)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.files_listbox = tk.Listbox(
+            list_frame,
+            height=4,
+            bg=self.app.colors["card"],
+            fg=self.app.colors["text"],
+            selectbackground=self.app.colors["accent"],
+            selectforeground="white",
+            font=("Segoe UI", 9)
+        )
+        self.files_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.files_listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.files_listbox.config(yscrollcommand=scrollbar.set)
+
+        # Кнопки управления файлами
+        btn_frame = ttk.Frame(files_frame)
+        btn_frame.pack(fill=tk.X)
+
+        ttk.Button(
+            btn_frame,
+            text="➕ Добавить файлы",
+            command=self.add_files,
+            style="IconButton.TButton",
+            width=15
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        ttk.Button(
+            btn_frame,
+            text="🗑️ Очистить",
+            command=self.clear_files,
+            style="IconButton.TButton",
+            width=10
+        ).pack(side=tk.LEFT)
+
+        row += 1
+
+        # Данные для скрытия - левая колонка
+        data_frame = ttk.LabelFrame(tab, text="📋 Данные для скрытия", padding=10)
+        data_frame.grid(row=row, column=0, sticky="nsew", padx=5, pady=5)
+
+        # Тип данных
+        ttk.Label(data_frame, text="Тип данных:", style="TLabel").pack(anchor="w", pady=(0, 5))
+
+        type_frame = ttk.Frame(data_frame)
+        type_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Radiobutton(
+            type_frame,
+            text="Текст",
+            variable=self.hide_data_type,
+            value="text",
+            command=self.update_hide_data_input
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Radiobutton(
+            type_frame,
+            text="Файл",
+            variable=self.hide_data_type,
+            value="file",
+            command=self.update_hide_data_input
+        ).pack(side=tk.LEFT)
+
+        # Текстовое поле
+        self.hide_text_frame = ttk.Frame(data_frame)
+        self.hide_text_frame.pack(fill=tk.BOTH, expand=True)
+
+        self.hide_text = scrolledtext.ScrolledText(
+            self.hide_text_frame,
+            height=6,
+            wrap=tk.WORD,
+            bg=self.app.colors["card"],
+            fg=self.app.colors["text"],
+            font=("Segoe UI", 9)
+        )
+        self.hide_text.pack(fill=tk.BOTH, expand=True)
+
+        # Выбор файла (скрыто по умолчанию)
+        self.hide_file_frame = ttk.Frame(data_frame)
+
+        file_select_frame = ttk.Frame(self.hide_file_frame)
+        file_select_frame.pack(fill=tk.X, pady=(0, 5))
+
+        self.hide_file_path = tk.StringVar()
+        ttk.Entry(
+            file_select_frame,
+            textvariable=self.hide_file_path,
+            state='readonly',
+            style="TEntry"
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        ttk.Button(
+            file_select_frame,
+            text="📂",
+            command=self.select_hide_file,
+            style="IconButton.TButton"
+        ).pack(side=tk.LEFT)
+
+        # Настройки - правая колонка
+        settings_frame = ttk.LabelFrame(tab, text="⚙️ Настройки", padding=10)
+        settings_frame.grid(row=row, column=1, sticky="nsew", padx=5, pady=5)
+
+        # Метод
+        ttk.Label(settings_frame, text="Метод скрытия:", style="TLabel").pack(anchor="w", pady=(0, 5))
+
+        self.hide_method_combo = ttk.Combobox(
+            settings_frame,
+            textvariable=self.method_var,
+            values=list(STEGANO_METHODS.keys()),
+            state="readonly",
+            width=20
+        )
+        self.hide_method_combo.pack(fill=tk.X, pady=(0, 10))
+
+        # Пароль
+        ttk.Label(settings_frame, text="Пароль (опционально):", style="TLabel").pack(anchor="w", pady=(0, 5))
+
+        ttk.Entry(
+            settings_frame,
+            textvariable=self.hide_password,
+            show="●",
+            style="TEntry"
+        ).pack(fill=tk.X, pady=(0, 10))
+
+        # Выходная директория
+        ttk.Label(settings_frame, text="Папка для сохранения:", style="TLabel").pack(anchor="w", pady=(0, 5))
+
+        output_frame = ttk.Frame(settings_frame)
+        output_frame.pack(fill=tk.X)
+
+        ttk.Entry(
+            output_frame,
+            textvariable=self.output_dir,
+            style="TEntry"
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        ttk.Button(
+            output_frame,
+            text="📂",
+            command=self.select_output_dir,
+            style="IconButton.TButton"
+        ).pack(side=tk.LEFT)
+
+        # Опции
+        options_frame = ttk.Frame(settings_frame)
+        options_frame.pack(fill=tk.X, pady=(10, 0))
+
+        ttk.Checkbutton(
+            options_frame,
+            text="Перезаписывать существующие файлы",
+            variable=self.overwrite_var,
+            style="TCheckbutton"
+        ).pack(anchor="w")
+
+        row += 1
+
+        # Кнопка запуска (во всю ширину)
+        self.hide_button = ttk.Button(
+            tab,
+            text="🚀 Начать пакетное скрытие",
+            style="Accent.TButton",
+            command=self.start_batch_hide
+        )
+        self.hide_button.grid(row=row, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
+
+        # Инициализация
+        self.hide_text_frame.pack()
+        self.hide_file_frame.pack_forget()
+
+        return tab
+
+    def create_extract_tab(self):
+        """Создает вкладку для пакетного извлечения"""
+        tab = ttk.Frame(self.batch_notebook, style="Card.TFrame")
+
+        # Используем сетку
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_columnconfigure(1, weight=1)
+
+        row = 0
+
+        # Выбор файлов
+        files_frame = ttk.LabelFrame(tab, text="📁 Выбор стего-файлов (до 5)", padding=10)
+        files_frame.grid(row=row, column=0, columnspan=2, sticky="nsew", padx=5, pady=5)
+        files_frame.grid_columnconfigure(0, weight=1)
+
+        # Список файлов с прокруткой
+        list_frame = ttk.Frame(files_frame)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.extract_files_listbox = tk.Listbox(
+            list_frame,
+            height=4,
+            bg=self.app.colors["card"],
+            fg=self.app.colors["text"],
+            selectbackground=self.app.colors["accent"],
+            selectforeground="white",
+            font=("Segoe UI", 9)
+        )
+        self.extract_files_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.extract_files_listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.extract_files_listbox.config(yscrollcommand=scrollbar.set)
+
+        # Кнопки
+        btn_frame = ttk.Frame(files_frame)
+        btn_frame.pack(fill=tk.X)
+
+        ttk.Button(
+            btn_frame,
+            text="➕ Добавить файлы",
+            command=self.add_extract_files,
+            style="IconButton.TButton",
+            width=15
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        ttk.Button(
+            btn_frame,
+            text="🗑️ Очистить",
+            command=lambda: self.extract_files_listbox.delete(0, tk.END) or self.selected_extract_files.clear(),
+            style="IconButton.TButton",
+            width=10
+        ).pack(side=tk.LEFT)
+
+        row += 1
+
+        # Настройки извлечения - левая колонка
+        settings_frame = ttk.LabelFrame(tab, text="⚙️ Настройки извлечения", padding=10)
+        settings_frame.grid(row=row, column=0, sticky="nsew", padx=5, pady=5)
+
+        # Пароль
+        ttk.Label(settings_frame, text="Пароль (если требуется):", style="TLabel").pack(anchor="w", pady=(0, 5))
+
+        ttk.Entry(
+            settings_frame,
+            textvariable=self.extract_password,
+            show="●",
+            style="TEntry"
+        ).pack(fill=tk.X, pady=(0, 10))
+
+        # Метод
+        ttk.Label(settings_frame, text="Метод (авто если пусто):", style="TLabel").pack(anchor="w", pady=(0, 5))
+
+        ttk.Combobox(
+            settings_frame,
+            textvariable=self.extract_method,
+            values=["", "lsb", "noise", "aelsb", "hill", "audio_lsb", "jpeg_dct"],
+            state="readonly",
+            width=20
+        ).pack(fill=tk.X, pady=(0, 10))
+
+        # Дополнительные настройки - правая колонка
+        output_frame = ttk.LabelFrame(tab, text="📁 Сохранение", padding=10)
+        output_frame.grid(row=row, column=1, sticky="nsew", padx=5, pady=5)
+
+        ttk.Label(output_frame, text="Папка для сохранения:", style="TLabel").pack(anchor="w", pady=(0, 5))
+
+        dir_frame = ttk.Frame(output_frame)
+        dir_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Entry(
+            dir_frame,
+            textvariable=self.extract_output_dir,
+            style="TEntry"
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        ttk.Button(
+            dir_frame,
+            text="📂",
+            command=self.select_extract_output_dir,
+            style="IconButton.TButton"
+        ).pack(side=tk.LEFT)
+
+        # Опции
+        ttk.Checkbutton(
+            output_frame,
+            text="Автоматически сохранять извлеченные данные",
+            variable=self.auto_save_var,
+            style="TCheckbutton"
+        ).pack(anchor="w", pady=(5, 0))
+
+        row += 1
+
+        # Кнопка запуска
+        self.extract_button = ttk.Button(
+            tab,
+            text="🚀 Начать пакетное извлечение",
+            style="Accent.TButton",
+            command=self.start_batch_extract
+        )
+        self.extract_button.grid(row=row, column=0, columnspan=2, sticky="ew", padx=5, pady=10)
+
+        return tab
+
+    def create_analyze_tab(self):
+        """Создает вкладку для пакетного анализа"""
+        tab = ttk.Frame(self.batch_notebook, style="Card.TFrame")
+
+        # Используем сетку
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(0, weight=0)
+        tab.grid_rowconfigure(1, weight=1)
+
+        # Выбор файлов
+        files_frame = ttk.LabelFrame(tab, text="📁 Выбор файлов для анализа (до 5)", padding=10)
+        files_frame.grid(row=0, column=0, sticky="nsew", padx=5, pady=5)
+        files_frame.grid_columnconfigure(0, weight=1)
+
+        # Список файлов с прокруткой
+        list_frame = ttk.Frame(files_frame)
+        list_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.analyze_files_listbox = tk.Listbox(
+            list_frame,
+            height=3,
+            bg=self.app.colors["card"],
+            fg=self.app.colors["text"],
+            selectbackground=self.app.colors["accent"],
+            selectforeground="white",
+            font=("Segoe UI", 9)
+        )
+        self.analyze_files_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.analyze_files_listbox.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.analyze_files_listbox.config(yscrollcommand=scrollbar.set)
+
+        # Кнопки
+        btn_frame = ttk.Frame(files_frame)
+        btn_frame.pack(fill=tk.X)
+
+        ttk.Button(
+            btn_frame,
+            text="➕ Добавить файлы",
+            command=self.add_analyze_files,
+            style="IconButton.TButton",
+            width=15
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        ttk.Button(
+            btn_frame,
+            text="🗑️ Очистить",
+            command=lambda: self.analyze_files_listbox.delete(0, tk.END) or self.selected_analyze_files.clear(),
+            style="IconButton.TButton",
+            width=10
+        ).pack(side=tk.LEFT)
+
+        # Кнопка запуска анализа
+        self.analyze_button = ttk.Button(
+            files_frame,
+            text="🔍 Начать анализ",
+            style="Accent.TButton",
+            command=self.start_batch_analyze
+        )
+        self.analyze_button.pack(fill=tk.X, pady=(10, 0))
+
+        # Поле для результатов
+        results_frame = ttk.LabelFrame(tab, text="📊 Результаты анализа", padding=10)
+        results_frame.grid(row=1, column=0, sticky="nsew", padx=5, pady=5)
+        results_frame.grid_rowconfigure(0, weight=1)
+        results_frame.grid_columnconfigure(0, weight=1)
+
+        self.analyze_results_text = scrolledtext.ScrolledText(
+            results_frame,
+            wrap=tk.WORD,
+            bg=self.app.colors["card"],
+            fg=self.app.colors["text"],
+            font=("Consolas", 9),
+            state='disabled'
+        )
+        self.analyze_results_text.grid(row=0, column=0, sticky="nsew")
+
+        return tab
+
+    def create_status_panel(self):
+        """Создает панель статуса"""
+        status_frame = ttk.LabelFrame(self.scrollable_frame, text="📊 Статус обработки", padding=10)
+        status_frame.pack(fill=tk.X, padx=10, pady=(0, 10))
+
+        # Прогресс
+        self.batch_progress_var = tk.DoubleVar()
+        self.batch_progress = ttk.Progressbar(
+            status_frame,
+            variable=self.batch_progress_var,
+            maximum=100,
+            style="TProgressbar",
+            length=400
+        )
+        self.batch_progress.pack(fill=tk.X, pady=(0, 10))
+
+        # Статус
+        self.batch_status_label = ttk.Label(
+            status_frame,
+            text="✅ Готов к обработке",
+            font=("Segoe UI", 10),
+            style="TLabel"
+        )
+        self.batch_status_label.pack(anchor="w", pady=(0, 10))
+
+        # Статистика в ряд
+        stats_frame = ttk.Frame(status_frame)
+        stats_frame.pack(fill=tk.X)
+
+        self.stats_total = ttk.Label(stats_frame, text="Всего: 0", style="TLabel")
+        self.stats_total.pack(side=tk.LEFT, padx=(0, 20))
+
+        self.stats_processed = ttk.Label(stats_frame, text="Обработано: 0", style="TLabel")
+        self.stats_processed.pack(side=tk.LEFT, padx=(0, 20))
+
+        self.stats_success = ttk.Label(stats_frame, text="Успешно: 0", style="Success.TLabel")
+        self.stats_success.pack(side=tk.LEFT, padx=(0, 20))
+
+        self.stats_failed = ttk.Label(stats_frame, text="Ошибки: 0", style="Error.TLabel")
+        self.stats_failed.pack(side=tk.LEFT)
+
+    def create_bottom_buttons(self):
+        """Создает кнопки управления внизу"""
+        btn_frame = ttk.Frame(self.scrollable_frame)
+        btn_frame.pack(fill=tk.X, padx=10, pady=(0, 20))
+
+        # Кнопки управления
+        ttk.Button(
+            btn_frame,
+            text="⏹️ Остановить обработку",
+            style="TButton",
+            command=self.stop_processing
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Button(
+            btn_frame,
+            text="📊 Экспорт результатов",
+            style="TButton",
+            command=self.export_batch_results
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Button(
+            btn_frame,
+            text="🗑️ Очистить все",
+            style="TButton",
+            command=self.clear_all
+        ).pack(side=tk.LEFT)
+
+    # Методы для работы с файлами
+    def add_files(self):
+        """Добавляет файлы в список"""
+        files = filedialog.askopenfilenames(
+            title="Выберите файлы-контейнеры",
+            filetypes=SUPPORTED_FORMATS,
+            initialdir=self.app.last_open_dir
+        )
+
+        if not files:
+            return
+
+        for file in files:
+            if file not in self.selected_files and len(self.selected_files) < 5:
+                self.selected_files.append(file)
+                display_name = os.path.basename(file)
+                if len(display_name) > 30:
+                    display_name = "..." + display_name[-27:]
+                self.files_listbox.insert(tk.END, display_name)
+            elif len(self.selected_files) >= 5:
+                messagebox.showwarning("Ограничение", "Максимальное количество файлов - 5")
+                break
+
+        self.update_stats()
+
+    def add_extract_files(self):
+        """Добавляет файлы для извлечения"""
+        files = filedialog.askopenfilenames(
+            title="Выберите стего-файлы",
+            filetypes=SUPPORTED_FORMATS,
+            initialdir=self.app.last_open_dir
+        )
+
+        if not files:
+            return
+
+        for file in files:
+            if file not in self.selected_extract_files and len(self.selected_extract_files) < 5:
+                self.selected_extract_files.append(file)
+                display_name = os.path.basename(file)
+                if len(display_name) > 30:
+                    display_name = "..." + display_name[-27:]
+                self.extract_files_listbox.insert(tk.END, display_name)
+            elif len(self.selected_extract_files) >= 5:
+                messagebox.showwarning("Ограничение", "Максимальное количество файлов - 5")
+                break
+
+    def add_analyze_files(self):
+        """Добавляет файлы для анализа"""
+        files = filedialog.askopenfilenames(
+            title="Выберите файлы для анализа",
+            filetypes=SUPPORTED_FORMATS,
+            initialdir=self.app.last_open_dir
+        )
+
+        if not files:
+            return
+
+        for file in files:
+            if file not in self.selected_analyze_files and len(self.selected_analyze_files) < 5:
+                self.selected_analyze_files.append(file)
+                display_name = os.path.basename(file)
+                if len(display_name) > 30:
+                    display_name = "..." + display_name[-27:]
+                self.analyze_files_listbox.insert(tk.END, display_name)
+            elif len(self.selected_analyze_files) >= 5:
+                messagebox.showwarning("Ограничение", "Максимальное количество файлов - 5")
+                break
+
+    def clear_files(self):
+        """Очищает список файлов"""
+        self.selected_files = []
+        self.files_listbox.delete(0, tk.END)
+        self.update_stats()
+
+    def select_hide_file(self):
+        """Выбирает файл для скрытия"""
+        file = filedialog.askopenfilename(
+            title="Выберите файл для скрытия",
+            initialdir=self.app.last_open_dir
+        )
+
+        if file:
+            self.hide_file_path.set(file)
+
+    def select_output_dir(self):
+        """Выбирает выходную директорию"""
+        directory = filedialog.askdirectory(
+            title="Выберите папку для сохранения",
+            initialdir=self.output_dir.get()
+        )
+
+        if directory:
+            self.output_dir.set(directory)
+
+    def select_extract_output_dir(self):
+        """Выбирает выходную директорию для извлечения"""
+        directory = filedialog.askdirectory(
+            title="Выберите папку для сохранения извлеченных данных",
+            initialdir=self.extract_output_dir.get()
+        )
+
+        if directory:
+            self.extract_output_dir.set(directory)
+
+    def update_hide_data_input(self):
+        """Обновляет поле ввода данных в зависимости от типа"""
+        if self.hide_data_type.get() == "text":
+            self.hide_file_frame.pack_forget()
+            self.hide_text_frame.pack(fill=tk.BOTH, expand=True)
+        else:
+            self.hide_text_frame.pack_forget()
+            self.hide_file_frame.pack(fill=tk.X, pady=(10, 0))
+
+    def update_stats(self):
+        """Обновляет статистику"""
+        total = len(self.selected_files)
+        self.stats_total.config(text=f"Всего: {total}")
+
+    def start_batch_hide(self):
+        """Запускает пакетное скрытие"""
+        if not self.selected_files:
+            messagebox.showwarning("Ошибка", "Не выбраны файлы для обработки")
+            return
+
+        # Ограничение до 5 файлов
+        files_to_process = self.selected_files[:5]
+
+        # Подготовка данных
+        data = None
+        if self.hide_data_type.get() == "text":
+            data = self.hide_text.get("1.0", tk.END).strip().encode('utf-8')
+            if not data:
+                messagebox.showwarning("Ошибка", "Не введен текст для скрытия")
+                return
+        else:
+            file_path = self.hide_file_path.get()
+            if not file_path or not os.path.exists(file_path):
+                messagebox.showwarning("Ошибка", "Не выбран файл для скрытия")
+                return
+
+            try:
+                with open(file_path, 'rb') as f:
+                    data = f.read()
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось прочитать файл: {e}")
+                return
+
+        # Проверка вместимости
+        try:
+            # Проверяем первый файл для оценки
+            if files_to_process:
+                w, h, available_bits = ImageProcessor.get_image_info(files_to_process[0])
+                required_bits = len(data) * 8
+                if required_bits > available_bits:
+                    if not messagebox.askyesno("Предупреждение",
+                                               "Данные могут не поместиться в некоторые контейнеры. Продолжить?"):
+                        return
+        except:
+            pass
+
+        # Подготовка параметров
+        params = {
+            'data': data,
+            'method': self.method_var.get(),
+            'password': self.hide_password.get(),
+            'output_dir': self.output_dir.get(),
+            'overwrite': self.overwrite_var.get(),
+            'compression_level': self.app.compression_level.get()
+        }
+
+        # Добавление в очередь
+        self.batch_processor.clear_batch()
+        self.batch_processor.add_to_batch(files_to_process, 'hide', params)
+
+        # Запуск обработки
+        self.start_processing("Скрытие данных...")
+
+    def start_batch_extract(self):
+        """Запускает пакетное извлечение - ИСПРАВЛЕНО!"""
+        if not self.selected_extract_files:
+            messagebox.showwarning("Ошибка", "Не выбраны файлы для извлечения")
+            return
+
+        # Ограничение до 5 файлов
+        files_to_process = self.selected_extract_files[:5]
+
+        # Подготовка параметров
+        method = self.extract_method.get() if self.extract_method.get() else None
+
+        params = {
+            'password': self.extract_password.get(),
+            'method': method,
+            'output_dir': self.extract_output_dir.get(),
+            'auto_save': self.auto_save_var.get()
+        }
+
+        # Проверка существования файлов
+        for file in files_to_process:
+            if not os.path.exists(file):
+                messagebox.showerror("Ошибка", f"Файл не найден: {file}")
+                return
+
+        # Добавление в очередь
+        self.batch_processor.clear_batch()
+        self.batch_processor.add_to_batch(files_to_process, 'extract', params)
+
+        # Запуск обработки
+        self.start_processing("Извлечение данных...")
+
+    def start_batch_analyze(self):
+        """Запускает пакетный анализ"""
+        if not self.selected_analyze_files:
+            messagebox.showwarning("Ошибка", "Не выбраны файлы для анализа")
+            return
+
+        # Ограничение до 5 файлов
+        files_to_process = self.selected_analyze_files[:5]
+
+        # Проверка существования файлов
+        for file in files_to_process:
+            if not os.path.exists(file):
+                messagebox.showerror("Ошибка", f"Файл не найден: {file}")
+                return
+
+        # Подготовка параметров
+        params = {}
+
+        # Добавление в очередь
+        self.batch_processor.clear_batch()
+        self.batch_processor.add_to_batch(files_to_process, 'analyze', params)
+
+        # Запуск обработки
+        self.start_processing("Анализ файлов...")
+
+    def start_processing(self, initial_message="Обработка..."):
+        """Запускает обработку с правильным статусом"""
+        self.batch_status_label.config(text=initial_message)
+        self.batch_progress_var.set(0)
+
+        def progress_callback(progress, status):
+            self.batch_progress_var.set(progress)
+            self.batch_status_label.config(text=status)
+
+            # Обновление статистики
+            info = self.batch_processor.get_batch_info()
+            self.stats_processed.config(text=f"Обработано: {info['completed']}")
+            self.stats_success.config(text=f"Успешно: {info['success_count']}")
+            self.stats_failed.config(text=f"Ошибки: {info['fail_count']}")
+
+            # Обновляем интерфейс
+            self.parent.update_idletasks()
+
+        def completion_callback(results):
+            # ВАЖНО: Разблокируем кнопки после завершения
+            self.disable_buttons(False)
+
+            self.batch_status_label.config(text="✅ Обработка завершена")
+            self.batch_progress_var.set(100)
+
+            # Подсчет результатов
+            success = len([r for r in results if r['success']])
+            failed = len([r for r in results if not r['success']])
+
+            # Показываем результаты
+            current_tab = self.batch_notebook.index(self.batch_notebook.select())
+            if current_tab == 0:  # Вкладка скрытия
+                message = f"Пакетное скрытие завершено.\n\nУспешно: {success}\nС ошибками: {failed}"
+            elif current_tab == 1:  # Вкладка извлечения
+                message = f"Пакетное извлечение завершено.\n\nУспешно: {success}\nС ошибками: {failed}"
+            else:  # Вкладка анализа
+                message = f"Пакетный анализ завершён.\n\nУспешно: {success}\nС ошибками: {failed}"
+                self.show_analysis_results(results)
+
+            # Показываем сообщение только если есть результаты
+            if len(results) > 0:
+                # Используем after для отложенного показа сообщения
+                self.app.root.after(100, lambda: messagebox.showinfo("Завершено", message))
+
+            # Записываем в лог
+            operation_type = ["hide", "extract", "analyze"][current_tab]
+            self.app.log_manager.add_entry(f"batch_{operation_type}",
+                                           "success" if success > 0 else "error",
+                                           {"total": len(results), "success": success, "failed": failed})
+
+        # Отключаем кнопки на время обработки
+        self.disable_buttons(True)
+
+        # Запуск асинхронной обработки
+        self.batch_processor.process_batch(progress_callback, completion_callback)
+
+    def disable_buttons(self, disable=True):
+        """Включает/отключает кнопки"""
+        state = "disabled" if disable else "normal"
+
+        # Отключаем/включаем кнопки на всех вкладках
+        if hasattr(self, 'hide_button'):
+            self.hide_button.config(state=state)
+        if hasattr(self, 'extract_button'):
+            self.extract_button.config(state=state)
+        if hasattr(self, 'analyze_button'):
+            self.analyze_button.config(state=state)
+
+        # Также отключаем кнопки управления файлами
+        if hasattr(self, 'files_listbox'):
+            # Находим все кнопки в интерфейсе
+            for widget in self.scrollable_frame.winfo_children():
+                self._recursive_disable(widget, state)
+
+        # Обновляем интерфейс
+        self.parent.update_idletasks()
+
+    def _recursive_disable(self, widget, state):
+        """Рекурсивно отключает/включает виджеты"""
+        try:
+            if isinstance(widget, (ttk.Button, tk.Button)):
+                if widget not in [self.hide_button, self.extract_button, self.analyze_button]:
+                    widget.config(state=state)
+        except:
+            pass
+
+        # Рекурсивно обрабатываем дочерние виджеты
+        try:
+            for child in widget.winfo_children():
+                self._recursive_disable(child, state)
+        except:
+            pass
+
+    def stop_processing(self):
+        """Останавливает обработку"""
+        if self.batch_processor.processing:
+            self.batch_processor.cancel_processing()
+            self.batch_status_label.config(text="⏹️ Обработка остановлена")
+            self.disable_buttons(False)  # Разблокируем кнопки
+            self.app.root.after(100, lambda: messagebox.showinfo("Остановлено",
+                                                                 "Пакетная обработка была остановлена"))
+
+    def export_batch_results(self):
+        """Экспортирует результаты обработки"""
+        if not self.batch_processor.results:
+            messagebox.showwarning("Ошибка", "Нет результатов для экспорта")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            title="Сохранить результаты",
+            defaultextension=".json",
+            filetypes=[("JSON файлы", "*.json"), ("Все файлы", "*.*")],
+            initialdir=self.app.last_save_dir
+        )
+
+        if file_path:
+            if self.batch_processor.export_results(file_path):
+                messagebox.showinfo("Успех", "Результаты успешно экспортированы")
+                self.app.last_save_dir = os.path.dirname(file_path)
+            else:
+                messagebox.showerror("Ошибка", "Не удалось экспортировать результаты")
+
+    def show_analysis_results(self, results):
+        """Показывает результаты анализа"""
+        self.analyze_results_text.config(state='normal')
+        self.analyze_results_text.delete("1.0", tk.END)
+
+        for result in results:
+            if result['success']:
+                info = result.get('data', {})
+                file_info = info.get('file_info', {})
+                text = f"📄 {os.path.basename(result.get('file', 'Unknown'))}:\n"
+                text += f"   📏 Размер: {file_info.get('size_formatted', 'N/A')}\n"
+                text += f"   📅 Создан: {file_info.get('created', 'N/A')}\n"
+                text += f"   📝 Тип: {file_info.get('type', 'unknown')}\n"
+
+                if info.get('has_stego'):
+                    text += "   ✅ Содержит скрытые данные\n"
+                    stego_info = info.get('stego_info', {})
+                    text += f"      Размер данных: {stego_info.get('size', 0)} байт\n"
+                    text += f"      Тип данных: {stego_info.get('data_type', 'unknown')}\n"
+                else:
+                    text += "   ❌ Скрытых данных не обнаружено\n"
+
+                # Вместимость
+                capacity = info.get('capacity_info', {})
+                if capacity:
+                    text += "   📊 Вместимость (в байтах):\n"
+                    for method, cap in capacity.items():
+                        method_name = STEGANO_METHODS.get(method, method)
+                        cap_bytes = cap // 8
+                        text += f"      • {method_name}: {cap_bytes:,}\n"
+
+                text += "-" * 60 + "\n\n"
+                self.analyze_results_text.insert(tk.END, text)
+            else:
+                text = f"❌ {os.path.basename(result.get('file', 'Unknown'))}:\n"
+                text += f"   Ошибка: {result.get('error', 'Неизвестная ошибка')}\n"
+                text += "-" * 60 + "\n\n"
+                self.analyze_results_text.insert(tk.END, text)
+
+        self.analyze_results_text.config(state='disabled')
+
+    def clear_all(self):
+        """Очищает все списки и результаты"""
+        # Очистка списков
+        self.selected_files = []
+        self.selected_extract_files = []
+        self.selected_analyze_files = []
+
+        # Очистка виджетов
+        self.files_listbox.delete(0, tk.END)
+        self.extract_files_listbox.delete(0, tk.END)
+        self.analyze_files_listbox.delete(0, tk.END)
+
+        # Очистка полей ввода
+        if hasattr(self, 'hide_text'):
+            self.hide_text.delete("1.0", tk.END)
+        self.hide_file_path.set("")
+        self.hide_password.set("")
+        self.extract_password.set("")
+        self.extract_method.set("")
+
+        # Очистка результатов анализа
+        self.analyze_results_text.config(state='normal')
+        self.analyze_results_text.delete("1.0", tk.END)
+        self.analyze_results_text.config(state='disabled')
+
+        # Сброс состояния обработки
+        self.reset_processing_state()
+
+        messagebox.showinfo("Очистка", "Все списки и результаты очищены")
+
+
+# ───────────────────────────────────────────────
 # 🧠 ИНТЕЛЛЕКТУАЛЬНЫЕ ПОДСКАЗКИ И АССИСТЕНТ
 # ───────────────────────────────────────────────
+
 class SmartAssistant:
-    """Интеллектуальный помощник пользователя"""
+    """Интеллектуальный помощник пользователя с расширенными правилами"""
 
     def __init__(self, app):
         self.app = app
@@ -1899,9 +3362,110 @@ class SmartAssistant:
             "💡 Совет: Для больших файлов используйте классический LSB для максимальной вместимости",
             "💡 Совет: Регулярно создавайте резервные копии важных файлов",
             "💡 Совет: Используйте историю для быстрого доступа к недавно использованным файлам",
-            "💡 Совет: Откройте настройки, чтобы настроить тему интерфейса под ваши предпочтения"
+            "💡 Совет: Откройте настройки, чтобы настроить тему интерфейса под ваши предпочтения",
+            "💡 Совет: Для текстовых сообщений сжимайте данные в ZIP для экономии места",
+            "💡 Совет: Проверяйте контрольные суммы извлеченных файлов для проверки целостности",
+            "💡 Совет: Используйте разные методы для разных типов контейнеров (LSB для изображений, DCT для JPEG)",
+            "💡 Совет: Создавайте регулярные копии настроек приложения",
+            "💡 Совет: Используйте пакетную обработку для работы с несколькими файлами одновременно",
+            "💡 Совет: Для конфиденциальных данных используйте комбинацию пароля и шифрования",
+            "💡 Совет: Проверяйте статистику использования для оптимизации рабочих процессов",
+            "💡 Совет: Используйте плагины для расширения функциональности приложения"
         ]
+        self.context_rules = {
+            "large_file": [
+                "💡 Контекстный совет: Для больших файлов рекомендуется использовать классический LSB метод",
+                "💡 Контекстный совет: Рассмотрите возможность сжатия файла перед скрытием",
+                "💡 Контекстный совет: Проверьте свободное место на диске перед обработкой больших файлов"
+            ],
+            "small_container": [
+                "💡 Контекстный совет: Контейнер слишком мал для выбранных данных",
+                "💡 Контекстный совет: Попробуйте использовать изображение большего размера",
+                "💡 Контекстный совет: Сожмите данные или используйте более эффективный метод"
+            ],
+            "audio_container": [
+                "💡 Контекстный совет: Для аудио контейнеров используйте метод WAV LSB",
+                "💡 Контекстный совет: Убедитесь, что аудиофайл не будет подвергаться сжатию",
+                "💡 Контекстный совет: Аудиофайлы имеют меньшую вместимость чем изображения"
+            ],
+            "jpeg_container": [
+                "💡 Контекстный совет: Для JPEG используйте DCT метод для лучшей устойчивости",
+                "💡 Контекстный совет: JPEG сжатие может повредить скрытые данные",
+                "💡 Контекстный совет: Вместимость JPEG меньше чем у lossless форматов"
+            ],
+            "first_time": [
+                "💡 Добро пожаловать! Начните с выбора контейнера и данных для скрытия",
+                "💡 Совет для новичка: Используйте вкладку 'Помощь' для получения подробной информации",
+                "💡 Совет: Начните с небольшого текста для тестирования функциональности"
+            ],
+            "low_contrast": [
+                "💡 Контекстный совет: Изображение имеет низкий контраст, что может повлиять на качество",
+                "💡 Контекстный совет: Рассмотрите использование метода Adaptive-Noise для таких изображений",
+                "💡 Контекстный совет: Низкий контраст может сделать изменения более заметными"
+            ],
+            "high_capacity_usage": [
+                "💡 Контекстный совет: Высокое заполнение контейнера может ухудшить качество",
+                "💡 Контекстный совет: Рекомендуется использовать не более 80% вместимости",
+                "💡 Контекстный совет: Рассмотрите использование контейнера большего размера"
+            ],
+            "multiple_files": [
+                "💡 Контекстный совет: Используйте пакетную обработку для нескольких файлов",
+                "💡 Контекстный совет: Убедитесь, что все файлы имеют одинаковый формат",
+                "💡 Контекстный совет: Создайте резервные копии перед пакетной обработкой"
+            ],
+            "password_weak": [
+                "💡 Контекстный совет: Используйте более сложный пароль для безопасности",
+                "💡 Контекстный совет: Рекомендуемая длина пароля - не менее 8 символов",
+                "💡 Контекстный совет: Используйте комбинацию букв, цифр и специальных символов"
+            ],
+            "network_share": [
+                "💡 Контекстный совет: Будьте осторожны при работе с сетевыми ресурсами",
+                "💡 Контекстный совет: Создавайте локальные копии сетевых файлов",
+                "💡 Контекстный совет: Проверьте права доступа к сетевым папкам"
+            ],
+            "low_disk_space": [
+                "💡 Контекстный совет: На диске мало свободного места",
+                "💡 Контекстный совет: Освободите место перед обработкой больших файлов",
+                "💡 Контекстный совет: Проверьте доступное место на целевом диске"
+            ],
+            "unsupported_format": [
+                "💡 Контекстный совет: Формат файла не поддерживается",
+                "💡 Контекстный совет: Проверьте список поддерживаемых форматов",
+                "💡 Контекстный совет: Конвертируйте файл в поддерживаемый формат"
+            ],
+            "performance_issue": [
+                "💡 Контекстный совет: Операция выполняется медленно",
+                "💡 Контекстный совет: Закройте другие приложения для повышения производительности",
+                "💡 Контекстный совет: Используйте более простой метод для ускорения"
+            ],
+            "backup_recommended": [
+                "💡 Контекстный совет: Рекомендуется создать резервную копию",
+                "💡 Контекстный совет: Автоматическое резервное копирование включено",
+                "💡 Контекстный совет: Проверьте настройки резервного копирования"
+            ]
+        }
         self.last_tip_index = -1
+        self.rule_weights = {}
+        self.initialize_rule_weights()
+
+    def initialize_rule_weights(self):
+        """Инициализирует веса правил для приоритизации"""
+        self.rule_weights = {
+            "small_container": 10,
+            "low_disk_space": 9,
+            "unsupported_format": 8,
+            "high_capacity_usage": 7,
+            "password_weak": 6,
+            "large_file": 5,
+            "low_contrast": 4,
+            "performance_issue": 3,
+            "backup_recommended": 2,
+            "audio_container": 1,
+            "jpeg_container": 1,
+            "multiple_files": 1,
+            "network_share": 1,
+            "first_time": 0
+        }
 
     def get_next_tip(self):
         """Возвращает следующий совет"""
@@ -1910,39 +3474,128 @@ class SmartAssistant:
 
     def get_contextual_tip(self, context):
         """Возвращает контекстный совет в зависимости от ситуации"""
-        if context == "large_file":
-            return "💡 Контекстный совет: Для больших файлов рекомендуется использовать классический LSB метод для максимальной вместимости"
-        elif context == "small_container":
-            return "💡 Контекстный совет: Контейнер слишком мал для выбранных данных. Попробуйте использовать изображение большего размера или сожмите данные"
-        elif context == "audio_container":
-            return "💡 Контекстный совет: Для аудио контейнеров используется метод WAV LSB. Убедитесь, что файл не будет подвергаться сжатию после скрытия данных"
-        elif context == "first_time":
-            return "💡 Добро пожаловать! Начните с выбора контейнера и данных для скрытия. Используйте вкладку 'Помощь' для получения подробной информации"
+        if context in self.context_rules:
+            tips = self.context_rules[context]
+            return tips[self.last_tip_index % len(tips)]
         else:
             return self.get_next_tip()
 
-    def analyze_situation(self, container_path=None, data_size=0):
-        """Анализирует текущую ситуацию и возвращает соответствующий контекст"""
+    def analyze_situation(self, container_path=None, data_size=0, operation_type=None):
+        """Анализирует текущую ситуацию и возвращает список контекстов с приоритетами"""
+        contexts = []
+
         if not container_path:
-            return "first_time"
+            contexts.append(("first_time", self.rule_weights.get("first_time", 0)))
+            return contexts
 
         try:
-            if container_path.lower().endswith(".wav"):
-                return "audio_container"
+            # Проверка на низкий контраст (для изображений)
+            if container_path.lower().endswith(('.png', '.bmp', '.tiff', '.tga', '.jpg', '.jpeg')):
+                try:
+                    from PIL import Image, ImageStat
+                    with Image.open(container_path) as img:
+                        if img.mode != 'L':
+                            img_gray = img.convert('L')
+                        else:
+                            img_gray = img
+                        stat = ImageStat.Stat(img_gray)
+                        contrast = stat.stddev[0] / 128.0
+                        if contrast < 0.2:
+                            contexts.append(("low_contrast", self.rule_weights.get("low_contrast", 0)))
+                except:
+                    pass
 
-            w, h, available_bits = ImageProcessor.get_image_info(container_path)
+            # Проверка вместимости
+            if container_path.lower().endswith(".wav"):
+                contexts.append(("audio_container", self.rule_weights.get("audio_container", 0)))
+                with wave.open(container_path, 'rb') as wav:
+                    available_bits = wav.getnframes()
+            elif container_path.lower().endswith(('.jpg', '.jpeg')):
+                contexts.append(("jpeg_container", self.rule_weights.get("jpeg_container", 0)))
+                w, h, available_bits = ImageProcessor.get_image_info(container_path)
+            else:
+                w, h, available_bits = ImageProcessor.get_image_info(container_path)
+
             required_bits = data_size * 8
 
+            if required_bits > available_bits * 0.9:
+                contexts.append(("high_capacity_usage", self.rule_weights.get("high_capacity_usage", 0)))
             if required_bits > available_bits:
-                return "small_container"
+                contexts.append(("small_container", self.rule_weights.get("small_container", 0)))
 
             if data_size > 10 * 1024 * 1024:  # 10 MB
-                return "large_file"
+                contexts.append(("large_file", self.rule_weights.get("large_file", 0)))
 
-        except:
-            pass
+            # Проверка свободного места
+            free_space_mb = Utils.get_free_space_mb(os.path.dirname(container_path))
+            if free_space_mb < 100:  # Меньше 100 МБ свободно
+                contexts.append(("low_disk_space", self.rule_weights.get("low_disk_space", 0)))
 
-        return None
+            # Проверка на сетевой путь
+            if container_path.startswith(('\\\\', '//')) or '://' in container_path:
+                contexts.append(("network_share", self.rule_weights.get("network_share", 0)))
+
+            # Проверка формата
+            if not Utils.is_supported_container(container_path):
+                contexts.append(("unsupported_format", self.rule_weights.get("unsupported_format", 0)))
+
+        except Exception as e:
+            print(f"Ошибка анализа ситуации: {e}")
+
+        # Сортировка по приоритету (высокий вес = высокий приоритет)
+        contexts.sort(key=lambda x: x[1], reverse=True)
+
+        # Возвращаем только контексты (без весов)
+        return [context for context, weight in contexts]
+
+    def get_smart_recommendation(self, container_path, data_size, operation_type="hide"):
+        """Возвращает интеллектуальную рекомендацию на основе анализа"""
+        contexts = self.analyze_situation(container_path, data_size, operation_type)
+
+        if not contexts:
+            return self.get_next_tip()
+
+        # Берем контекст с наивысшим приоритетом
+        primary_context = contexts[0]
+
+        # Получаем рекомендацию для этого контекста
+        recommendation = self.get_contextual_tip(primary_context)
+
+        # Добавляем дополнительные рекомендации если есть
+        if len(contexts) > 1:
+            secondary_context = contexts[1]
+            secondary_tip = self.get_contextual_tip(secondary_context)
+            if secondary_tip != recommendation:
+                recommendation += f"\n\n{secondary_tip}"
+
+        return recommendation
+
+    def learn_from_user_action(self, action, success=True):
+        """Учится на действиях пользователя"""
+        # Здесь можно добавить логику машинного обучения
+        # для улучшения рекомендаций со временем
+        pass
+
+    def get_method_recommendation(self, container_path, data_size):
+        """Рекомендует лучший метод на основе характеристик"""
+        if not container_path:
+            return "lsb"
+
+        ext = os.path.splitext(container_path)[1].lower()
+
+        if ext == '.wav':
+            return "audio_lsb"
+        elif ext in ['.jpg', '.jpeg']:
+            return "jpeg_dct"
+        elif data_size > 5 * 1024 * 1024:  # >5MB
+            return "lsb"
+        else:
+            # Для маленьких файлов рекомендуем более скрытные методы
+            contexts = self.analyze_situation(container_path, data_size)
+            if "low_contrast" in contexts:
+                return "hill"
+            else:
+                return "noise"
 
 
 # ───────────────────────────────────────────────
@@ -2032,7 +3685,6 @@ class ModernPasswordDialog:
             pady=25
         )
         main_frame.pack(fill="both", expand=True)
-
         # Заголовок с иконкой
         header_frame = tk.Frame(main_frame, bg=self.colors["bg"])
         header_frame.pack(fill="x", pady=(0, 25))
@@ -3650,6 +5302,17 @@ class SteganographyUltimatePro:
             5000
         )
 
+    def create_batch_tab(self):
+        """Создает вкладку пакетной обработки"""
+        self.batch_tab = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.notebook.add(self.batch_tab, text="📦 Пакетная обработка")
+
+        # Инициализация UI пакетной обработки
+        self.batch_ui = BatchProcessingUI(self.batch_tab, self)
+
+        # Обновляем SmartAssistant
+        self.smart_assistant = SmartAssistant(self)
+
     def initialize_plugins(self):
         """Инициализирует плагины"""
         plugins = self.plugin_manager.get_plugins()
@@ -3693,6 +5356,7 @@ class SteganographyUltimatePro:
         self.notebook.add(self.statistics_tab, text="📊 Статистика")  # Правильное имя вкладки
         self.notebook.add(self.achievements_tab, text="🏆 Достижения")  # Правильное имя вкладки
         self.notebook.add(self.help_tab, text="❓ Помощь")
+        self.create_batch_tab()  # Создаем вкладку пакетной обработки
 
         # Создаем тост
         self.create_toast()
@@ -4765,126 +6429,252 @@ class SteganographyUltimatePro:
         self.help_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.notebook.add(self.help_tab, text="❓ Помощь")
 
-        # Создаем canvas с прокруткой
-        help_canvas = tk.Canvas(self.help_tab, bg=self.colors["bg"])
-        scrollbar = ttk.Scrollbar(self.help_tab, orient="vertical", command=help_canvas.yview)
-        scrollable_frame = ttk.Frame(help_canvas, style="Card.TFrame")
+        # Создаем основную сетку с двумя колонками
+        main_container = ttk.Frame(self.help_tab, style="Card.TFrame")
+        main_container.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
 
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: help_canvas.configure(scrollregion=help_canvas.bbox("all"))
-        )
+        # Настраиваем сетку для левой и правой колонок
+        main_container.grid_columnconfigure(0, weight=1)  # Левая колонка с содержанием - теперь больше
+        main_container.grid_columnconfigure(1, weight=3)  # Правая колонка с текстом - увеличена в 3 раза
+        main_container.grid_rowconfigure(0, weight=1)
 
-        help_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        help_canvas.configure(yscrollcommand=scrollbar.set)
-
-        help_canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        # Заголовок
-        ttk.Label(
-            scrollable_frame,
-            text="📚 Полное руководство по ØccultoNG Pro",
-            font=("Segoe UI Variable Display", 18, "bold"),
-            foreground=self.colors["accent"],
-            style="TLabel"
-        ).pack(pady=(20, 30))
-
-        # Содержание
-        contents_frame = ttk.LabelFrame(
-            scrollable_frame,
+        # ЛЕВАЯ КОЛОНКА - СОДЕРЖАНИЕ
+        left_frame = ttk.LabelFrame(
+            main_container,
             text="📋 Содержание",
             padding=15,
             style="Card.TLabelframe"
         )
-        contents_frame.pack(fill=tk.X, pady=(0, 15))
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
 
+        # Список разделов помощи
         contents = [
             ("1. Введение", self.show_help_intro),
             ("2. Поддерживаемые методы", self.show_help_methods),
             ("3. Быстрый старт", self.show_help_quickstart),
-            ("4. Советы и рекомендации", self.show_help_tips),
-            ("5. Горячие клавиши", self.show_help_shortcuts),
-            ("6. Часто задаваемые вопросы", self.show_help_faq),
-            ("7. Техническая поддержка", self.show_help_support)
+            ("4. Пакетная обработка", self.show_help_batch),
+            ("5. Советы и рекомендации", self.show_help_tips),
+            ("6. Горячие клавиши", self.show_help_shortcuts),
+            ("7. Часто задаваемые вопросы", self.show_help_faq),
+            ("8. Техническая поддержка", self.show_help_support)
         ]
 
         for i, (title, command) in enumerate(contents):
             btn = ttk.Button(
-                contents_frame,
+                left_frame,
                 text=title,
                 style="CardButton.TButton",
                 command=command
             )
             btn.pack(fill=tk.X, pady=2)
 
-        # Основной текст помощи
+        # Добавим кнопку поиска внизу левой колонки
+        search_btn = ttk.Button(
+            left_frame,
+            text="🔍 Поиск в помощи",
+            style="IconButton.TButton",
+            command=self.search_help
+        )
+        search_btn.pack(fill=tk.X, pady=(20, 5))
+
+        # ПРАВАЯ КОЛОНКА - ТЕКСТ ПОМОЩИ (УВЕЛИЧЕННАЯ)
+        right_frame = ttk.LabelFrame(
+            main_container,
+            text="📚 Информация",
+            padding=10,  # Уменьшим отступы, чтобы было больше места для текста
+            style="Card.TLabelframe"
+        )
+        right_frame.grid(row=0, column=1, sticky="nsew")
+        right_frame.grid_rowconfigure(0, weight=1)
+        right_frame.grid_columnconfigure(0, weight=1)
+
+        # Используем ScrolledText для отображения текста помощи
         self.help_text = scrolledtext.ScrolledText(
-            scrollable_frame,
-            height=20,
-            font=("Segoe UI", 10),
+            right_frame,
             wrap=tk.WORD,
             bg=self.colors["card"],
             fg=self.colors["text"],
-            insertbackground=self.colors["fg"],
-            selectbackground=self.colors["accent"],
-            selectforeground="#ffffff",
+            font=("Segoe UI", 10),
+            padx=15,
+            pady=15,
             relief="flat",
-            borderwidth=1
+            borderwidth=0,
+            highlightthickness=0
         )
-        self.help_text.pack(fill=tk.BOTH, expand=True, padx=15, pady=(0, 15))
+        self.help_text.grid(row=0, column=0, sticky="nsew")
 
-        # Кнопки
-        btn_frame = ttk.Frame(scrollable_frame, style="Card.TFrame")
-        btn_frame.pack(pady=20)
+        # Создаем теги для форматирования
+        self.help_text.tag_configure("title", font=("Segoe UI", 16, "bold"), foreground=self.colors["accent"])
+        self.help_text.tag_configure("subtitle", font=("Segoe UI", 12, "bold"), foreground=self.colors["text"])
+        self.help_text.tag_configure("normal", font=("Segoe UI", 10), foreground=self.colors["text"])
+        self.help_text.tag_configure("tip", font=("Segoe UI", 10), foreground=self.colors["success"])
+        self.help_text.tag_configure("warning", font=("Segoe UI", 10), foreground=self.colors["warning"])
+        self.help_text.tag_configure("error", font=("Segoe UI", 10), foreground=self.colors["error"])
+        self.help_text.tag_configure("code", font=("Consolas", 9), background=self.colors["secondary"])
+
+        # Отключаем редактирование
+        self.help_text.config(state='disabled')
+
+        # ПАНЕЛЬ КНОПОК ВНИЗУ ПРАВОЙ КОЛОНКИ
+        bottom_frame = ttk.Frame(right_frame, style="Card.TFrame")
+        bottom_frame.grid(row=1, column=0, sticky="ew", pady=(10, 0))
 
         ttk.Button(
-            btn_frame,
-            text="🔍 Поиск в помощи",
-            style="TButton",
-            command=self.search_help
-        ).pack(side=tk.LEFT, padx=10)
-
-        ttk.Button(
-            btn_frame,
+            bottom_frame,
             text="📥 Скачать PDF",
-            style="TButton",
+            style="IconButton.TButton",
             command=self.download_help_pdf
-        ).pack(side=tk.LEFT, padx=10)
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Button(
+            bottom_frame,
+            text="📝 Отправить отзыв",  # Измененный текст
+            style="IconButton.TButton",
+            command=self.send_feedback  # Эта команда уже правильно указана
+        ).pack(side=tk.LEFT, padx=5)
 
         ttk.Button(
-            btn_frame,
-            text="✉️ Отправить отзыв",
-            style="TButton",
-            command=self.send_feedback
-        ).pack(side=tk.LEFT, padx=10)
+            bottom_frame,
+            text="🔄 Обновить",
+            style="IconButton.TButton",
+            command=self.refresh_help
+        ).pack(side=tk.RIGHT, padx=5)
 
         # Показываем введение по умолчанию
         self.show_help_intro()
 
+    def refresh_help(self):
+        """Обновляет текст помощи"""
+        current_tab = self.notebook.index(self.notebook.select())
+        if current_tab == self.notebook.index(self.help_tab):
+            # Если мы на вкладке помощи, обновляем текст
+            self.show_help_intro()
+            messagebox.showinfo("Обновление", "Текст помощи обновлен!")
+
     def show_help_intro(self):
         """Показывает введение в помощь"""
         help_text = f"""
-🎯 Добро пожаловать в ØccultoNG Pro!
+    🎯 Добро пожаловать в ØccultoNG Pro v{VERSION}!
 
-ØccultoNG Pro — это профессиональный инструмент для стеганографии,
-позволяющий скрывать тексты и файлы внутри изображений и аудиофайлов
-без потерь, с автоматическим извлечением и проверкой целостности.
+    ØccultoNG Pro — это профессиональный инструмент для стеганографии,
+    позволяющий скрывать тексты и файлы внутри изображений и аудиофайлов
+    без потерь, с автоматическим извлечением и проверкой целостности.
 
-🔑 Основные возможности:
-• Поддержка различных методов скрытия данных
-• Работа с изображениями (PNG, BMP, TIFF, TGA, JPG) и аудио (WAV)
-• Автоматическое определение метода при извлечении
-• Расширенная статистика и достижения
-• Интеллектуальные подсказки и ассистент
-• Поддержка плагинов и расширений
+    🚀 ОСНОВНЫЕ ВОЗМОЖНОСТИ:
+    • Поддержка различных методов скрытия данных
+    • Работа с изображениями (PNG, BMP, TIFF, TGA, JPG) и аудио (WAV)
+    • Автоматическое определение метода при извлечении
+    • Пакетная обработка до 5 файлов одновременно ✅ НОВОЕ!
+    • Расширенная статистика и достижения
+    • Интеллектуальные подсказки и ассистент
+    • Поддержка плагинов и расширений
 
-🚀 Начните с выбора вкладки "Скрыть данные" или "Извлечь данные"
-в верхней части окна.
+    📋 ОСНОВНЫЕ ВКЛАДКИ:
+    1. 📦 Скрыть данные — скрытие данных в одном контейнере
+    2. 🔍 Извлечь данные — извлечение скрытых данных
+    3. 📦 Пакетная обработка — одновременная обработка до 5 файлов
+    4. ⚙️ Настройки — настройка программы и темы
+    5. 📊 Статистика — просмотр статистики использования
+    6. 🏆 Достижения — ваши достижения в программе
+    7. ❓ Помощь — это окно с руководством
 
-💡 Совет: Используйте вкладку "Статистика" для отслеживания
-вашей активности и "Достижения" для мотивации!
-"""
+    💡 СОВЕТ: Начните с выбора вкладки "Скрыть данные" или "Извлечь данные"
+    в верхней части окна. Для работы с несколькими файлами используйте
+    вкладку "Пакетная обработка".
+
+    🎮 ДОСТИЖЕНИЯ: Следите за своими достижениями в соответствующей вкладке!
+    📈 СТАТИСТИКА: Отслеживайте свою активность и прогресс!
+    🤖 АССИСТЕНТ: Используйте интеллектуальные подсказки для лучших результатов!
+    """
+        self.display_help_text(help_text)
+
+    def show_help_batch(self):
+        """Показывает помощь по пакетной обработке"""
+        help_text = """
+    📦 ПАКЕТНАЯ ОБРАБОТКА ФАЙЛОВ
+
+    ØccultoNG Pro теперь поддерживает пакетную обработку до 5 файлов одновременно!
+    Это позволяет значительно ускорить работу при необходимости обработки
+    нескольких файлов.
+
+    🚀 ВОЗМОЖНОСТИ ПАКЕТНОЙ ОБРАБОТКИ:
+    • Скрытие данных в до 5 контейнерах одновременно
+    • Извлечение данных из до 5 стего-файлов одновременно
+    • Анализ до 5 файлов на наличие скрытых данных
+    • Автоматическое сохранение результатов
+    • Экспорт результатов обработки в JSON
+    • Отслеживание прогресса в реальном времени
+
+    📋 ТРИ РЕЖИМА РАБОТЫ:
+
+    1. 📤 ПАКЕТНОЕ СКРЫТИЕ:
+       • Выберите до 5 файлов-контейнеров
+       • Укажите данные для скрытия (текст или файл)
+       • Выберите метод и настройки
+       • Начните обработку — все файлы будут обработаны автоматически
+
+    2. 📥 ПАКЕТНОЕ ИЗВЛЕЧЕНИЕ:
+       • Выберите до 5 стего-файлов
+       • Укажите пароль (если требуется)
+       • Выберите метод или используйте автоопределение
+       • Результаты будут сохранены автоматически
+
+    3. 🔍 ПАКЕТНЫЙ АНАЛИЗ:
+       • Выберите до 5 файлов для анализа
+       • Программа проверит наличие скрытых данных
+       • Покажет информацию о вместимости контейнеров
+       • Определит тип возможных скрытых данных
+
+    🎯 ПРЕИМУЩЕСТВА ПАКЕТНОЙ ОБРАБОТКИ:
+    • Экономия времени — не нужно обрабатывать каждый файл отдельно
+    • Единые настройки для всех файлов
+    • Автоматическое создание резервных копий
+    • Подробный отчет о результатах
+    • Возможность экспорта результатов
+
+    ⚠️ ОГРАНИЧЕНИЯ:
+    • Максимум 5 файлов за одну операцию
+    • Все файлы обрабатываются с одинаковыми настройками
+    • Для скрытия используется один набор данных для всех файлов
+    • Требуется достаточно свободного места на диске
+
+    💡 СОВЕТЫ ПО ИСПОЛЬЗОВАНИЮ:
+    1. Убедитесь, что все выбранные файлы имеют одинаковый формат
+    2. Проверьте достаточно ли свободного места на диске
+    3. Используйте автоматическое резервное копирование
+    4. Экспортируйте результаты для дальнейшего анализа
+    5. Следите за прогрессом в статусной панели
+
+    🔧 РЕШЕНИЕ ПРОБЛЕМ:
+    • Если кнопки остаются заблокированными — нажмите "Очистить все"
+    • Если обработка зависла — используйте кнопку "Остановить обработку"
+    • Если файлы не обрабатываются — проверьте формат и права доступа
+    • Для повторной обработки тех же файлов — очистите список и добавьте заново
+
+    📊 ЭКСПОРТ РЕЗУЛЬТАТОВ:
+    После завершения обработки вы можете экспортировать результаты в JSON:
+    1. Нажмите "Экспорт результатов"
+    2. Выберите место сохранения
+    3. JSON-файл будет содержать:
+       • Дату и время обработки
+       • Статистику (успешно/ошибки)
+       • Подробную информацию по каждому файлу
+       • Настройки, использованные при обработке
+
+    🚀 БЫСТРЫЙ СТАРТ:
+    1. Перейдите на вкладку "📦 Пакетная обработка"
+    2. Выберите нужный режим (скрытие/извлечение/анализ)
+    3. Добавьте файлы (до 5 штук)
+    4. Настройте параметры
+    5. Нажмите соответствующую кнопку запуска
+    6. Дождитесь завершения обработки
+    7. Просмотрите или экспортируйте результаты
+
+    🎮 ДОСТИЖЕНИЯ, связанные с пакетной обработкой:
+    • "Конвейер" — выполните первую пакетную операцию
+    • "Мультитаскинг" — обработайте 5 файлов одновременно
+    • "Эксперт по анализу" — проанализируйте 10 файлов
+    • "Массовое скрытие" — скройте данные в 3 разных типах контейнеров
+    """
         self.display_help_text(help_text)
 
     def show_help_methods(self):
@@ -4929,150 +6719,350 @@ class SteganographyUltimatePro:
     def show_help_quickstart(self):
         """Показывает быстрый старт"""
         help_text = """
-🚀 Быстрый старт
+    🚀 БЫСТРЫЙ СТАРТ
 
-Скрыть данные в изображении:
-1. Перейдите на вкладку "Скрыть данные"
-2. Выберите изображение-контейнер (PNG/BMP/TIFF/TGA/JPG)
-3. Выберите тип данных: текст или файл
-4. Введите текст или выберите файл для скрытия
-5. Выберите метод скрытия (рекомендуется начать с "Классический LSB")
-6. Нажмите "🔐 Скрыть данные в изображении"
-7. Выберите место сохранения и имя файла
+    ОСНОВНАЯ РАБОТА:
 
-Скрыть данные в аудио:
-1. Перейдите на вкладку "Скрыть данные"
-2. Выберите аудиофайл WAV
-3. Выберите тип данных: текст или файл
-4. Введите текст или выберите файл для скрытия
-5. Метод автоматически изменится на "WAV LSB"
-6. Нажмите "🔐 Скрыть данные"
-7. Выберите место сохранения и имя файла
+    Скрыть данные в изображении:
+    1. Перейдите на вкладку "📦 Скрыть данные"
+    2. Выберите изображение-контейнер (PNG/BMP/TIFF/TGA/JPG)
+    3. Выберите тип данных: текст или файл
+    4. Введите текст или выберите файл для скрытия
+    5. Выберите метод скрытия (рекомендуется начать с "Классический LSB")
+    6. Нажмите "🔐 Скрыть данные в изображении"
+    7. Выберите место сохранения и имя файла
 
-Извлечь данные:
-1. Перейдите на вкладку "Извлечь данные"
-2. Выберите изображение или аудиофайл со скрытыми данными
-3. Нажмите "🔍 Извлечь данные"
-4. Дождитесь завершения операции
-5. Скопируйте или сохраните извлеченные данные
+    Скрыть данные в аудио:
+    1. Перейдите на вкладку "📦 Скрыть данные"
+    2. Выберите аудиофайл WAV
+    3. Выберите тип данных: текст или файл
+    4. Введите текст или выберите файл для скрытия
+    5. Метод автоматически изменится на "WAV LSB"
+    6. Нажмите "🔐 Скрыть данные"
+    7. Выберите место сохранения и имя файла
 
-💡 Совет: Используйте сочетания клавиш для ускорения работы!
-"""
+    Извлечь данные:
+    1. Перейдите на вкладку "🔍 Извлечь данные"
+    2. Выберите изображение или аудиофайл со скрытыми данными
+    3. Нажмите "🔍 Извлечь данные"
+    4. Дождитесь завершения операции
+    5. Скопируйте или сохраните извлеченные данные
+
+    📦 ПАКЕТНАЯ ОБРАБОТКА (НОВОЕ!):
+
+    Пакетное скрытие (до 5 файлов):
+    1. Перейдите на вкладку "📦 Пакетная обработка"
+    2. Выберите вкладку "📤 Скрытие"
+    3. Добавьте до 5 файлов-контейнеров
+    4. Выберите тип данных и введите текст/выберите файл
+    5. Настройте метод и параметры
+    6. Нажмите "🚀 Начать пакетное скрытие"
+    7. Дождитесь завершения обработки всех файлов
+
+    Пакетное извлечение (до 5 файлов):
+    1. Перейдите на вкладку "📦 Пакетная обработка"
+    2. Выберите вкладку "📥 Извлечение"
+    3. Добавьте до 5 стего-файлов
+    4. Введите пароль (если требуется)
+    5. Нажмите "🚀 Начать пакетное извлечение"
+    6. Результаты будут сохранены автоматически
+
+    Пакетный анализ (до 5 файлов):
+    1. Перейдите на вкладку "📦 Пакетная обработка"
+    2. Выберите вкладку "🔍 Анализ"
+    3. Добавьте до 5 файлов для проверки
+    4. Нажмите "🔍 Начать анализ"
+    5. Просмотрите результаты в поле ниже
+
+    ⚡ ПРОДВИНУТЫЕ ВОЗМОЖНОСТИ:
+
+    Интеллектуальный ассистент:
+    • Программа анализирует ваши действия и дает советы
+    • Автоматически рекомендует оптимальные методы
+    • Предупреждает о потенциальных проблемах
+    • Учится на ваших предпочтениях
+
+    Расширенная статистика:
+    • Отслеживание всех операций
+    • Анализ использования методов
+    • История успешных и неудачных операций
+    • Визуализация данных
+
+    Система достижений:
+    • Разблокируйте достижения за использование функций
+    • Следите за прогрессом
+    • Получайте мотивацию для освоения всех возможностей
+
+    💡 СОВЕТЫ:
+    • Используйте сочетания клавиш для ускорения работы!
+    • Регулярно сохраняйте настройки
+    • Создавайте резервные копии важных файлов
+    • Экспортируйте результаты для отчетности
+    • Используйте пакетную обработку для экономии времени
+    """
         self.display_help_text(help_text)
 
     def show_help_tips(self):
         """Показывает советы и рекомендации"""
         help_text = """
-💡 Советы и рекомендации
+    💡 СОВЕТЫ И РЕКОМЕНДАЦИИ
 
-• Используйте lossless-форматы (PNG/BMP/TIFF) для максимального качества
-  скрытия данных. Форматы с потерями (JPEG) могут повредить скрытую информацию.
+    🎯 ОБЩИЕ СОВЕТЫ:
+    • Используйте lossless-форматы (PNG/BMP/TIFF) для максимального качества
+      скрытия данных. Форматы с потерями (JPEG) могут повредить скрытую информацию.
 
-• Для аудио используйте несжатый WAV. Любое перекодирование или сжатие
-  может разрушить скрытые биты.
+    • Для аудио используйте несжатый WAV. Любое перекодирование или сжатие
+      может разрушить скрытые биты.
 
-• Метод HILL-CA обеспечивает максимальную скрытность, но имеет меньшую
-  вместимость. Используйте его когда важна незаметность.
+    • Метод HILL-CA обеспечивает максимальную скрытность, но имеет меньшую
+      вместимость. Используйте его когда важна незаметность.
 
-• Метод Adaptive-Noise лучше маскирует изменения в изображении.
-  Хороший баланс между вместимостью и скрытностью.
+    • Метод Adaptive-Noise лучше маскирует изменения в изображении.
+      Хороший баланс между вместимостью и скрытностью.
 
-• Для больших файлов используйте классический LSB для максимальной
-  вместимости.
+    • Для больших файлов используйте классический LSB для максимальной
+      вместимости.
 
-• Всегда проверяйте вместимость контейнера перед скрытием данных.
-  Программа покажет процент заполнения для выбранного метода.
+    📦 СОВЕТЫ ПО ПАКЕТНОЙ ОБРАБОТКЕ:
+    • Перед пакетной обработкой проверьте, что все файлы имеют одинаковый формат
+    • Убедитесь в наличии достаточного свободного места на диске
+    • Используйте одну и ту же папку для сохранения результатов
+    • Экспортируйте результаты обработки для ведения учета
+    • Ограничение в 5 файлов установлено для стабильности работы
+    • Если нужно обработать больше файлов — разбейте на несколько партий
 
-• Регулярно создавайте резервные копии важных файлов перед операциями.
+    🔐 СОВЕТЫ ПО БЕЗОПАСНОСТИ:
+    • Всегда используйте пароли для конфиденциальных данных
+    • Регулярно создавайте резервные копии важных файлов
+    • Проверяйте контрольные суммы извлеченных файлов
+    • Используйте разные пароли для разных операций
+    • Храните пароли в безопасном месте
 
-• Используйте историю для быстрого доступа к недавно использованным файлам.
+    ⚡ СОВЕТЫ ПО ПРОИЗВОДИТЕЛЬНОСТИ:
+    • Закрывайте другие ресурсоемкие приложения во время обработки
+    • Для пакетной обработки используйте SSD-диски для скорости
+    • При работе с большими файлами увеличьте размер файла подкачки
+    • Регулярно очищайте временные файлы программы
 
-• Откройте настройки, чтобы настроить тему интерфейса под ваши предпочтения.
+    🔄 СОВЕТЫ ПО НАСТРОЙКАМ:
+    • Настройте тему интерфейса под свои предпочтения
+    • Включите автоматическое резервное копирование
+    • Настройте горячие клавиши для часто используемых операций
+    • Используйте историю операций для быстрого доступа
+    • Регулярно обновляйте программу для получения новых функций
 
-• Следите за своими достижениями в соответствующей вкладке!
+    🤖 СОВЕТЫ ПО ИСПОЛЬЗОВАНИЮ АССИСТЕНТА:
+    • Внимательно читайте контекстные подсказки
+    • Следуйте рекомендациям по выбору метода
+    • Используйте анализ ситуации для предотвращения ошибок
+    • Обращайте внимание на предупреждения о проблемах
 
-• Используйте интеллектуального ассистента для получения контекстных советов.
-"""
+    📊 СОВЕТЫ ПО СТАТИСТИКЕ:
+    • Регулярно проверяйте статистику использования
+    • Анализируйте наиболее часто используемые методы
+    • Используйте историю операций для отладки проблем
+    • Экспортируйте статистику для отчетов
+
+    🏆 СОВЕТЫ ПО ДОСТИЖЕНИЯМ:
+    • Следите за прогрессом в достижениях
+    • Ставьте цели по разблокировке достижений
+    • Используйте достижения как руководство по изучению функций
+    • Делитесь достижениями с коллегами
+
+    🚀 ПРОДВИНУТЫЕ СОВЕТЫ:
+    • Комбинируйте разные методы для разных типов данных
+    • Используйте сжатие данных перед скрытием для экономии места
+    • Экспериментируйте с разными типами контейнеров
+    • Тестируйте извлечение на разных устройствах
+    • Документируйте использованные настройки для повторения
+    """
         self.display_help_text(help_text)
 
     def show_help_shortcuts(self):
         """Показывает горячие клавиши"""
         help_text = """
-⌨️ Горячие клавиши
+    ⌨️ ГОРЯЧИЕ КЛАВИШИ
 
-Основные:
-• F1 — Открыть помощь
-• Esc — Отменить текущую операцию
-• Ctrl+Enter — Выполнить основное действие на активной вкладке
-• Ctrl+O — Выбрать контейнер (на активной вкладке)
-• Ctrl+E — Извлечь данные
-• Ctrl+S — Сохранить извлеченные данные
-• Ctrl+L — Очистить текстовое поле
-• Ctrl+T — Переключить тему
+    ОСНОВНЫЕ:
+    • F1 — Открыть помощь
+    • Esc — Отменить текущую операцию
+    • Ctrl+Enter — Выполнить основное действие на активной вкладке
+    • Ctrl+O — Выбрать контейнер (на активной вкладке)
+    • Ctrl+E — Извлечь данные
+    • Ctrl+S — Сохранить извлеченные данные
+    • Ctrl+L — Очистить текстовое поле
+    • Ctrl+T — Переключить тему
 
-На вкладке "Скрыть данные":
-• Ctrl+1 — Выбрать метод "Классический LSB"
-• Ctrl+2 — Выбрать метод "Adaptive-Noise"
-• Ctrl+3 — Выбрать метод "Adaptive-Edge-LSB"
-• Ctrl+4 — Выбрать метод "HILL-CA"
-• Ctrl+5 — Выбрать метод "WAV LSB"
+    НА ВКЛАДКЕ "СКРЫТЬ ДАННЫЕ":
+    • Ctrl+1 — Выбрать метод "Классический LSB"
+    • Ctrl+2 — Выбрать метод "Adaptive-Noise"
+    • Ctrl+3 — Выбрать метод "Adaptive-Edge-LSB"
+    • Ctrl+4 — Выбрать метод "HILL-CA"
+    • Ctrl+5 — Выбрать метод "WAV LSB"
+    • Ctrl+6 — Выбрать метод "JPEG DCT"
 
-На вкладке "Извлечь данные":
-• Ctrl+R — Обновить предпросмотр
-• Ctrl+C — Копировать извлеченные данные
-• Ctrl+H — Копировать хеш извлеченных данных
+    НА ВКЛАДКЕ "ИЗВЛЕЧЬ ДАННЫЕ":
+    • Ctrl+R — Обновить предпросмотр
+    • Ctrl+C — Копировать извлеченные данные
+    • Ctrl+H — Копировать хеш извлеченных данных
+    • Ctrl+F — Найти в извлеченных данных
 
-Общие:
-• Ctrl+Tab — Переключиться на следующую вкладку
-• Ctrl+Shift+Tab — Переключиться на предыдущую вкладку
-• Ctrl+, — Открыть настройки
-• Ctrl+Q — Выйти из программы
-"""
+    НА ВКЛАДКЕ "ПАКЕТНАЯ ОБРАБОТКА" (НОВОЕ!):
+    • Ctrl+B — Переключиться на вкладку пакетной обработки
+    • Ctrl+Shift+H — Быстрый доступ к пакетному скрытию
+    • Ctrl+Shift+E — Быстрый доступ к пакетному извлечению
+    • Ctrl+Shift+A — Быстрый доступ к пакетному анализу
+    • Ctrl+Shift+C — Очистить все списки в пакетной обработке
+    • Ctrl+Shift+X — Экспорт результатов пакетной обработки
+
+    ОБЩИЕ:
+    • Ctrl+Tab — Переключиться на следующую вкладку
+    • Ctrl+Shift+Tab — Переключиться на предыдущую вкладку
+    • Ctrl+, — Открыть настройки
+    • Ctrl+Q — Выйти из программы
+    • Ctrl+Shift+S — Открыть статистику
+    • Ctrl+Shift+D — Открыть достижения
+
+    РАБОТА С ФАЙЛАМИ:
+    • Ctrl+N — Создать новый проект
+    • Ctrl+O — Открыть файл
+    • Ctrl+Shift+O — Открыть несколько файлов (пакетная обработка)
+    • Ctrl+W — Закрыть текущий файл
+    • Ctrl+Shift+W — Закрыть все файлы
+
+    РЕДАКТИРОВАНИЕ:
+    • Ctrl+Z — Отменить
+    • Ctrl+Y — Повторить
+    • Ctrl+X — Вырезать
+    • Ctrl+C — Копировать
+    • Ctrl+V — Вставить
+    • Ctrl+A — Выделить все
+    • Ctrl+F — Найти
+    • Ctrl+H — Заменить
+
+    ПРОСМОТР:
+    • Ctrl++ — Увеличить масштаб
+    • Ctrl+- — Уменьшить масштаб
+    • Ctrl+0 — Сбросить масштаб
+    • F11 — Полноэкранный режим
+    • Alt+Enter — Свойства файла
+
+    СИСТЕМНЫЕ:
+    • Alt+F4 — Закрыть программу
+    • Alt+Tab — Переключение между приложениями
+    • Win+D — Показать рабочий стол
+    • Win+E — Открыть проводник
+
+    💡 СОВЕТ: Горячие клавиши можно изменить в настройках программы.
+    """
         self.display_help_text(help_text)
 
     def show_help_faq(self):
         """Показывает часто задаваемые вопросы"""
         help_text = """
-❓ Часто задаваемые вопросы
+    ❓ ЧАСТО ЗАДАВАЕМЫЕ ВОПРОСЫ
 
-Q: Что делать, если данные не извлекаются?
-A: Попробуйте следующее:
-   1. Убедитесь, что используете правильный файл-контейнер
-   2. Попробуйте другой метод извлечения
-   3. Проверьте, не был ли файл изменен после скрытия данных
-   4. Убедитесь, что пароль (если используется) введен правильно
-   5. Попробуйте извлечь данные на другом устройстве
+    Q: Что делать, если данные не извлекаются?
+    A: Попробуйте следующее:
+       1. Убедитесь, что используете правильный файл-контейнер
+       2. Попробуйте другой метод извлечения
+       3. Проверьте, не был ли файл изменен после скрытия данных
+       4. Убедитесь, что пароль (если используется) введен правильно
+       5. Попробуйте извлечь данные на другом устройстве
 
-Q: Почему мой большой файл не помещается в контейнер?
-A: Каждый метод имеет ограничения по вместимости:
-   • Классический LSB: максимальная вместимость
-   • Adaptive-Noise: такая же вместимость, как у LSB
-   • AELSB/HILL: вместимость примерно 3/7 от LSB
-   Попробуйте:
-   1. Использовать контейнер большего размера
-   2. Выбрать метод с большей вместимостью
-   3. Сжать файл перед скрытием
+    Q: Почему мой большой файл не помещается в контейнер?
+    A: Каждый метод имеет ограничения по вместимости:
+       • Классический LSB: максимальная вместимость
+       • Adaptive-Noise: такая же вместимость, как у LSB
+       • AELSB/HILL: вместимость примерно 3/7 от LSB
+       Попробуйте:
+       1. Использовать контейнер большего размера
+       2. Выбрать метод с большей вместимостью
+       3. Сжать файл перед скрытием
 
-Q: Можно ли использовать JPEG как контейнер?
-A: Технически можно, но не рекомендуется. JPEG использует сжатие
-   с потерями, которое может повредить скрытые данные. Лучше
-   использовать lossless-форматы: PNG, BMP, TIFF.
+    Q: Можно ли использовать JPEG как контейнер?
+    A: Технически можно, но не рекомендуется. JPEG использует сжатие
+       с потерями, которое может повредить скрытые данные. Лучше
+       использовать lossless-форматы: PNG, BMP, TIFF.
 
-Q: Как проверить целостность извлеченных данных?
-A: Программа автоматически проверяет контрольную сумму (CRC32).
-   Также вы можете сравнить хеш SHA-256 извлеченных данных
-   с оригиналом.
+    Q: Как проверить целостность извлеченных данных?
+    A: Программа автоматически проверяет контрольную сумму (CRC32).
+       Также вы можете сравнить хеш SHA-256 извлеченных данных
+       с оригиналом.
 
-Q: Можно ли скрывать данные в уже модифицированных файлах?
-A: Да, но с осторожностью. Каждая модификация файла может
-   повредить скрытые данные. Лучше использовать оригинальные
-   файлы-контейнеры.
+    Q: Можно ли скрывать данные в уже модифицированных файлах?
+    A: Да, но с осторожностью. Каждая модификация файла может
+       повредить скрытые данные. Лучше использовать оригинальные
+       файлы-контейнеры.
 
-Q: Как восстановить данные, если что-то пошло не так?
-A: Если включено автоматическое создание резервных копий,
-   проверьте папку "backups" в директории с файлом. Также
-   можно попробовать извлечь данные другим методом.
-"""
+    Q: Как восстановить данные, если что-то пошло не так?
+    A: Если включено автоматическое создание резервных копий,
+       проверьте папку "backups" в директории с файлом. Также
+       можно попробовать извлечь данные другим методом.
+
+    📦 ВОПРОСЫ ПО ПАКЕТНОЙ ОБРАБОТКЕ:
+
+    Q: Почему ограничение в 5 файлов?
+    A: Ограничение установлено для:
+       1. Стабильности работы программы
+       2. Предотвращения перегрузки системы
+       3. Удобства управления процессом
+       4. Оптимизации использования памяти
+
+    Q: Что делать, если кнопки пакетной обработки заблокировались?
+    A: Нажмите кнопку "Очистить все" или переключитесь на другую
+       вкладку и обратно. Если не помогает — перезапустите программу.
+
+    Q: Как обработать больше 5 файлов?
+    A: Разделите файлы на группы по 5 штук и обработайте каждую
+       группу отдельно. Используйте экспорт результатов для
+       объединения отчетов.
+
+    Q: Почему пакетное извлечение не работает, хотя по отдельности работает?
+    A: Возможные причины:
+       1. Разные пароли для разных файлов
+       2. Разные методы скрытия в файлах
+       3. Повреждение некоторых файлов
+       4. Недостаточно прав доступа
+
+    Q: Как отменить пакетную обработку?
+    A: Нажмите кнопку "⏹️ Остановить обработку" в статусной панели.
+       Обработка остановится после завершения текущего файла.
+
+    Q: Где сохраняются результаты пакетной обработки?
+    A: Результаты сохраняются в указанную вами папку. Каждому файлу
+       присваивается уникальное имя на основе исходного имени.
+
+    🤖 ВОПРОСЫ ПО АССИСТЕНТУ:
+
+    Q: Как работает интеллектуальный ассистент?
+    A: Ассистент анализирует:
+       1. Тип и размер контейнера
+       2. Размер скрываемых данных
+       3. Выбранный метод
+       4. Системные ресурсы
+       И дает рекомендации на основе этих данных.
+
+    Q: Можно ли отключить подсказки ассистента?
+    A: Да, в настройках программы есть опция "Показывать подсказки и советы".
+
+    ⚙️ ТЕХНИЧЕСКИЕ ВОПРОСЫ:
+
+    Q: Какие системные требования?
+    A: Минимальные требования:
+       • Windows 7 / macOS 10.12 / Ubuntu 18.04
+       • 2 ГБ оперативной памяти
+       • 100 МБ свободного места
+       • Python 3.8+ (уже включен в сборку)
+
+    Q: Как обновить программу?
+    A: Скачайте новую версию с официального сайта и установите поверх
+       старой. Настройки и история сохранятся.
+
+    Q: Где хранятся настройки программы?
+    A: Настройки хранятся в файле "stego_settings_pro.json" в папке
+       с программой или в домашней директории пользователя.
+    """
         self.display_help_text(help_text)
 
     def show_help_support(self):
@@ -5084,7 +7074,7 @@ A: Если включено автоматическое создание ре�
 вы можете связаться с нами:
 
 📧 Email: tudubambam@ya.ru
-🌐 Сайт: www.occultong.pro
+🌐 Сайт: www.occulto.pro
 
 🕒 Время ответа: обычно в течение 24 часов
 
@@ -5128,11 +7118,140 @@ A: Если включено автоматическое создание ре�
         messagebox.showinfo("PDF Помощь", "Функция скачивания PDF будет доступна в следующей версии.")
 
     def send_feedback(self):
-        """Отправляет отзыв"""
-        feedback = tk.simpledialog.askstring("Отзыв", "Пожалуйста, оставьте ваш отзыв:")
-        if feedback:
-            # Здесь можно добавить код для отправки отзыва
-            messagebox.showinfo("Отзыв", "Спасибо за ваш отзыв! Он поможет нам улучшить продукт.")
+        """Предлагает несколько вариантов для обратной связи"""
+
+        # Создаем окно выбора
+        feedback_window = tk.Toplevel(self.root)
+        feedback_window.title("Обратная связь")
+        feedback_window.geometry("500x300")
+        feedback_window.transient(self.root)
+        feedback_window.grab_set()
+        feedback_window.configure(bg=self.colors["bg"])
+
+        ttk.Label(
+            feedback_window,
+            text="📝 Обратная связь",
+            font=("Segoe UI", 16, "bold"),
+            foreground=self.colors["accent"],
+            background=self.colors["bg"]
+        ).pack(pady=(20, 10))
+
+        ttk.Label(
+            feedback_window,
+            text="Пожалуйста, выберите способ обратной связи:",
+            font=("Segoe UI", 11),
+            background=self.colors["bg"],
+            foreground=self.colors["text"]
+        ).pack(pady=(0, 20))
+
+        # Вариант 1: Google Forms (основной)
+        forms_btn = ttk.Button(
+            feedback_window,
+            text="📊 Заполнить форму Google Forms",
+            style="Accent.TButton",
+            command=lambda: self.open_feedback_form(feedback_window)
+        )
+        forms_btn.pack(fill=tk.X, padx=50, pady=5)
+
+        # Вариант 2: Email
+        email_btn = ttk.Button(
+            feedback_window,
+            text="📧 Написать на email",
+            style="TButton",
+            command=lambda: self.send_email_feedback(feedback_window)
+        )
+        email_btn.pack(fill=tk.X, padx=50, pady=5)
+
+        # Вариант 3: GitHub Issues
+        github_btn = ttk.Button(
+            feedback_window,
+            text="🐙 Создать issue на GitHub",
+            style="TButton",
+            command=lambda: self.open_github_issues(feedback_window)
+        )
+        github_btn.pack(fill=tk.X, padx=50, pady=5)
+
+        ttk.Separator(feedback_window, orient="horizontal").pack(fill=tk.X, padx=50, pady=20)
+
+        # Кнопка отмены
+        ttk.Button(
+            feedback_window,
+            text="❌ Отмена",
+            style="TButton",
+            command=feedback_window.destroy
+        ).pack(pady=10)
+
+    def open_feedback_form(self, parent_window=None):
+        """Открывает форму Google Forms"""
+        import webbrowser
+
+        feedback_url = "https://docs.google.com/forms/d/1LrCMmimT_BCiVGekva2sbWgVfAUz6MbbzsPcZ3SgKKA"
+
+        try:
+            if parent_window:
+                parent_window.destroy()
+
+            webbrowser.open(feedback_url, new=2)
+
+            messagebox.showinfo(
+                "✅ Форма открыта",
+                "Форма для отзыва открыта в вашем браузере.\n\n"
+                "Пожалуйста, заполните форму, чтобы помочь нам улучшить программу!"
+            )
+
+            self.log_manager.add_entry("feedback", "info", {"type": "google_forms"})
+
+        except Exception as e:
+            messagebox.showerror(
+                "❌ Ошибка",
+                f"Не удалось открыть форму:\n{str(e)}\n\n"
+                f"Скопируйте ссылку вручную:\n{feedback_url}"
+            )
+
+    def send_email_feedback(self, parent_window=None):
+        """Предлагает отправить email"""
+        import webbrowser
+
+        if parent_window:
+            parent_window.destroy()
+
+        email_url = "mailto:tudubambam@ya.ru?subject=Отзыв%20о%20программе%20ØccultoNG%20Pro&body=Пожалуйста,%20опишите%20ваш%20отзыв%20или%20предложение..."
+
+        try:
+            webbrowser.open(email_url)
+            messagebox.showinfo(
+                "📧 Email",
+                "Почтовый клиент открыт.\n\n"
+                "Пожалуйста, отправьте ваш отзыв на адрес: tudubambam@ya.ru"
+            )
+        except Exception as e:
+            messagebox.showerror(
+                "❌ Ошибка",
+                f"Не удалось открыть почтовый клиент:\n{str(e)}\n\n"
+                "Напишите на адрес: tudubambam@ya.ru"
+            )
+
+    def open_github_issues(self, parent_window=None):
+        """Открывает страницу Issues на GitHub"""
+        import webbrowser
+
+        if parent_window:
+            parent_window.destroy()
+
+        github_url = "https://github.com/Proffessor2008/-ccultoNG/issues"
+
+        try:
+            webbrowser.open(github_url, new=2)
+            messagebox.showinfo(
+                "🐙 GitHub Issues",
+                "Страница Issues открыта в вашем браузере.\n\n"
+                "Вы можете сообщить о баге или предложить новую функцию."
+            )
+        except Exception as e:
+            messagebox.showerror(
+                "❌ Ошибка",
+                f"Не удалось открыть страницу GitHub:\n{str(e)}"
+            )
 
     def create_status_bar(self, parent: ttk.Frame) -> None:
         status_frame = ttk.Frame(parent, style="StatusBar.TFrame")
