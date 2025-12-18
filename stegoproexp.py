@@ -7114,9 +7114,290 @@ class SteganographyUltimatePro:
                 messagebox.showinfo("Поиск", "Текст не найден.")
 
     def download_help_pdf(self):
-        """Скачивает помощь в PDF"""
-        messagebox.showinfo("PDF Помощь", "Функция скачивания PDF будет доступна в следующей версии.")
+        """Скачивает помощь в PDF с поддержкой кириллицы"""
+        try:
+            # Импортируем необходимые модули
+            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak
+            from reportlab.pdfbase import pdfmetrics
+            from reportlab.pdfbase.ttfonts import TTFont
+            import os
+            import sys
+            import time
 
+            # Регистрируем шрифт с поддержкой кириллицы
+            try:
+                # Пытаемся использовать шрифт из системы
+                if sys.platform.startswith('win'):
+                    font_path = 'C:/Windows/Fonts/arial.ttf'
+                elif sys.platform.startswith('darwin'):
+                    font_path = '/System/Library/Fonts/PingFang.ttc'  # Для Mac
+                else:  # Linux
+                    font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+
+                # Если шрифт не найден, используем встроенный шрифт с кириллицей
+                if not os.path.exists(font_path):
+                    # Используем шрифт из ресурсов приложения
+                    font_path = os.path.join(os.path.dirname(__file__), 'resources', 'DejaVuSans.ttf')
+                    if not os.path.exists(font_path):
+                        # Если ресурс не найден, пытаемся загрузить шрифт
+                        try:
+                            import urllib.request
+                            os.makedirs(os.path.join(os.path.dirname(__file__), 'resources'), exist_ok=True)
+                            font_path = os.path.join(os.path.dirname(__file__), 'resources', 'DejaVuSans.ttf')
+                            urllib.request.urlretrieve(
+                                'https://github.com/dejavu-fonts/dejavu-fonts/raw/master/ttf/DejaVuSans.ttf',
+                                font_path
+                            )
+                        except:
+                            raise Exception("Не удалось найти шрифт с поддержкой кириллицы")
+
+                # Регистрируем шрифт
+                pdfmetrics.registerFont(TTFont('DejaVuSans', font_path))
+                font_name = 'DejaVuSans'
+            except Exception as e:
+                messagebox.showerror("Ошибка шрифта",
+                                     f"Не удалось загрузить шрифт с кириллицей: {str(e)}\n\nУстановите шрифт DejaVu Sans или Arial в систему.")
+                self.log_manager.add_entry("pdf_font_error", "error", {"error": str(e)})
+                return
+
+            # Получаем текущий текст помощи
+            help_text = self.help_text.get("1.0", tk.END).strip()
+
+            if not help_text:
+                messagebox.showwarning("Предупреждение", "Нет текста для экспорта в PDF")
+                return
+
+            # Открываем диалог сохранения
+            file_path = filedialog.asksaveasfilename(
+                title="Сохранить помощь в PDF",
+                defaultextension=".pdf",
+                filetypes=[("PDF файлы", "*.pdf"), ("Все файлы", "*.*")],
+                initialdir=self.last_save_dir,
+                initialfile=f"OccultoNG_Pro_Pomosh_v{VERSION}.pdf"
+            )
+
+            if not file_path:
+                return
+
+            # Создаем PDF документ
+            doc = SimpleDocTemplate(
+                file_path,
+                pagesize=A4,
+                rightMargin=72,
+                leftMargin=72,
+                topMargin=72,
+                bottomMargin=72
+            )
+
+            # Стили для PDF (с указанием шрифта)
+            styles = getSampleStyleSheet()
+
+            # Заголовок
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontName=font_name,
+                fontSize=16,
+                alignment=1,
+                spaceAfter=30,
+                textColor=colors.HexColor("#2563EB")
+            )
+
+            # Заголовки разделов
+            heading_style = ParagraphStyle(
+                'CustomHeading',
+                parent=styles['Heading2'],
+                fontName=font_name,
+                fontSize=14,
+                spaceBefore=20,
+                spaceAfter=10,
+                textColor=colors.HexColor("#1E3A8A")
+            )
+
+            # Обычный текст
+            normal_style = ParagraphStyle(
+                'CustomNormal',
+                parent=styles['Normal'],
+                fontName=font_name,
+                fontSize=11,
+                spaceAfter=6,
+                leading=14
+            )
+
+            # Стиль для подсказок/советов
+            tip_style = ParagraphStyle(
+                'CustomTip',
+                parent=styles['Normal'],
+                fontName=font_name,
+                fontSize=11,
+                spaceAfter=6,
+                leading=14,
+                backColor=colors.HexColor("#F0F9FF"),
+                borderColor=colors.HexColor("#3B82F6"),
+                borderWidth=1,
+                borderPadding=8,
+                spaceBefore=10
+            )
+
+            # Стиль для кода
+            code_style = ParagraphStyle(
+                'CustomCode',
+                parent=styles['Code'],
+                fontName=font_name,
+                fontSize=10,
+                backColor=colors.HexColor("#F3F4F6"),
+                borderPadding=6,
+                spaceAfter=10
+            )
+
+            # Стиль для предупреждений
+            warning_style = ParagraphStyle(
+                'CustomWarning',
+                parent=styles['Normal'],
+                fontName=font_name,
+                fontSize=11,
+                spaceAfter=6,
+                leading=14,
+                textColor=colors.HexColor("#DC2626")
+            )
+
+            # Стиль для информации
+            info_style = ParagraphStyle(
+                'CustomInfo',
+                parent=styles['Normal'],
+                fontName=font_name,
+                fontSize=11,
+                spaceAfter=6,
+                leading=14,
+                textColor=colors.HexColor("#047857")
+            )
+
+            # Формируем содержание документа
+            story = []
+
+            # Титульная страница
+            title = Paragraph(f"ØccultoNG Pro v{VERSION}", title_style)
+            story.append(title)
+            story.append(Spacer(1, 24))
+
+            subtitle = Paragraph("Полное руководство пользователя",
+                                 ParagraphStyle('Subtitle', parent=styles['Heading2'],
+                                                fontName=font_name, fontSize=14, alignment=1))
+            story.append(subtitle)
+            story.append(Spacer(1, 48))
+
+            author = Paragraph(f"Автор: {AUTHOR}",
+                               ParagraphStyle('Author', parent=styles['Normal'],
+                                              fontName=font_name, fontSize=12, alignment=1))
+            story.append(author)
+            story.append(Spacer(1, 12))
+
+            date = Paragraph(f"Дата сборки: {BUILD_DATE}",
+                             ParagraphStyle('Date', parent=styles['Normal'],
+                                            fontName=font_name, fontSize=12, alignment=1))
+            story.append(date)
+            story.append(Spacer(1, 12))
+
+            contact = Paragraph("Техническая поддержка: tudubambam@ya.ru",
+                                ParagraphStyle('Contact', parent=styles['Normal'],
+                                               fontName=font_name, fontSize=12, alignment=1))
+            story.append(contact)
+            story.append(PageBreak())
+
+            # Содержание
+            toc_title = Paragraph("Содержание", heading_style)
+            story.append(toc_title)
+            story.append(Spacer(1, 12))
+
+            # Создаем оглавление
+            contents = [
+                "1. Введение",
+                "2. Поддерживаемые методы",
+                "3. Быстрый старт",
+                "4. Пакетная обработка",
+                "5. Советы и рекомендации",
+                "6. Горячие клавиши",
+                "7. Часто задаваемые вопросы",
+                "8. Техническая поддержка"
+            ]
+
+            for item in contents:
+                story.append(Paragraph(f"• {item}", normal_style))
+                story.append(Spacer(1, 4))
+
+            story.append(PageBreak())
+
+            # Основное содержание
+            story.append(Paragraph("1. Введение", heading_style))
+            story.append(Spacer(1, 12))
+
+            # Разбиваем текст на абзацы и форматируем их
+            paragraphs = help_text.split("\n")
+            for para in paragraphs:
+                para = para.strip()
+                if not para:
+                    continue
+
+                # Определяем тип абзаца по префиксам
+                if para.startswith("🎯") or para.startswith("🚀") or para.startswith("📋"):
+                    story.append(Paragraph(para, heading_style))
+                elif para.startswith("💡") or para.startswith("✅") or para.startswith("🏆"):
+                    story.append(Paragraph(para, tip_style))
+                elif para.startswith("⚠️") or para.startswith("❌"):
+                    story.append(Paragraph(para, warning_style))
+                elif para.startswith("🔍") or para.startswith("📊") or para.startswith("🔄"):
+                    story.append(Paragraph(para, info_style))
+                elif para.startswith("```") or para.startswith("    "):
+                    # Код или пример
+                    code_text = para.replace("```", "").strip()
+                    story.append(Paragraph(code_text, code_style))
+                else:
+                    # Обычный текст
+                    story.append(Paragraph(para, normal_style))
+
+            story.append(Spacer(1, 24))
+            story.append(Paragraph(f"Документ сгенерирован: {time.strftime('%d.%m.%Y %H:%M')}",
+                                   ParagraphStyle('Footer', parent=styles['Normal'],
+                                                  fontName=font_name, fontSize=9, alignment=2)))
+
+            # Создаем PDF
+            doc.build(story)
+            import subprocess
+            # Показываем сообщение об успехе
+            if messagebox.askyesno("Успех", f"Помощь успешно сохранена в PDF: {file_path}\n\nОткрыть файл сейчас?"):
+                try:
+                    if sys.platform.startswith('darwin'):
+                        subprocess.call(['open', file_path])
+                    elif os.name == 'nt':
+                        os.startfile(file_path)
+                    else:
+                        subprocess.call(['xdg-open', file_path])
+                except Exception as e:
+                    messagebox.showwarning("Предупреждение", f"Не удалось открыть PDF файл: {str(e)}")
+
+            self.log_manager.add_entry("help_exported", "success", {"format": "PDF", "file": file_path})
+            self.show_toast("✅ Помощь экспортирована в PDF")
+
+        except ImportError:
+            # Обработка отсутствия reportlab
+            if messagebox.askyesno("Ошибка",
+                                   "Библиотека reportlab не установлена.\n\nХотите установить её автоматически?"):
+                try:
+                    import subprocess
+                    subprocess.check_call([sys.executable, "-m", "pip", "install", "reportlab"])
+                    messagebox.showinfo("Успех",
+                                        "Библиотека reportlab успешно установлена. Попробуйте снова экспортировать PDF.")
+                    self.log_manager.add_entry("pdf_library_installed", "success", {})
+                except Exception as e:
+                    messagebox.showerror("Ошибка",
+                                         f"Не удалось установить библиотеку reportlab: {str(e)}\n\nПожалуйста, установите её вручную: pip install reportlab")
+                    self.log_manager.add_entry("pdf_library_install_failed", "error", {"error": str(e)})
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось создать PDF файл: {str(e)}")
+            self.log_manager.add_entry("help_export_failed", "error", {"error": str(e)})
     def send_feedback(self):
         """Предлагает несколько вариантов для обратной связи"""
 
