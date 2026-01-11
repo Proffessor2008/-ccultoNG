@@ -4,9 +4,9 @@
 
 [![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/)
 [![License](https://img.shields.io/badge/License-Proprietary-red)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-2.1.0-green)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/Version-2.1.1-green)](CHANGELOG.md)
 [![Status](https://img.shields.io/badge/Status-Production%20Ready-brightgreen)](https://github.com/Proffessor2008/-ccultoNG)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blueviolet)](https://github.com)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20)](https://github.com)
 
 ---
 
