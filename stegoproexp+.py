@@ -4270,17 +4270,106 @@ class BatchProcessingUI:
         self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
     def create_content(self):
-        """Создает содержимое интерфейса с оптимизированной компоновкой для эффективного использования пространства"""
+        """Создает содержимое интерфейса"""
         # Создаем Notebook для разных операций в центре
         self.batch_notebook = ttk.Notebook(self.scrollable_frame)
         self.batch_notebook.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 10))
+
         # Создаем три вкладки с оптимизированным внутренним расположением
         self.hide_tab = self.create_hide_tab()
         self.batch_notebook.add(self.hide_tab, text="📤 Скрытие")
+
         self.extract_tab = self.create_extract_tab()
         self.batch_notebook.add(self.extract_tab, text="📥 Извлечение")
+
         self.analyze_tab = self.create_analyze_tab()
         self.batch_notebook.add(self.analyze_tab, text="🔍 Анализ")
+
+        # Дополнительная панель для детальной информации
+        details_frame = ttk.LabelFrame(self.analyze_tab, text="🔍 Детальная информация", padding=15,
+                                       style="Card.TLabelframe")
+        details_frame.grid(row=3, column=0, sticky="nsew", padx=15, pady=(10, 0))
+
+        # Вкладки для детальной информации
+        self.details_notebook = ttk.Notebook(details_frame)
+        self.details_notebook.pack(fill=tk.BOTH, expand=True)
+
+        # Вкладка с основной информацией
+        info_tab = ttk.Frame(self.details_notebook, style="Card.TFrame")
+        self.details_notebook.add(info_tab, text="Основная информация")
+
+        # Текстовое поле для детальной информации
+        self.details_text = scrolledtext.ScrolledText(
+            info_tab,
+            wrap=tk.WORD,
+            bg=self.app.colors["card"],
+            fg=self.app.colors["text"],
+            font=("Segoe UI", 10),
+            padx=10,
+            pady=10
+        )
+        self.details_text.pack(fill=tk.BOTH, expand=True)
+        self.details_text.config(state=tk.DISABLED)
+
+        # Вкладка со статистикой
+        stats_tab = ttk.Frame(self.details_notebook, style="Card.TFrame")
+        self.details_notebook.add(stats_tab, text="Статистика")
+
+        # Создаем фрейм для статистики
+        stats_frame = ttk.Frame(stats_tab, style="Card.TFrame")
+        stats_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Заголовок статистики
+        ttk.Label(
+            stats_frame,
+            text="📊 Статистические тесты",
+            font=("Segoe UI", 12, "bold"),
+            style="TLabel"
+        ).pack(anchor="w", pady=(5, 5))
+
+        # Заглушки для статистики (будут заменены при анализе)
+        self.stats_content = ttk.Frame(stats_frame, style="Card.TFrame")
+        self.stats_content.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(
+            self.stats_content,
+            text="Для отображения статистики выберите файл для анализа",
+            font=("Segoe UI", 10),
+            style="Secondary.TLabel"
+        ).pack(pady=20)
+
+        # Сохраняем ссылку на вкладку статистики
+        self.stats_tab = stats_tab
+
+        # Вкладка с гистограммой
+        histogram_tab = ttk.Frame(self.details_notebook, style="Card.TFrame")
+        self.details_notebook.add(histogram_tab, text="Гистограмма")
+
+        # Создаем фрейм для гистограммы
+        hist_frame = ttk.Frame(histogram_tab, style="Card.TFrame")
+        hist_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Заголовок гистограммы
+        ttk.Label(
+            hist_frame,
+            text="📈 Распределение значений",
+            font=("Segoe UI", 12, "bold"),
+            style="TLabel"
+        ).pack(anchor="w", pady=(5, 5))
+
+        # Заглушка для гистограммы
+        self.hist_content = ttk.Frame(hist_frame, style="Card.TFrame")
+        self.hist_content.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(
+            self.hist_content,
+            text="Для отображения гистограммы выберите файл для анализа",
+            font=("Segoe UI", 10),
+            style="Secondary.TLabel"
+        ).pack(pady=20)
+
+        # Сохраняем ссылку на вкладку гистограммы
+        self.histogram_tab = histogram_tab
 
     def create_hide_tab(self):
         """Создает профессиональную вкладку для пакетного скрытия с оптимизированной компоновкой"""
@@ -4831,6 +4920,7 @@ class BatchProcessingUI:
         self.results_tree.column("Размер данных", width=120, anchor=tk.CENTER)
         self.results_tree.column("Вместимость", width=120, anchor=tk.CENTER)
         self.results_tree.column("Качество", width=100, anchor=tk.CENTER)
+        self.results_tree.bind("<<TreeviewSelect>>", self.on_analysis_result_select)
         # Полоса прокрутки
         results_scroll = ttk.Scrollbar(results_frame, orient="vertical", command=self.results_tree.yview)
         self.results_tree.configure(yscrollcommand=results_scroll.set)
@@ -5335,6 +5425,341 @@ class BatchProcessingUI:
                 'analysis_time': time.time()
             }
 
+    def update_statistics_tab(self, result):
+        """Обновляет вкладку статистики с данными анализа"""
+        # Очищаем предыдущее содержимое
+        for widget in self.stats_content.winfo_children():
+            widget.destroy()
+
+        # Проверяем, есть ли данные для отображения
+        analysis = result.get('detailed_analysis', {})
+        if not analysis:
+            ttk.Label(
+                self.stats_content,
+                text="Нет данных для отображения статистики",
+                font=("Segoe UI", 10),
+                style="Secondary.TLabel"
+            ).pack(pady=15)
+            return
+
+        # Создаем фрейм для статистики
+        stats_frame = ttk.Frame(self.stats_content, style="Card.TFrame")
+        stats_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Статистика по методам
+        if 'statistical_tests' in analysis:
+            tests = analysis['statistical_tests']
+
+            # Chi-square тест
+            if 'chi_square' in tests:
+                chi = tests['chi_square']
+                chi_frame = ttk.Frame(stats_frame, style="Card.TFrame")
+                chi_frame.pack(fill=tk.X, pady=5)
+                ttk.Label(
+                    chi_frame,
+                    text="• Chi-square тест:",
+                    font=("Segoe UI", 10, "bold"),
+                    style="TLabel"
+                ).pack(side=tk.LEFT)
+
+                # Добавляем проверку наличия ключей
+                chi_value = chi.get('chi_square_value', 'N/A')
+                p_value = chi.get('p_value', 'N/A')
+                interpretation = chi.get('interpretation', 'N/A')
+
+                ttk.Label(
+                    chi_frame,
+                    text=f"Значение: {chi_value:.2f}" if isinstance(chi_value, (int, float)) else chi_value,
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(side=tk.LEFT, padx=(5, 10))
+                ttk.Label(
+                    chi_frame,
+                    text=f"P-значение: {p_value:.4f}" if isinstance(p_value, (int, float)) else p_value,
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(side=tk.LEFT)
+
+            # Sample Pair Analysis
+            if 'spa' in tests:
+                spa = tests['spa']
+                spa_frame = ttk.Frame(stats_frame, style="Card.TFrame")
+                spa_frame.pack(fill=tk.X, pady=5)
+                ttk.Label(
+                    spa_frame,
+                    text="• Sample Pair Analysis:",
+                    font=("Segoe UI", 10, "bold"),
+                    style="TLabel"
+                ).pack(side=tk.LEFT)
+
+                # Добавляем проверку наличия ключей
+                ratio = spa.get('ratio', 'N/A')
+                stego_probability = spa.get('stego_probability', 'N/A')
+
+                ttk.Label(
+                    spa_frame,
+                    text=f"Соотношение: {ratio:.2f}" if isinstance(ratio, (int, float)) else ratio,
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(side=tk.LEFT, padx=(5, 10))
+                ttk.Label(
+                    spa_frame,
+                    text=f"Вероятность: {stego_probability:.1%}" if isinstance(stego_probability,
+                                                                               (int, float)) else stego_probability,
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(side=tk.LEFT)
+
+            # RS анализ
+            if 'rs' in tests:
+                rs = tests['rs']
+                rs_frame = ttk.Frame(stats_frame, style="Card.TFrame")
+                rs_frame.pack(fill=tk.X, pady=5)
+                ttk.Label(
+                    rs_frame,
+                    text="• RS анализ:",
+                    font=("Segoe UI", 10, "bold"),
+                    style="TLabel"
+                ).pack(side=tk.LEFT)
+
+                # Добавляем проверку наличия ключей
+                ratio = rs.get('ratio', 'N/A')
+                stego_probability = rs.get('stego_probability', 'N/A')
+
+                ttk.Label(
+                    rs_frame,
+                    text=f"Соотношение: {ratio:.2f}" if isinstance(ratio, (int, float)) else ratio,
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(side=tk.LEFT, padx=(5, 10))
+                ttk.Label(
+                    rs_frame,
+                    text=f"Вероятность: {stego_probability:.1%}" if isinstance(stego_probability,
+                                                                               (int, float)) else stego_probability,
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(side=tk.LEFT)
+
+            # Анализ шума
+            if 'noise_analysis' in analysis:
+                noise = analysis['noise_analysis']
+                noise_frame = ttk.Frame(stats_frame, style="Card.TFrame")
+                noise_frame.pack(fill=tk.X, pady=10)
+                ttk.Label(
+                    noise_frame,
+                    text="📈 Анализ шума",
+                    font=("Segoe UI", 12, "bold"),
+                    style="TLabel"
+                ).pack(anchor="w", pady=(5, 0))
+                ttk.Label(
+                    noise_frame,
+                    text=f"Уровень шума: {noise.get('noise_level', 'N/A'):.2f}" if isinstance(noise.get('noise_level'),
+                                                                                              (int,
+                                                                                               float)) else noise.get(
+                        'noise_level', 'N/A'),
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(anchor="w")
+                ttk.Label(
+                    noise_frame,
+                    text=f"Тип шума: {noise.get('noise_type', 'N/A')}",
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(anchor="w")
+                ttk.Label(
+                    noise_frame,
+                    text=f"Оценка паттерна: {noise.get('pattern_score', 'N/A'):.2f}" if isinstance(
+                        noise.get('pattern_score'), (int, float)) else noise.get('pattern_score', 'N/A'),
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(anchor="w")
+
+            # Анализ энтропии
+            if 'entropy_analysis' in analysis:
+                entropy = analysis['entropy_analysis']
+                entropy_frame = ttk.Frame(stats_frame, style="Card.TFrame")
+                entropy_frame.pack(fill=tk.X, pady=10)
+                ttk.Label(
+                    entropy_frame,
+                    text="🔍 Анализ энтропии",
+                    font=("Segoe UI", 12, "bold"),
+                    style="TLabel"
+                ).pack(anchor="w", pady=(5, 0))
+                ttk.Label(
+                    entropy_frame,
+                    text=f"Общая энтропия: {entropy.get('overall_entropy', 'N/A'):.2f}" if isinstance(
+                        entropy.get('overall_entropy'), (int, float)) else entropy.get('overall_entropy', 'N/A'),
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(anchor="w")
+                ttk.Label(
+                    entropy_frame,
+                    text=f"Энтропия LSB: {entropy.get('lsb_entropy', 'N/A'):.2f}" if isinstance(
+                        entropy.get('lsb_entropy'), (int, float)) else entropy.get('lsb_entropy', 'N/A'),
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(anchor="w")
+                ttk.Label(
+                    entropy_frame,
+                    text=f"Вердикт: {entropy.get('interpretation', 'N/A')}",
+                    font=("Segoe UI", 10),
+                    style="Secondary.TLabel"
+                ).pack(anchor="w")
+        else:
+            ttk.Label(
+                stats_frame,
+                text="Статистические данные отсутствуют",
+                font=("Segoe UI", 10),
+                style="Secondary.TLabel"
+            ).pack(pady=10)
+
+    def update_histogram_tab(self, result):
+        """Обновляет вкладку гистограммы с данными анализа"""
+        # Очищаем предыдущее содержимое
+        for widget in self.hist_content.winfo_children():
+            widget.destroy()
+
+        # Проверяем, есть ли данные для отображения
+        analysis = result.get('detailed_analysis', {})
+        if not analysis:
+            ttk.Label(
+                self.hist_content,
+                text="Нет данных для отображения гистограммы",
+                font=("Segoe UI", 10),
+                style="Secondary.TLabel"
+            ).pack(pady=15)
+            return
+
+        # Проверяем, есть ли данные для гистограммы
+        if 'histogram_analysis' not in analysis or not analysis['histogram_analysis'].get('histogram'):
+            ttk.Label(
+                self.hist_content,
+                text="Нет данных для отображения гистограммы",
+                font=("Segoe UI", 10),
+                style="Secondary.TLabel"
+            ).pack(pady=15)
+            return
+
+        hist_data = analysis['histogram_analysis']
+        histogram = hist_data.get('histogram', [])
+
+        if not histogram:
+            ttk.Label(
+                self.hist_content,
+                text="Нет данных для отображения гистограммы",
+                font=("Segoe UI", 10),
+                style="Secondary.TLabel"
+            ).pack(pady=15)
+            return
+
+        # Создаем Canvas для гистограммы
+        canvas = tk.Canvas(
+            self.hist_content,
+            bg=self.app.colors["card"],
+            highlightthickness=0,
+            height=300  # Устанавливаем фиксированную высоту
+        )
+        canvas.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Используем метод after для отложенного отображения, чтобы Canvas успел отобразиться
+        def draw_histogram():
+            # Получаем актуальные размеры
+            width = canvas.winfo_width() or 500
+            height = canvas.winfo_height() or 300
+
+            # Очищаем предыдущую отрисовку
+            canvas.delete("all")
+
+            # Добавляем заголовок
+            canvas.create_text(
+                width / 2,
+                25,
+                text="Distribution Histogram",  # Используем английский текст
+                fill="white",
+                font=("Segoe UI", 12, "bold")
+            )
+
+            # Нормализуем данные
+            max_val = max(histogram) if histogram else 1
+            if max_val == 0:
+                max_val = 1
+
+            bar_width = width / len(histogram) * 0.9  # 90% ширины для баров
+            padding = width * 0.05  # 5% отступов с каждой стороны
+
+            # Рисуем гистограмму
+            for i, value in enumerate(histogram):
+                x0 = padding + i * bar_width
+                y0 = height - 50 - (value / max_val * (height - 70))
+                x1 = padding + (i + 1) * bar_width
+                y1 = height - 50
+
+                # Определяем цвет в зависимости от высоты
+                if value > max_val * 0.7:
+                    color = "#FF4444"  # Красный для высоких значений
+                elif value > max_val * 0.3:
+                    color = "#FFAA33"  # Оранжевый для средних значений
+                else:
+                    color = "#4C8DFF"  # Синий для низких значений
+
+                canvas.create_rectangle(x0, y0, x1, y1, fill=color, outline="#333333")
+
+            # Добавляем ось X
+            for i in range(0, len(histogram), max(1, len(histogram) // 10)):
+                x = padding + i * bar_width + bar_width / 2
+                canvas.create_line(x, height - 50, x, height - 45, fill="white")
+                canvas.create_text(
+                    x,
+                    height - 35,
+                    text=str(i),
+                    fill="white",
+                    font=("Segoe UI", 8),
+                    anchor="n"
+                )
+
+            # Добавляем метки оси X
+            canvas.create_text(
+                width / 2,
+                height - 20,
+                text="Pixel Value",
+                fill="white",
+                font=("Segoe UI", 9)
+            )
+
+            # Добавляем ось Y
+            for i in range(0, 101, 20):
+                y = height - 50 - (i / 100 * (height - 70))
+                canvas.create_line(padding, y, padding - 5, y, fill="white")
+                canvas.create_text(
+                    padding - 10,
+                    y,
+                    text=f"{i}%",
+                    fill="white",
+                    font=("Segoe UI", 8),
+                    anchor="e"
+                )
+
+            # Добавляем метку оси Y
+            canvas.create_text(
+                padding - 20,
+                height / 2,
+                text="Frequency",
+                fill="white",
+                font=("Segoe UI", 9),
+                angle=90
+            )
+
+        # Запланируем отрисовку после того, как Canvas отобразится
+        canvas.after(100, draw_histogram)
+
+        # Добавляем подсказку о том, как читать гистограмму
+        ttk.Label(
+            self.hist_content,
+            text="Красный: высокие значения | Оранжевый: средние значения | Синий: низкие значения",
+            font=("Segoe UI", 9),
+            style="Secondary.TLabel"
+        ).pack(pady=(5, 0))
+
     def show_detailed_analysis(self, result):
         """Показывает детальный анализ в панели детальной информации"""
         try:
@@ -5348,8 +5773,37 @@ class BatchProcessingUI:
             # Вставляем текст
             self.details_text.insert("1.0", analysis_text)
             self.details_text.config(state=tk.DISABLED)
+
+            # Обновляем вкладки статистики и гистограммы
+            self.update_statistics_tab(result)
+            self.update_histogram_tab(result)
         except Exception as e:
             print(f"Ошибка отображения детального анализа: {e}")
+
+    def on_analysis_result_select(self, event):
+        """Обрабатывает выбор результата анализа в таблице"""
+        selected = self.results_tree.selection()
+        if selected:
+            item = selected[0]
+            index = int(self.results_tree.item(item, "values")[0]) - 1  # Индекс в 0-индексации
+
+            # Получаем результат анализа из сохраненных данных
+            if hasattr(self, 'analysis_results') and index in self.analysis_results:
+                result = self.analysis_results[index]
+
+                # Показываем детальный анализ
+                self.show_detailed_analysis(result)
+
+                # Обновляем вкладки статистики и гистограммы
+                self.update_statistics_tab(result)
+                self.update_histogram_tab(result)
+            else:
+                # Если данных нет, пытаемся получить из текущей очереди
+                if 0 <= index < len(self.batch_processor.batch_queue):
+                    result = self.batch_processor.batch_queue[index]
+                    self.show_detailed_analysis(result)
+                    self.update_statistics_tab(result)
+                    self.update_histogram_tab(result)
 
     def add_analysis_result_to_table(self, index, file_path, result):
         """Добавляет результат анализа в таблицу результатов с расширенной информацией"""
@@ -5364,6 +5818,11 @@ class BatchProcessingUI:
         file_info = result.get('file_info', {})
         analysis = result.get('detailed_analysis', {})
         stego_probability = result.get('stego_probability', 0.0)
+
+        # Сохраняем детальные данные анализа для последующего использования
+        if not hasattr(self, 'analysis_results'):
+            self.analysis_results = {}
+        self.analysis_results[index] = result
 
         # Определяем, содержит ли файл скрытые данные
         has_stego = result.get('likely_contains_stego', stego_probability > 0.7)
@@ -5424,12 +5883,12 @@ class BatchProcessingUI:
             ),
             tags=(tag,)
         )
+
         # Настраиваем теги для цветов
-        self.results_tree.tag_configure('high_confidence', background="#ff4444", foreground="white")  # Ярко-красный
-        self.results_tree.tag_configure('medium_confidence', background="#ffaa33", foreground="black")  # Оранжевый
-        self.results_tree.tag_configure('low_confidence', background="#ffd700", foreground="black")  # Желтый
-        self.results_tree.tag_configure('no_stego', background=self.app.colors["success"],
-                                        foreground="white")  # Зеленый
+        self.results_tree.tag_configure('high_confidence', background="#ff4444", foreground="white")
+        self.results_tree.tag_configure('medium_confidence', background="#ffaa33", foreground="black")
+        self.results_tree.tag_configure('low_confidence', background="#ffd700", foreground="black")
+        self.results_tree.tag_configure('no_stego', background=self.app.colors["success"], foreground="white")
         self.results_tree.tag_configure('error', background=self.app.colors["error"], foreground="white")
 
     def calculate_stego_probability(self, analysis):
@@ -5538,60 +5997,101 @@ class BatchProcessingUI:
                 text += "\n🖼️ ДЕТАЛЬНЫЙ АНАЛИЗ ИЗОБРАЖЕНИЯ:\n"
                 if 'dimensions' in analysis:
                     dims = analysis['dimensions']
-                    text += f"   • Размеры: {dims['width']}x{dims['height']} пикселей\n"
+                    text += f"   • Размеры: {dims.get('width', 'N/A')}x{dims.get('height', 'N/A')} пикселей\n"
                 if 'color_depth' in analysis:
                     text += f"   • Цветовая глубина: {analysis['color_depth']} бит\n"
 
                 text += "\n📊 СТАТИСТИЧЕСКИЕ ТЕСТЫ:\n"
                 if 'statistical_tests' in analysis:
                     tests = analysis['statistical_tests']
+
+                    # Chi-square тест
                     if 'chi_square' in tests:
                         chi = tests['chi_square']
+                        chi_value = chi.get('chi_square_value', 'N/A')
+                        p_value = chi.get('p_value', 'N/A')
+                        interpretation = chi.get('interpretation', 'N/A')
+
                         text += f"   • Chi-square тест:\n"
-                        text += f"      - Значение: {chi['chi_square_value']:.2f}\n"
-                        text += f"      - P-значение: {chi['p_value']:.4f}\n"
-                        text += f"      - Вердикт: {chi['interpretation']}\n"
+                        text += f"      - Значение: {chi_value:.2f}" if isinstance(chi_value, (
+                            int, float)) else f"      - Значение: {chi_value}\n"
+                        text += f"      - P-значение: {p_value:.4f}" if isinstance(p_value, (
+                            int, float)) else f"      - P-значение: {p_value}\n"
+                        text += f"      - Вердикт: {interpretation}\n"
+
+                    # Sample Pair Analysis
                     if 'spa' in tests:
                         spa = tests['spa']
+                        ratio = spa.get('ratio', 'N/A')
+                        stego_probability = spa.get('stego_probability', 'N/A')
+
                         text += f"   • Sample Pair Analysis:\n"
-                        text += f"      - Регулярные пары: {spa['regular_pairs']}\n"
-                        text += f"      - Нерегулярные пары: {spa['irregular_pairs']}\n"
-                        text += f"      - Соотношение: {spa['ratio']:.2f}\n"
-                        text += f"      - Вероятность стеганографии: {spa['stego_probability']:.1%}\n"
+                        text += f"      - Соотношение: {ratio:.2f}" if isinstance(ratio, (
+                            int, float)) else f"      - Соотношение: {ratio}\n"
+                        text += f"      - Вероятность стеганографии: {stego_probability:.1%}" if isinstance(
+                            stego_probability,
+                            (int, float)) else f"      - Вероятность стеганографии: {stego_probability}\n"
+
+                    # RS анализ
                     if 'rs' in tests:
                         rs = tests['rs']
+                        ratio = rs.get('ratio', 'N/A')
+                        stego_probability = rs.get('stego_probability', 'N/A')
+
                         text += f"   • RS анализ:\n"
-                        text += f"      - Регулярные блоки: {rs['regular_blocks']}\n"
-                        text += f"      - Нерегулярные блоки: {rs['irregular_blocks']}\n"
-                        text += f"      - Соотношение: {rs['ratio']:.2f}\n"
-                        text += f"      - Вероятность стеганографии: {rs['stego_probability']:.1%}\n"
+                        text += f"      - Соотношение: {ratio:.2f}" if isinstance(ratio, (
+                            int, float)) else f"      - Соотношение: {ratio}\n"
+                        text += f"      - Вероятность стеганографии: {stego_probability:.1%}" if isinstance(
+                            stego_probability,
+                            (int, float)) else f"      - Вероятность стеганографии: {stego_probability}\n"
 
-                text += "\n📈 АНАЛИЗ ШУМА И ЭНТРОПИИ:\n"
-                if 'noise_analysis' in analysis:
-                    noise = analysis['noise_analysis']
-                    text += f"   • Уровень шума: {noise.get('noise_level', 0):.2f}\n"
-                    text += f"   • Тип шума: {noise.get('noise_type', 'неизвестен')}\n"
-                    text += f"   • Оценка паттерна: {noise.get('pattern_score', 0):.2f}\n"
-                if 'entropy_analysis' in analysis:
-                    entropy = analysis['entropy_analysis']
-                    text += f"   • Общая энтропия: {entropy.get('overall_entropy', 0):.2f}\n"
-                    text += f"   • Энтропия LSB плоскости: {entropy.get('lsb_entropy', 0):.2f}\n"
-                    text += f"   • Вердикт: {entropy.get('interpretation', 'N/A')}\n"
+                    text += "\n📈 АНАЛИЗ ШУМА И ЭНТРОПИИ:\n"
+                    if 'noise_analysis' in analysis:
+                        noise = analysis['noise_analysis']
+                        noise_level = noise.get('noise_level', 'N/A')
+                        noise_type = noise.get('noise_type', 'N/A')
+                        pattern_score = noise.get('pattern_score', 'N/A')
 
-                if 'dct_analysis' in analysis:
-                    dct = analysis['dct_analysis']
-                    text += "\n🎯 DCT АНАЛИЗ (для JPEG):\n"
-                    text += f"   • Количество DC коэффициентов: {dct.get('dc_coefficients_count', 0)}\n"
-                    text += f"   • Количество AC коэффициентов: {dct.get('ac_coefficients_count', 0)}\n"
-                    text += f"   • Энтропия AC коэффициентов: {dct.get('ac_entropy', 0):.2f}\n"
-                    text += f"   • Оценка паттерна: {dct.get('pattern_score', 0):.2f}\n"
-                    text += f"   • Вердикт: {dct.get('interpretation', 'N/A')}\n"
+                        text += f"   • Уровень шума: {noise_level:.2f}" if isinstance(noise_level, (
+                            int, float)) else f"   • Уровень шума: {noise_level}\n"
+                        text += f"   • Тип шума: {noise_type}\n"
+                        text += f"   • Оценка паттерна: {pattern_score:.2f}" if isinstance(pattern_score, (
+                            int, float)) else f"   • Оценка паттерна: {pattern_score}\n"
 
-                # Рекомендации
-                text += "\n💡 РЕКОМЕНДАЦИИ:\n"
-                recommendations = self.generate_analysis_recommendations(result)
-                for rec in recommendations:
-                    text += f"   • {rec}\n"
+                    if 'entropy_analysis' in analysis:
+                        entropy = analysis['entropy_analysis']
+                        overall_entropy = entropy.get('overall_entropy', 'N/A')
+                        lsb_entropy = entropy.get('lsb_entropy', 'N/A')
+                        interpretation = entropy.get('interpretation', 'N/A')
+
+                        text += f"   • Общая энтропия: {overall_entropy:.2f}" if isinstance(overall_entropy, (
+                            int, float)) else f"   • Общая энтропия: {overall_entropy}\n"
+                        text += f"   • Энтропия LSB плоскости: {lsb_entropy:.2f}" if isinstance(lsb_entropy, (
+                            int, float)) else f"   • Энтропия LSB плоскости: {lsb_entropy}\n"
+                        text += f"   • Вердикт: {interpretation}\n"
+
+                    if 'dct_analysis' in analysis:
+                        dct = analysis['dct_analysis']
+                        dc_count = dct.get('dc_coefficients_count', 'N/A')
+                        ac_count = dct.get('ac_coefficients_count', 'N/A')
+                        ac_entropy = dct.get('ac_entropy', 'N/A')
+                        pattern_score = dct.get('pattern_score', 'N/A')
+                        interpretation = dct.get('interpretation', 'N/A')
+
+                        text += "\n🎯 DCT АНАЛИЗ (для JPEG):\n"
+                        text += f"   • Количество DC коэффициентов: {dc_count}\n"
+                        text += f"   • Количество AC коэффициентов: {ac_count}\n"
+                        text += f"   • Энтропия AC коэффициентов: {ac_entropy:.2f}" if isinstance(ac_entropy, (
+                            int, float)) else f"   • Энтропия AC коэффициентов: {ac_entropy}\n"
+                        text += f"   • Оценка паттерна: {pattern_score:.2f}" if isinstance(pattern_score, (
+                            int, float)) else f"   • Оценка паттерна: {pattern_score}\n"
+                        text += f"   • Вердикт: {interpretation}\n"
+
+            # Рекомендации
+            text += "\n💡 РЕКОМЕНДАЦИИ:\n"
+            recommendations = self.generate_analysis_recommendations(result)
+            for rec in recommendations:
+                text += f"   • {rec}\n"
 
             return text
         except Exception as e:
