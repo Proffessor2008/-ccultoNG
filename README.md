@@ -4,7 +4,7 @@
 **Professional steganography toolkit for secure data hiding in images and audio with advanced methods and comprehensive analytics**
 
 [![GitHub Stars](https://img.shields.io/github/stars/Proffessor2008/-ccultoNG?style=for-the-badge&logo=github)](https://github.com/Proffessor2008/-ccultoNG)
-[![License]([https://img.shields.io/badge/license-Commercial%20%2F%20Community-blue?style=for-the-badge](https://github.com/Proffessor2008/-ccultoNG/blob/main/Community%20License%20(Free)))](LICENSE)
+[![License]((https://github.com/Proffessor2008/-ccultoNG/blob/main/Community%20License%20(Free)))](LICENSE)
 [![Version](https://img.shields.io/badge/version-2.2.1-007bff?style=for-the-badge)](https://github.com/Proffessor2008/-ccultoNG/releases)
 
 **Officially registered with Rospatent** (Certificate No. 2025693797)  
