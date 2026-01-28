@@ -17,6 +17,12 @@ from tkinter import ttk, filedialog, messagebox, scrolledtext
 from typing import List
 from typing import Tuple
 
+import matplotlib
+
+matplotlib.use('TkAgg')
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
+
 import cv2
 import numba
 import numpy as np
@@ -7905,6 +7911,1813 @@ class SmartAssistant:
 
 
 # ───────────────────────────────────────────────
+# 📊 КЛАСС АНАЛИЗА ФАЙЛОВ ДЛЯ СТЕГАНОГРАФИИ (ОБНОВЛЕННЫЙ С 9 ТЕСТАМИ)
+# ───────────────────────────────────────────────
+class FileAnalyzer:
+    """Класс для анализа файлов на наличие стеганографических данных с расширенным набором тестов"""
+
+    @staticmethod
+    def calculate_entropy(data: bytes) -> float:
+        """
+        Рассчитывает энтропию Шеннона для данных.
+        Энтропия измеряет степень случайности/хаотичности данных.
+        """
+
+        if not data:
+            return 0.0
+
+        # Подсчитываем частоту каждого байта
+        byte_counts = np.bincount(np.frombuffer(data, dtype=np.uint8), minlength=256)
+        total = len(data)
+
+        # Рассчитываем вероятности
+        probabilities = byte_counts / total
+        probabilities = probabilities[probabilities > 0]  # Исключаем нулевые вероятности
+
+        # Формула энтропии Шеннона
+        entropy = -np.sum(probabilities * np.log2(probabilities))
+        return entropy
+
+    @staticmethod
+    def calculate_block_entropy(pixels: np.ndarray, block_size: int = 8) -> dict:
+        """
+        Рассчитывает энтропию по блокам изображения для выявления аномалий.
+        Стеганография часто создает неравномерное распределение энтропии по блокам.
+        """
+        if pixels.ndim == 3:
+            # Конвертируем в оттенки серого для анализа
+            gray = np.dot(pixels[..., :3], [0.299, 0.587, 0.114])
+        else:
+            gray = pixels.astype(np.float32)
+
+        h, w = gray.shape
+        blocks_h = h // block_size
+        blocks_w = w // block_size
+
+        block_entropies = []
+
+        for i in range(blocks_h):
+            for j in range(blocks_w):
+                block = gray[i * block_size:(i + 1) * block_size, j * block_size:(j + 1) * block_size]
+                # Рассчитываем энтропию блока
+                hist, _ = np.histogram(block.flatten(), bins=16, range=(0, 256))
+                hist = hist[hist > 0]
+                if len(hist) > 0:
+                    probs = hist / np.sum(hist)
+                    entropy = -np.sum(probs * np.log2(probs + 1e-10))
+                    block_entropies.append(entropy)
+
+        if not block_entropies:
+            return {'mean_entropy': 0.0, 'std_entropy': 0.0, 'suspicion_level': 10,
+                    'interpretation': 'Недостаточно данных'}
+
+        mean_entropy = np.mean(block_entropies)
+        std_entropy = np.std(block_entropies)
+
+        # Низкая дисперсия энтропии по блокам может указывать на стеганографию
+        # Естественные изображения имеют вариативную энтропию по блокам
+        if std_entropy < 0.3:
+            suspicion_level = 85
+            interpretation = 'Подозрительно низкая вариативность'
+        elif std_entropy < 0.5:
+            suspicion_level = 60
+            interpretation = 'Умеренная вариативность'
+        elif std_entropy < 0.8:
+            suspicion_level = 30
+            interpretation = 'Нормальная вариативность'
+        else:
+            suspicion_level = 10
+            interpretation = 'Высокая вариативность (естественно)'
+
+        return {
+            'mean_entropy': float(mean_entropy),
+            'std_entropy': float(std_entropy),
+            'block_count': len(block_entropies),
+            'suspicion_level': suspicion_level,
+            'interpretation': interpretation,
+            'entropy_values': block_entropies
+        }
+
+    @staticmethod
+    def analyze_lsb_distribution(pixels: np.ndarray) -> dict:
+        """
+        Анализирует распределение младших битов (LSB) с применением статистического теста.
+        При стеганографии распределение LSB становится искусственно равномерным (близко к 50/50),
+        в то время как естественные изображения часто имеют статистически значимое смещение.
+        """
+        # Извлекаем младшие биты всех каналов
+        if pixels.ndim == 3:
+            # Обрабатываем все каналы отдельно для большей точности
+            lsb_values = []
+            for channel in range(min(3, pixels.shape[2])):
+                channel_data = pixels[:, :, channel].flatten()
+                lsb_values.append(channel_data & 1)
+            lsb_values = np.concatenate(lsb_values)
+        else:
+            lsb_values = (pixels & 1).flatten()
+
+        # Подсчитываем количество нулей и единиц
+        zeros_count = np.sum(lsb_values == 0)
+        ones_count = np.sum(lsb_values == 1)
+        total = len(lsb_values)
+
+        if total == 0:
+            return {
+                'zeros_count': 0,
+                'ones_count': 0,
+                'balance': 0.0,
+                'p_value': 1.0,
+                'suspicion_level': 0,
+                'interpretation': 'Недостаточно данных для анализа',
+                'is_statistically_significant': False
+            }
+
+        # Рассчитываем фактическое соотношение
+        ratio_ones = ones_count / total
+        balance = abs(ratio_ones - 0.5)  # 0.0 = идеально 50/50, 0.5 = полностью смещено
+
+        # СТАТИСТИЧЕСКИЙ ТЕСТ: биномиальный тест на равномерность
+        # Нулевая гипотеза: распределение 50/50 (естественное изображение НЕ должно иметь идеальное 50/50)
+        # Альтернатива: распределение отлично от 50/50 (естественное изображение)
+        from scipy.stats import binom_test
+        p_value = binom_test(ones_count, n=total, p=0.5, alternative='two-sided')
+
+        # ИНТЕРПРЕТАЦИЯ: - Очень низкий p-value (<0.01) = распределение СТАТИСТИЧЕСКИ ЗНАЧИМО отлично от 50/50 →
+        # ЕСТЕСТВЕННОЕ изображение - Очень высокий p-value (>0.8) = распределение СЛИШКОМ близко к 50/50 →
+        # ПОДОЗРИТЕЛЬНО (стеганография) - Средние значения = неопределённость
+
+        if p_value > 0.85:
+            suspicion_level = 90
+            interpretation = 'Крайне подозрительно: распределение искусственно близко к 50/50'
+            is_significant = True
+        elif p_value > 0.7:
+            suspicion_level = 75
+            interpretation = 'Подозрительно: распределение слишком равномерное'
+            is_significant = True
+        elif p_value > 0.3:
+            suspicion_level = 40
+            interpretation = 'Умеренная равномерность распределения'
+            is_significant = False
+        elif p_value > 0.05:
+            suspicion_level = 20
+            interpretation = 'Незначительное отклонение от равномерности'
+            is_significant = False
+        else:  # p_value <= 0.05
+            suspicion_level = 5
+            interpretation = 'Естественное распределение с выраженным смещением'
+            is_significant = True
+
+        return {
+            'zeros_count': int(zeros_count),
+            'ones_count': int(ones_count),
+            'ratio_ones': float(ratio_ones),
+            'balance': float(balance),  # 0.0 = идеально 50/50
+            'p_value': float(p_value),
+            'suspicion_level': suspicion_level,
+            'interpretation': interpretation,
+            'is_statistically_significant': is_significant,
+            'description': 'Равномерное распределение младших битов (близко к 50/50) часто указывает на стеганографию. Естественные изображения обычно имеют статистически значимое смещение.'
+        }
+
+    @staticmethod
+    def analyze_pixel_correlation(pixels: np.ndarray) -> dict:
+        """
+        Анализирует корреляцию между соседними пикселями без искажения знака.
+        Естественные изображения имеют высокую ПОЛОЖИТЕЛЬНУЮ корреляцию (>0.8).
+        Стеганография снижает корреляцию, делая её ближе к нулю или отрицательной.
+        """
+        if pixels.ndim == 3:
+            # Конвертируем в оттенки серого для анализа пространственных зависимостей
+            gray = np.dot(pixels[..., :3], [0.299, 0.587, 0.114]).astype(np.uint8)
+        else:
+            gray = pixels.astype(np.uint8)
+
+        h, w = gray.shape
+        if h < 2 or w < 2:
+            return {
+                'horizontal_corr': 0.0,
+                'vertical_corr': 0.0,
+                'avg_corr': 0.0,
+                'suspicion_level': 10,
+                'interpretation': 'Изображение слишком маленькое для анализа корреляции',
+                'description': 'Корреляция соседних пикселей снижается при стеганографии. Естественные изображения имеют высокую положительную корреляцию (>0.8).'
+            }
+
+        # Горизонтальная корреляция (БЕЗ абсолютного значения!)
+        x_h = gray[:, :-1].flatten().astype(np.float32)
+        y_h = gray[:, 1:].flatten().astype(np.float32)
+        if len(x_h) > 1:
+            mean_x_h, mean_y_h = np.mean(x_h), np.mean(y_h)
+            numerator_h = np.sum((x_h - mean_x_h) * (y_h - mean_y_h))
+            denominator_h = np.sqrt(np.sum((x_h - mean_x_h) ** 2) * np.sum((y_h - mean_y_h) ** 2))
+            horizontal_corr = numerator_h / denominator_h if denominator_h != 0 else 0.0
+        else:
+            horizontal_corr = 0.0
+
+        # Вертикальная корреляция (БЕЗ абсолютного значения!)
+        x_v = gray[:-1, :].flatten().astype(np.float32)
+        y_v = gray[1:, :].flatten().astype(np.float32)
+        if len(x_v) > 1:
+            mean_x_v, mean_y_v = np.mean(x_v), np.mean(y_v)
+            numerator_v = np.sum((x_v - mean_x_v) * (y_v - mean_y_v))
+            denominator_v = np.sqrt(np.sum((x_v - mean_x_v) ** 2) * np.sum((y_v - mean_y_v) ** 2))
+            vertical_corr = numerator_v / denominator_v if denominator_v != 0 else 0.0
+        else:
+            vertical_corr = 0.0
+
+        # Средняя корреляция (сохраняем знак!)
+        avg_corr = (horizontal_corr + vertical_corr) / 2.0
+
+        # ИНТЕРПРЕТАЦИЯ:
+        # Естественные изображения: высокая ПОЛОЖИТЕЛЬНАЯ корреляция (>0.8)
+        # Стеганография: снижение корреляции (<0.7), возможна отрицательная корреляция
+
+        if avg_corr < 0.5:
+            suspicion_level = 90
+            interpretation = 'Крайне низкая корреляция (сильный признак стеганографии)'
+        elif avg_corr < 0.65:
+            suspicion_level = 75
+            interpretation = 'Значительно сниженная корреляция'
+        elif avg_corr < 0.78:
+            suspicion_level = 50
+            interpretation = 'Умеренно сниженная корреляция'
+        elif avg_corr < 0.85:
+            suspicion_level = 25
+            interpretation = 'Нормальная корреляция'
+        else:
+            suspicion_level = 10
+            interpretation = 'Высокая корреляция (естественное изображение)'
+
+        # Дополнительная проверка: отрицательная корреляция всегда подозрительна
+        if horizontal_corr < 0 or vertical_corr < 0:
+            suspicion_level = min(100, suspicion_level + 20)
+            interpretation += ' + отрицательная корреляция (аномалия)'
+
+        return {
+            'horizontal_corr': float(horizontal_corr),
+            'vertical_corr': float(vertical_corr),
+            'avg_corr': float(avg_corr),
+            'suspicion_level': suspicion_level,
+            'interpretation': interpretation,
+            'description': 'Естественные изображения имеют высокую положительную корреляцию соседних пикселей (>0.8). Стеганография снижает корреляцию, делая изображение более "случайным". Отрицательная корреляция — сильный признак аномалии.'
+        }
+
+    @staticmethod
+    def analyze_noise_pattern(image: np.ndarray) -> dict:
+        """
+        Анализирует шумовой паттерн изображения.
+        Стеганография может создавать аномальные шумовые паттерны.
+        """
+        if image.ndim == 3:
+            # Конвертируем в оттенки серого для анализа
+            gray = np.dot(image[..., :3], [0.299, 0.587, 0.114])
+        else:
+            gray = image.astype(np.float32)
+
+        # Применяем размытие для выделения шумовой компоненты
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        noise = gray - blurred
+
+        # Анализируем статистику шума
+        noise_std = np.std(noise)
+        noise_mean = np.mean(noise)
+        noise_skewness = np.mean(((noise - noise_mean) / noise_std) ** 3) if noise_std > 0 else 0.0
+
+        # Правильная интерпретация:
+        if noise_std < 2.0:  # Слишком низкая дисперсия = подозрительно
+            suspicion_level = 85
+            interpretation = 'Аномально низкая дисперсия шума (подозрительно)'
+        elif noise_std < 4.0:
+            suspicion_level = 60
+            interpretation = 'Пониженная дисперсия шума'
+        else:
+            suspicion_level = 10
+            interpretation = 'Нормальная дисперсия шума'
+
+        return {
+            'std_deviation': float(noise_std),
+            'mean': float(noise_mean),
+            'skewness': float(noise_skewness),
+            'suspicion_level': suspicion_level,
+            'interpretation': 'Аномальный шум' if suspicion_level > 60 else 'Нормальный шум'
+        }
+
+    @staticmethod
+    def analyze_histogram(data: np.ndarray) -> dict:
+        """
+        Анализирует гистограмму распределения значений.
+        Выявляет аномалии в распределении (провалы, пики, периодичность).
+        """
+        # Строим гистограмму
+        if data.ndim == 3:
+            data = data.flatten()
+
+        histogram, bin_edges = np.histogram(data, bins=256, range=(0, 256))
+
+        # Анализируем гладкость гистограммы
+        smoothness = np.mean(np.abs(np.diff(histogram)))
+
+        # Ищем пики и провалы
+        peaks = np.where(histogram > np.mean(histogram) + 2 * np.std(histogram))[0]
+        valleys = np.where(histogram < np.mean(histogram) - 2 * np.std(histogram))[0]
+
+        # Периодичность может указывать на стеганографию
+        # Проверяем корреляцию между соседними бинами
+        autocorr = np.correlate(histogram - np.mean(histogram),
+                                histogram - np.mean(histogram), mode='full')
+        periodicity_score = np.max(autocorr[len(autocorr) // 2 + 1:]) / autocorr[len(autocorr) // 2] if autocorr[
+                                                                                                            len(autocorr) // 2] != 0 else 0.0
+
+        # Интерпретация результатов
+        suspicion_level = 0
+        issues = []
+
+        if len(peaks) > 10:
+            suspicion_level += 20
+            issues.append('Много пиков')
+
+        if len(valleys) > 10:
+            suspicion_level += 20
+            issues.append('Много провалов')
+
+        if periodicity_score > 0.3:
+            suspicion_level += 30
+            issues.append('Периодичность')
+
+        if smoothness < np.mean(histogram) * 0.1:
+            suspicion_level += 20
+            issues.append('Негладкое распределение')
+
+        return {
+            'histogram': histogram.tolist(),
+            'smoothness': float(smoothness),
+            'peaks_count': len(peaks),
+            'valleys_count': len(valleys),
+            'periodicity_score': float(periodicity_score),
+            'suspicion_level': min(suspicion_level, 100),
+            'issues': issues,
+            'interpretation': ', '.join(issues) if issues else 'Нормальное распределение'
+        }
+
+    @staticmethod
+    def analyze_color_channel_correlation(pixels: np.ndarray) -> dict:
+        """
+        Анализирует корреляцию между цветовыми каналами (только для цветных изображений).
+        Стеганография может нарушать естественные соотношения между каналами.
+        """
+        if pixels.ndim != 3 or pixels.shape[2] < 3:
+            return {'correlation_r_g': 0.0, 'correlation_g_b': 0.0, 'correlation_r_b': 0.0, 'suspicion_level': 0,
+                    'interpretation': 'Не цветное изображение'}
+
+        # Извлекаем каналы
+        r = pixels[:, :, 0].flatten().astype(np.float32)
+        g = pixels[:, :, 1].flatten().astype(np.float32)
+        b = pixels[:, :, 2].flatten().astype(np.float32)
+
+        # Рассчитываем корреляции
+        corr_rg = np.corrcoef(r, g)[0, 1] if len(r) > 1 else 0.0
+        corr_gb = np.corrcoef(g, b)[0, 1] if len(g) > 1 else 0.0
+        corr_rb = np.corrcoef(r, b)[0, 1] if len(r) > 1 else 0.0
+
+        # Средняя корреляция
+        avg_corr = (abs(corr_rg) + abs(corr_gb) + abs(corr_rb)) / 3
+
+        # Естественные изображения имеют высокую корреляцию между каналами (>0.85)
+        if avg_corr < 0.7:
+            suspicion_level = 80
+            interpretation = 'Низкая корреляция каналов (подозрительно)'
+        elif avg_corr < 0.8:
+            suspicion_level = 60
+            interpretation = 'Умеренная корреляция каналов'
+        elif avg_corr < 0.9:
+            suspicion_level = 30
+            interpretation = 'Нормальная корреляция каналов'
+        else:
+            suspicion_level = 10
+            interpretation = 'Высокая корреляция каналов (естественно)'
+
+        return {
+            'correlation_r_g': float(corr_rg),
+            'correlation_g_b': float(corr_gb),
+            'correlation_r_b': float(corr_rb),
+            'avg_correlation': float(avg_corr),
+            'suspicion_level': suspicion_level,
+            'interpretation': interpretation
+        }
+
+    @staticmethod
+    def analyze_jpeg_artifacts(image_path: str) -> dict:
+        """
+        Анализирует артефакты JPEG сжатия для выявления признаков стеганографии.
+        Работает только с JPEG изображениями.
+        """
+        file_ext = os.path.splitext(image_path)[1].lower()
+        if file_ext not in ['.jpg', '.jpeg']:
+            return {'artifact_score': 0.0, 'blockiness': 0.0, 'suspicion_level': 0,
+                    'interpretation': 'Не JPEG изображение'}
+
+        try:
+            # Загружаем изображение
+            img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+            if img is None:
+                return {'artifact_score': 0.0, 'blockiness': 0.0, 'suspicion_level': 0,
+                        'interpretation': 'Не удалось загрузить изображение'}
+
+            h, w = img.shape
+
+            # Анализируем границы блоков 8x8 (характерные для JPEG)
+            blockiness_scores = []
+
+            # Проверяем вертикальные границы блоков
+            for x in range(8, w, 8):
+                left_col = img[:, x - 1]
+                right_col = img[:, x]
+                diff = np.abs(left_col.astype(np.int16) - right_col.astype(np.int16))
+                blockiness_scores.append(np.mean(diff))
+
+            # Проверяем горизонтальные границы блоков
+            for y in range(8, h, 8):
+                top_row = img[y - 1, :]
+                bottom_row = img[y, :]
+                diff = np.abs(top_row.astype(np.int16) - bottom_row.astype(np.int16))
+                blockiness_scores.append(np.mean(diff))
+
+            if not blockiness_scores:
+                return {'artifact_score': 0.0, 'blockiness': 0.0, 'suspicion_level': 10,
+                        'interpretation': 'Недостаточно данных'}
+
+            avg_blockiness = np.mean(blockiness_scores)
+
+            # Высокая блочность может указывать на стеганографию или повторное сжатие
+            if avg_blockiness > 8.0:
+                suspicion_level = 70
+                interpretation = 'Высокая блочность (возможно стеганография)'
+            elif avg_blockiness > 5.0:
+                suspicion_level = 40
+                interpretation = 'Умеренная блочность'
+            else:
+                suspicion_level = 20
+                interpretation = 'Низкая блочность (естественно)'
+
+            return {
+                'artifact_score': float(avg_blockiness),
+                'blockiness': float(avg_blockiness),
+                'suspicion_level': suspicion_level,
+                'interpretation': interpretation,
+                'block_count_horizontal': w // 8,
+                'block_count_vertical': h // 8
+            }
+        except Exception as e:
+            return {'artifact_score': 0.0, 'blockiness': 0.0, 'suspicion_level': 0,
+                    'interpretation': f'Ошибка анализа: {str(e)}'}
+
+    @staticmethod
+    def analyze_audio_spectral_features(audio_path: str) -> dict:
+        """
+        Анализирует спектральные характеристики аудиофайла.
+        Стеганография может создавать аномалии в спектре.
+        """
+        file_ext = os.path.splitext(audio_path)[1].lower()
+        if file_ext != '.wav':
+            return {'spectral_centroid_mean': 0.0, 'spectral_flatness_mean': 0.0, 'suspicion_level': 0,
+                    'interpretation': 'Не WAV аудиофайл'}
+
+        try:
+            with wave.open(audio_path, 'rb') as wav:
+                n_channels = wav.getnchannels()
+                sample_rate = wav.getframerate()
+                n_frames = wav.getnframes()
+                frames = wav.readframes(n_frames)
+
+                # Конвертируем в массив
+                if wav.getsampwidth() == 2:  # 16-bit
+                    audio_data = np.frombuffer(frames, dtype=np.int16)
+                else:  # 8-bit
+                    audio_data = np.frombuffer(frames, dtype=np.uint8).astype(np.int16) - 128
+
+                # Для стерео берем один канал
+                if n_channels > 1:
+                    audio_data = audio_data[::n_channels]
+
+                if len(audio_data) < 1024:
+                    return {'spectral_centroid_mean': 0.0, 'spectral_flatness_mean': 0.0, 'suspicion_level': 10,
+                            'interpretation': 'Аудио слишком короткое'}
+
+                # Делим на сегменты для анализа
+                segment_size = 1024
+                n_segments = len(audio_data) // segment_size
+
+                spectral_centroids = []
+                spectral_flatness = []
+
+                for i in range(n_segments):
+                    segment = audio_data[i * segment_size:(i + 1) * segment_size]
+
+                    # Вычисляем спектр
+                    spectrum = np.abs(np.fft.rfft(segment))
+                    freqs = np.fft.rfftfreq(segment_size, 1 / sample_rate)
+
+                    if np.sum(spectrum) > 0:
+                        # Спектральный центроид
+                        centroid = np.sum(freqs * spectrum) / np.sum(spectrum)
+                        spectral_centroids.append(centroid)
+
+                        # Спектральная плоскостность (мера шума)
+                        geometric_mean = np.exp(np.mean(np.log(spectrum + 1e-10)))
+                        arithmetic_mean = np.mean(spectrum)
+                        flatness = geometric_mean / arithmetic_mean if arithmetic_mean > 0 else 0.0
+                        spectral_flatness.append(flatness)
+
+                if not spectral_centroids or not spectral_flatness:
+                    return {'spectral_centroid_mean': 0.0, 'spectral_flatness_mean': 0.0, 'suspicion_level': 10,
+                            'interpretation': 'Недостаточно данных'}
+
+                centroid_mean = np.mean(spectral_centroids)
+                flatness_mean = np.mean(spectral_flatness)
+                flatness_std = np.std(spectral_flatness)
+
+                # Низкая вариативность спектральной плоскостности может указывать на стеганографию
+                if flatness_std < 0.05:
+                    suspicion_level = 85
+                    interpretation = 'Очень низкая вариативность спектра (подозрительно)'
+                elif flatness_std < 0.1:
+                    suspicion_level = 65
+                    interpretation = 'Низкая вариативность спектра'
+                elif flatness_std < 0.2:
+                    suspicion_level = 40
+                    interpretation = 'Умеренная вариативность спектра'
+                else:
+                    suspicion_level = 15
+                    interpretation = 'Высокая вариативность спектра (естественно)'
+
+                return {
+                    'spectral_centroid_mean': float(centroid_mean),
+                    'spectral_flatness_mean': float(flatness_mean),
+                    'spectral_flatness_std': float(flatness_std),
+                    'segment_count': n_segments,
+                    'suspicion_level': suspicion_level,
+                    'interpretation': interpretation
+                }
+        except Exception as e:
+            return {'spectral_centroid_mean': 0.0, 'spectral_flatness_mean': 0.0, 'suspicion_level': 0,
+                    'interpretation': f'Ошибка анализа: {str(e)}'}
+
+    @staticmethod
+    def analyze_file_for_stego(file_path: str, cancel_event=None) -> dict:
+        """
+        Проводит полный анализ файла на наличие стеганографических данных с 9 тестами.
+        """
+        results = {
+            'file_info': {},
+            'tests': {},
+            'overall_suspicion': 0,
+            'recommendations': [],
+            'analysis_time': 0.0
+        }
+
+        start_time = time.time()
+
+        try:
+            # Получаем информацию о файле
+            file_info = Utils.get_file_info(file_path)
+            results['file_info'] = file_info
+
+            # Читаем данные файла
+            with open(file_path, 'rb') as f:
+                file_data = f.read()
+
+            # Анализ энтропии
+            if cancel_event and cancel_event.is_set():
+                raise InterruptedError("Анализ отменен пользователем")
+
+            entropy = FileAnalyzer.calculate_entropy(file_data)
+            results['tests']['entropy'] = {
+                'value': entropy,
+                'suspicion_level': 80 if entropy > 7.5 else 30 if entropy > 6.5 else 10,
+                'interpretation': 'Высокая энтропия' if entropy > 7.5 else 'Средняя энтропия' if entropy > 6.5 else 'Низкая энтропия',
+                'description': 'Энтропия измеряет случайность данных. Высокая энтропия (>7.5) может указывать на зашифрованные или скрытые данные.'
+            }
+
+            # Анализ изображений/аудио
+            file_ext = os.path.splitext(file_path)[1].lower()
+
+            if file_ext in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tga']:
+                # Загружаем изображение
+                with Image.open(file_path) as img:
+                    if img.mode not in ['RGB', 'RGBA', 'L']:
+                        img = img.convert('RGB')
+                    pixels = np.array(img)
+
+                # Анализ распределения LSB
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Анализ отменен пользователем")
+
+                lsb_analysis = FileAnalyzer.analyze_lsb_distribution(pixels)
+                results['tests']['lsb_distribution'] = {
+                    'value': lsb_analysis['balance'],
+                    'suspicion_level': lsb_analysis['suspicion_level'],
+                    'interpretation': lsb_analysis['interpretation'],
+                    'details': lsb_analysis,
+                    'description': 'Анализ распределения младших битов. Равномерное распределение (баланс ~0.5) может указывать на стеганографию.'
+                }
+
+                # Анализ шумового паттерна
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Анализ отменен пользователем")
+
+                noise_analysis = FileAnalyzer.analyze_noise_pattern(pixels)
+                results['tests']['noise_pattern'] = {
+                    'value': noise_analysis['std_deviation'],
+                    'suspicion_level': noise_analysis['suspicion_level'],
+                    'interpretation': noise_analysis['interpretation'],
+                    'details': noise_analysis,
+                    'description': 'Анализ шумовой компоненты изображения. Высокая дисперсия шума может указывать на скрытые данные.'
+                }
+
+                # Гистограммный анализ
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Анализ отменен пользователем")
+
+                histogram_analysis = FileAnalyzer.analyze_histogram(pixels)
+                results['tests']['histogram'] = {
+                    'value': histogram_analysis['smoothness'],
+                    'suspicion_level': histogram_analysis['suspicion_level'],
+                    'interpretation': histogram_analysis['interpretation'],
+                    'details': histogram_analysis,
+                    'description': 'Анализ гистограммы распределения значений пикселей. Аномалии могут указывать на стеганографию.'
+                }
+
+                # Анализ корреляции пикселей
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Анализ отменен пользователем")
+
+                correlation_analysis = FileAnalyzer.analyze_pixel_correlation(pixels)
+                results['tests']['pixel_correlation'] = {
+                    'value': correlation_analysis['avg_corr'],
+                    'suspicion_level': correlation_analysis['suspicion_level'],
+                    'interpretation': correlation_analysis['interpretation'],
+                    'details': correlation_analysis,
+                    'description': 'Анализ корреляции между соседними пикселями. Снижение корреляции может указывать на стеганографию.'
+                }
+
+                # Анализ энтропии по блокам
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Анализ отменен пользователем")
+
+                block_entropy_analysis = FileAnalyzer.calculate_block_entropy(pixels)
+                results['tests']['block_entropy'] = {
+                    'value': block_entropy_analysis['std_entropy'],
+                    'suspicion_level': block_entropy_analysis['suspicion_level'],
+                    'interpretation': block_entropy_analysis['interpretation'],
+                    'details': block_entropy_analysis,
+                    'description': 'Анализ вариативности энтропии по блокам изображения. Низкая вариативность может указывать на стеганографию.'
+                }
+
+                # Анализ корреляции цветовых каналов (только для цветных изображений)
+                if pixels.ndim == 3 and pixels.shape[2] >= 3:
+                    if cancel_event and cancel_event.is_set():
+                        raise InterruptedError("Анализ отменен пользователем")
+
+                    color_corr_analysis = FileAnalyzer.analyze_color_channel_correlation(pixels)
+                    if color_corr_analysis['suspicion_level'] > 0:  # Только если анализ выполнен
+                        results['tests']['color_correlation'] = {
+                            'value': color_corr_analysis['avg_correlation'],
+                            'suspicion_level': color_corr_analysis['suspicion_level'],
+                            'interpretation': color_corr_analysis['interpretation'],
+                            'details': color_corr_analysis,
+                            'description': 'Анализ корреляции между цветовыми каналами. Нарушение естественных соотношений может указывать на стеганографию.'
+                        }
+
+                # Анализ артефактов JPEG (только для JPEG)
+                if file_ext in ['.jpg', '.jpeg']:
+                    if cancel_event and cancel_event.is_set():
+                        raise InterruptedError("Анализ отменен пользователем")
+
+                    jpeg_analysis = FileAnalyzer.analyze_jpeg_artifacts(file_path)
+                    if jpeg_analysis['suspicion_level'] > 0:  # Только если анализ выполнен
+                        results['tests']['jpeg_artifacts'] = {
+                            'value': jpeg_analysis['blockiness'],
+                            'suspicion_level': jpeg_analysis['suspicion_level'],
+                            'interpretation': jpeg_analysis['interpretation'],
+                            'details': jpeg_analysis,
+                            'description': 'Анализ артефактов JPEG сжатия. Аномальная блочность может указывать на стеганографию.'
+                        }
+
+            elif file_ext == '.wav':
+                # Анализ аудио файла
+                with wave.open(file_path, 'rb') as wav:
+                    frames = wav.readframes(wav.getnframes())
+                    audio_data = np.frombuffer(frames, dtype=np.uint8)
+
+                # Анализ распределения LSB для аудио
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Анализ отменен пользователем")
+
+                lsb_analysis = FileAnalyzer.analyze_lsb_distribution(audio_data)
+                results['tests']['lsb_distribution'] = {
+                    'value': lsb_analysis['balance'],
+                    'suspicion_level': lsb_analysis['suspicion_level'],
+                    'interpretation': lsb_analysis['interpretation'],
+                    'details': lsb_analysis,
+                    'description': 'Анализ распределения младших битов аудиоданных. Равномерное распределение может указывать на стеганографию.'
+                }
+
+                # Гистограммный анализ для аудио
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Анализ отменен пользователем")
+
+                histogram_analysis = FileAnalyzer.analyze_histogram(audio_data)
+                results['tests']['histogram'] = {
+                    'value': histogram_analysis['smoothness'],
+                    'suspicion_level': histogram_analysis['suspicion_level'],
+                    'interpretation': histogram_analysis['interpretation'],
+                    'details': histogram_analysis,
+                    'description': 'Анализ гистограммы распределения аудиосэмплов.'
+                }
+
+                # Спектральный анализ аудио
+                if cancel_event and cancel_event.is_set():
+                    raise InterruptedError("Анализ отменен пользователем")
+
+                spectral_analysis = FileAnalyzer.analyze_audio_spectral_features(file_path)
+                if spectral_analysis['suspicion_level'] > 0:  # Только если анализ выполнен
+                    results['tests']['spectral_analysis'] = {
+                        'value': spectral_analysis['spectral_flatness_std'],
+                        'suspicion_level': spectral_analysis['suspicion_level'],
+                        'interpretation': spectral_analysis['interpretation'],
+                        'details': spectral_analysis,
+                        'description': 'Анализ спектральных характеристик аудио. Низкая вариативность спектра может указывать на стеганографию.'
+                    }
+
+            # Рассчитываем общий уровень подозрительности
+            suspicion_levels = [test['suspicion_level'] for test in results['tests'].values()]
+            if suspicion_levels:
+                results['overall_suspicion'] = int(np.mean(suspicion_levels))
+
+            # Генерируем рекомендации
+            results['recommendations'] = FileAnalyzer.generate_recommendations(results)
+
+            results['status'] = 'success'
+            results['message'] = 'Анализ завершен успешно'
+            results['analysis_time'] = time.time() - start_time
+
+        except InterruptedError as e:
+            results['status'] = 'cancelled'
+            results['message'] = str(e)
+            results['analysis_time'] = time.time() - start_time
+        except Exception as e:
+            results['status'] = 'error'
+            results['message'] = f'Ошибка при анализе: {str(e)}'
+            results['error'] = str(e)
+            results['analysis_time'] = time.time() - start_time
+
+        return results
+
+    @staticmethod
+    def generate_recommendations(results: dict) -> list:
+        """
+        Генерирует рекомендации на основе результатов анализа.
+        """
+        recommendations = []
+        suspicion = results.get('overall_suspicion', 0)
+        analysis_time = results.get('analysis_time', 0)
+
+        if suspicion > 80:
+            recommendations.append('⚠️ Обнаружены сильные признаки стеганографии. Рекомендуется детальный анализ.')
+            recommendations.append('🔍 Попробуйте извлечь данные с использованием различных методов.')
+        elif suspicion > 60:
+            recommendations.append('⚠️ Обнаружены признаки стеганографии. Требуется дополнительная проверка.')
+            recommendations.append('📊 Рекомендуется сравнить с оригинальным файлом (если доступен).')
+        elif suspicion > 40:
+            recommendations.append('ℹ️ Некоторые тесты показывают отклонения от нормы.')
+            recommendations.append('🔍 Рекомендуется провести дополнительные тесты.')
+        else:
+            recommendations.append('✅ Файл не содержит явных признаков стеганографии.')
+            recommendations.append('ℹ️ Для большей уверенности можно провести дополнительные тесты.')
+
+        # Добавляем рекомендации на основе конкретных тестов
+        tests = results.get('tests', {})
+
+        if 'lsb_distribution' in tests and tests['lsb_distribution']['suspicion_level'] > 70:
+            recommendations.append('📊 Распределение младших битов подозрительно равномерное.')
+
+        if 'noise_pattern' in tests and tests['noise_pattern']['suspicion_level'] > 70:
+            recommendations.append('📈 Обнаружен аномальный шумовой паттерн.')
+
+        if 'histogram' in tests and tests['histogram']['suspicion_level'] > 70:
+            issues = tests['histogram']['details'].get('issues', [])
+            if issues:
+                recommendations.append(f'📉 Обнаружены аномалии в гистограмме: {", ".join(issues)}')
+
+        if 'pixel_correlation' in tests and tests['pixel_correlation']['suspicion_level'] > 70:
+            recommendations.append('🔗 Обнаружено снижение корреляции между соседними пикселями.')
+
+        if 'block_entropy' in tests and tests['block_entropy']['suspicion_level'] > 70:
+            recommendations.append('🧱 Обнаружена аномально низкая вариативность энтропии по блокам.')
+
+        if 'color_correlation' in tests and tests['color_correlation']['suspicion_level'] > 70:
+            recommendations.append('🎨 Обнаружено нарушение естественных соотношений между цветовыми каналами.')
+
+        if 'jpeg_artifacts' in tests and tests['jpeg_artifacts']['suspicion_level'] > 70:
+            recommendations.append('🖼️ Обнаружены аномальные артефакты JPEG сжатия.')
+
+        if 'spectral_analysis' in tests and tests['spectral_analysis']['suspicion_level'] > 70:
+            recommendations.append('🎵 Обнаружена аномально низкая вариативность спектра аудио.')
+
+        # Добавляем информацию о времени анализа
+        if analysis_time > 5.0:
+            recommendations.append(f'⏱️ Анализ занял {analysis_time:.1f} сек. Для больших файлов это нормально.')
+
+        return recommendations
+
+
+# ───────────────────────────────────────────────
+# 📊 ВКЛАДКА АНАЛИЗА ФАЙЛА (ОБНОВЛЕННАЯ С ИНТЕРАКТИВНЫМИ ГРАФИКАМИ)
+# ───────────────────────────────────────────────
+class AnalysisTab:
+    """Вкладка для анализа файлов на наличие стеганографических данных с интерактивными визуализациями"""
+
+    def __init__(self, parent, app):
+        self.parent = parent
+        self.app = app
+        self.colors = app.colors
+        self.file_path = tk.StringVar()
+        self.analysis_results = None
+        self.cancel_event = threading.Event()
+        self.analysis_thread = None
+        self.setup_ui()
+
+    def setup_ui(self):
+        """Создает интерфейс вкладки анализа"""
+        # Основной контейнер
+        main_container = ttk.Frame(self.parent, style="Card.TFrame")
+        main_container.pack(fill=tk.BOTH, expand=True, padx=15, pady=15)
+
+        # Верхняя панель управления
+        control_frame = ttk.LabelFrame(
+            main_container,
+            text="📁 Выбор файла",
+            padding=15,
+            style="Card.TLabelframe"
+        )
+        control_frame.pack(fill=tk.X, pady=(0, 15))
+
+        # Путь к файлу
+        path_frame = ttk.Frame(control_frame, style="Card.TFrame")
+        path_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(
+            path_frame,
+            text="📂 Файл для анализа:",
+            font=("Segoe UI", 10),
+            style="TLabel"
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        path_entry = ttk.Entry(
+            path_frame,
+            textvariable=self.file_path,
+            state='readonly',
+            font=("Segoe UI", 10),
+            style="TEntry"
+        )
+        path_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+
+        # Кнопки управления
+        button_frame = ttk.Frame(control_frame, style="Card.TFrame")
+        button_frame.pack(fill=tk.X)
+
+        ttk.Button(
+            button_frame,
+            text="🔍 Выбрать файл...",
+            style="Accent.TButton",
+            command=self.select_file
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Button(
+            button_frame,
+            text="🗑️ Очистить",
+            style="TButton",
+            command=self.clear_file
+        ).pack(side=tk.LEFT, padx=(0, 10))
+
+        self.analyze_button = ttk.Button(
+            button_frame,
+            text="🔍 Начать анализ",
+            style="Accent.TButton",
+            command=self.start_analysis,
+            state="disabled"
+        )
+        self.analyze_button.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.cancel_button = ttk.Button(
+            button_frame,
+            text="⛔ Отмена",
+            style="TButton",
+            command=self.cancel_analysis,
+            state="disabled"
+        )
+        self.cancel_button.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Прогресс-бар
+        progress_frame = ttk.Frame(control_frame, style="Card.TFrame")
+        progress_frame.pack(fill=tk.X, pady=(10, 0))
+
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = ttk.Progressbar(
+            progress_frame,
+            variable=self.progress_var,
+            maximum=100,
+            mode="determinate",
+            style="TProgressbar"
+        )
+        self.progress_bar.pack(fill=tk.X, pady=(0, 5))
+
+        self.status_label = ttk.Label(
+            progress_frame,
+            text="✅ Готов к анализу",
+            font=("Segoe UI", 9),
+            style="Secondary.TLabel"
+        )
+        self.status_label.pack(anchor="w")
+
+        # Центральная область с двумя колонками
+        content_frame = ttk.Frame(main_container, style="Card.TFrame")
+        content_frame.pack(fill=tk.BOTH, expand=True)
+        content_frame.grid_columnconfigure(0, weight=1)
+        content_frame.grid_columnconfigure(1, weight=1)
+        content_frame.grid_rowconfigure(0, weight=1)
+
+        # Левая колонка - Результаты анализа
+        left_frame = ttk.Frame(content_frame, style="Card.TFrame")
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+
+        # Метаданные файла
+        metadata_frame = ttk.LabelFrame(
+            left_frame,
+            text="📊 Метаданные файла",
+            padding=15,
+            style="Card.TLabelframe"
+        )
+        metadata_frame.pack(fill=tk.X, pady=(0, 15))
+
+        self.metadata_text = scrolledtext.ScrolledText(
+            metadata_frame,
+            height=8,
+            font=("Consolas", 9),
+            wrap=tk.WORD,
+            bg=self.colors["card"],
+            fg=self.colors["text"],
+            state='disabled'
+        )
+        self.metadata_text.pack(fill=tk.BOTH, expand=True)
+
+        # Индикатор вероятности стеганографии
+        suspicion_frame = ttk.LabelFrame(
+            left_frame,
+            text="🎯 Вероятность стеганографии",
+            padding=15,
+            style="Card.TLabelframe"
+        )
+        suspicion_frame.pack(fill=tk.X, pady=(0, 15))
+
+        self.suspicion_label = ttk.Label(
+            suspicion_frame,
+            text="—",
+            font=("Segoe UI", 24, "bold"),
+            style="TLabel"
+        )
+        self.suspicion_label.pack(pady=(0, 10))
+
+        self.suspicion_bar = ttk.Progressbar(
+            suspicion_frame,
+            orient="horizontal",
+            mode="determinate",
+            style="TProgressbar"
+        )
+        self.suspicion_bar.pack(fill=tk.X, pady=(0, 10))
+
+        self.suspicion_text = ttk.Label(
+            suspicion_frame,
+            text="Нет данных",
+            font=("Segoe UI", 10),
+            style="Secondary.TLabel"
+        )
+        self.suspicion_text.pack(anchor="w")
+
+        # Таблица результатов тестов
+        tests_frame = ttk.LabelFrame(
+            left_frame,
+            text="🧪 Результаты тестов",
+            padding=15,
+            style="Card.TLabelframe"
+        )
+        tests_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Создаем дерево для результатов тестов
+        columns = ("Тест", "Результат", "Интерпретация")
+        self.tests_tree = ttk.Treeview(
+            tests_frame,
+            columns=columns,
+            show="headings",
+            height=8
+        )
+
+        # Настройка заголовков
+        self.tests_tree.heading("Тест", text="Тест")
+        self.tests_tree.heading("Результат", text="Результат")
+        self.tests_tree.heading("Интерпретация", text="Интерпретация")
+
+        # Ширина столбцов
+        self.tests_tree.column("Тест", width=180, anchor=tk.W)
+        self.tests_tree.column("Результат", width=100, anchor=tk.CENTER)
+        self.tests_tree.column("Интерпретация", width=180, anchor=tk.W)
+
+        # Полоса прокрутки
+        tree_scroll = ttk.Scrollbar(tests_frame, orient="vertical", command=self.tests_tree.yview)
+        self.tests_tree.configure(yscrollcommand=tree_scroll.set)
+
+        # Размещение
+        self.tests_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Настройка стиля для таблицы с исправленными цветами
+        style = ttk.Style()
+        style.configure("Treeview",
+                        background=self.colors["card"],
+                        foreground=self.colors["text"],
+                        fieldbackground=self.colors["card"],
+                        font=("Segoe UI", 9))
+        style.configure("Treeview.Heading",
+                        background=self.colors["accent"],
+                        foreground="white",
+                        font=("Segoe UI", 9, "bold"))
+        style.map("Treeview",
+                  background=[('selected', self.colors["accent"])],
+                  foreground=[('selected', 'white')])
+
+        # Правая колонка - Визуализации
+        right_frame = ttk.Frame(content_frame, style="Card.TFrame")
+        right_frame.grid(row=0, column=1, sticky="nsew")
+
+        # Notebook для вкладок визуализаций
+        self.visualization_notebook = ttk.Notebook(right_frame)
+        self.visualization_notebook.pack(fill=tk.BOTH, expand=True)
+
+        # Вкладка гистограммы
+        self.histogram_tab = ttk.Frame(self.visualization_notebook, style="Card.TFrame")
+        self.visualization_notebook.add(self.histogram_tab, text="📊 Гистограмма")
+
+        self.histogram_frame = ttk.Frame(self.histogram_tab, style="Card.TFrame")
+        self.histogram_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Вкладка анализа шума
+        self.noise_tab = ttk.Frame(self.visualization_notebook, style="Card.TFrame")
+        self.visualization_notebook.add(self.noise_tab, text="📈 Анализ шума")
+
+        self.noise_frame = ttk.Frame(self.noise_tab, style="Card.TFrame")
+        self.noise_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Вкладка статистики LSB
+        self.stats_tab = ttk.Frame(self.visualization_notebook, style="Card.TFrame")
+        self.visualization_notebook.add(self.stats_tab, text="🔢 Статистика LSB")
+
+        self.stats_frame = ttk.Frame(self.stats_tab, style="Card.TFrame")
+        self.stats_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Вкладка корреляции пикселей
+        self.correlation_tab = ttk.Frame(self.visualization_notebook, style="Card.TFrame")
+        self.visualization_notebook.add(self.correlation_tab, text="🔗 Корреляция")
+
+        self.correlation_frame = ttk.Frame(self.correlation_tab, style="Card.TFrame")
+        self.correlation_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Нижняя панель - Рекомендации и экспорт
+        bottom_frame = ttk.Frame(main_container, style="Card.TFrame")
+        bottom_frame.pack(fill=tk.X, pady=(15, 0))
+
+        # Рекомендации
+        recommendations_frame = ttk.LabelFrame(
+            bottom_frame,
+            text="💡 Рекомендации",
+            padding=15,
+            style="Card.TLabelframe"
+        )
+        recommendations_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+
+        self.recommendations_text = scrolledtext.ScrolledText(
+            recommendations_frame,
+            height=6,
+            font=("Segoe UI", 10),
+            wrap=tk.WORD,
+            bg=self.colors["card"],
+            fg=self.colors["text"],
+            state='disabled'
+        )
+        self.recommendations_text.pack(fill=tk.BOTH, expand=True)
+
+        # Кнопка экспорта
+        export_button = ttk.Button(
+            bottom_frame,
+            text="📤 Экспортировать отчёт",
+            style="Accent.TButton",
+            command=self.export_report,
+            state="disabled"
+        )
+        export_button.pack(fill=tk.X)
+        self.export_button = export_button
+
+    def select_file(self):
+        """Выбирает файл для анализа"""
+        file_path = filedialog.askopenfilename(
+            title="Выберите файл для анализа",
+            filetypes=SUPPORTED_FORMATS,
+            initialdir=self.app.last_open_dir
+        )
+
+        if file_path:
+            self.file_path.set(file_path)
+            self.app.last_open_dir = os.path.dirname(file_path)
+            self.analyze_button.config(state="normal")
+            self.export_button.config(state="disabled")
+            self.clear_results()
+            self.display_file_info(file_path)
+
+    def clear_file(self):
+        """Очищает выбранный файл"""
+        self.file_path.set("")
+        self.analyze_button.config(state="disabled")
+        self.clear_results()
+
+    def display_file_info(self, file_path: str):
+        """Отображает информацию о файле"""
+        try:
+            file_info = Utils.get_file_info(file_path)
+
+            info_text = f"📁 Имя файла: {file_info.get('name', 'N/A')}\n"
+            info_text += f"📏 Размер: {file_info.get('size_formatted', 'N/A')}\n"
+            info_text += f"📅 Создан: {file_info.get('created', 'N/A')}\n"
+            info_text += f"✏️ Изменен: {file_info.get('modified', 'N/A')}\n"
+            info_text += f"🔍 Тип: {file_info.get('type', 'N/A').capitalize()}\n"
+
+            if file_info.get('type') == 'image':
+                info_text += f"🖼️ Размеры: {file_info.get('dimensions', 'N/A')}\n"
+                info_text += f"🎨 Режим: {file_info.get('mode', 'N/A')}\n"
+            elif file_info.get('type') == 'audio':
+                info_text += f"🎵 Каналы: {file_info.get('channels', 'N/A')}\n"
+                info_text += f"⏱️ Частота: {file_info.get('sample_rate', 'N/A')} Hz\n"
+                info_text += f"🔢 Сэмплов: {file_info.get('frames', 'N/A')}\n"
+                info_text += f"⏳ Длительность: {file_info.get('duration', 'N/A')}\n"
+
+            self.metadata_text.config(state='normal')
+            self.metadata_text.delete("1.0", tk.END)
+            self.metadata_text.insert("1.0", info_text)
+            self.metadata_text.config(state='disabled')
+
+        except Exception as e:
+            self.display_error(f"Ошибка при отображении информации о файле: {str(e)}")
+
+    def start_analysis(self):
+        """Запускает анализ файла"""
+        if not self.file_path.get():
+            messagebox.showwarning("⚠️ Предупреждение", "Сначала выберите файл для анализа")
+            return
+
+        if not os.path.exists(self.file_path.get()):
+            messagebox.showerror("❌ Ошибка", "Файл не найден")
+            return
+
+        # Сбрасываем флаг отмены
+        self.cancel_event.clear()
+
+        # Обновляем UI
+        self.analyze_button.config(state="disabled")
+        self.cancel_button.config(state="normal")
+        self.progress_var.set(0)
+        self.status_label.config(text="⏳ Начало анализа...")
+
+        # Запускаем анализ в отдельном потоке
+        self.analysis_thread = threading.Thread(target=self.run_analysis, daemon=True)
+        self.analysis_thread.start()
+
+    def run_analysis(self):
+        """Выполняет анализ в отдельном потоке"""
+        try:
+            file_path = self.file_path.get()
+
+            # Проверяем существование файла
+            if not os.path.exists(file_path):
+                self.update_ui(lambda: messagebox.showerror("❌ Ошибка", "Файл не найден"))
+                return
+
+            # Выполняем анализ
+            results = FileAnalyzer.analyze_file_for_stego(file_path, self.cancel_event)
+
+            # Обновляем UI с результатами
+            self.update_ui(lambda: self.display_results(results))
+
+        except InterruptedError:
+            self.update_ui(lambda: self.status_label.config(text="⛔ Анализ отменен"))
+        except Exception as e:
+            self.update_ui(lambda: self.display_error(f"Ошибка при анализе: {str(e)}"))
+        finally:
+            self.update_ui(lambda: self.restore_buttons())
+
+    def update_ui(self, callback):
+        """Обновляет UI из потока"""
+        self.app.root.after(0, callback)
+
+    def display_results(self, results: dict):
+        """Отображает результаты анализа"""
+        self.analysis_results = results
+
+        if results.get('status') == 'error':
+            messagebox.showerror("❌ Ошибка", results.get('message', 'Неизвестная ошибка'))
+            return
+
+        if results.get('status') == 'cancelled':
+            self.status_label.config(text="⛔ Анализ отменен")
+            return
+
+        # Отображаем общий уровень подозрительности
+        suspicion = results.get('overall_suspicion', 0)
+        self.suspicion_label.config(text=f"{suspicion}%")
+        self.suspicion_bar.config(value=suspicion)
+
+        # Цвет индикатора в зависимости от уровня
+        if suspicion <= 30:
+            self.suspicion_bar.config(style="UsageGreen.Horizontal.TProgressbar")
+            self.suspicion_text.config(text="🟢 Маловероятно", foreground=self.colors["success"])
+        elif suspicion <= 60:
+            self.suspicion_bar.config(style="UsageYellow.Horizontal.TProgressbar")
+            self.suspicion_text.config(text="🟡 Требует внимания", foreground=self.colors["warning"])
+        elif suspicion <= 85:
+            self.suspicion_bar.config(style="UsageYellow.Horizontal.TProgressbar")
+            self.suspicion_text.config(text="🟠 Вероятно", foreground=self.colors["warning"])
+        else:
+            self.suspicion_bar.config(style="UsageRed.Horizontal.TProgressbar")
+            self.suspicion_text.config(text="🔴 Обнаружены признаки", foreground=self.colors["error"])
+
+        # Очищаем таблицу тестов
+        for item in self.tests_tree.get_children():
+            self.tests_tree.delete(item)
+
+        # Заполняем таблицу результатами тестов
+        tests = results.get('tests', {})
+        test_order = [
+            'entropy', 'lsb_distribution', 'noise_pattern', 'histogram',
+            'pixel_correlation', 'block_entropy', 'color_correlation',
+            'jpeg_artifacts', 'spectral_analysis'
+        ]
+
+        for test_name in test_order:
+            if test_name not in tests:
+                continue
+
+            test_data = tests[test_name]
+
+            # Форматируем название теста
+            test_names = {
+                'entropy': 'Энтропия',
+                'lsb_distribution': 'Распределение младших битов',
+                'noise_pattern': 'Шумовой паттерн',
+                'histogram': 'Гистограммный анализ',
+                'pixel_correlation': 'Корреляция пикселей',
+                'block_entropy': 'Энтропия по блокам',
+                'color_correlation': 'Корреляция цветовых каналов',
+                'jpeg_artifacts': 'Артефакты JPEG',
+                'spectral_analysis': 'Спектральный анализ'
+            }
+
+            test_display_name = test_names.get(test_name, test_name)
+            value = test_data.get('value', 0)
+            interpretation = test_data.get('interpretation', 'N/A')
+            suspicion_level = test_data.get('suspicion_level', 0)
+
+            # Форматируем значение
+            if isinstance(value, float):
+                value_str = f"{value:.2f}"
+            else:
+                value_str = str(value)
+
+            # Определяем тег для цвета строки
+            if suspicion_level > 70:
+                tag = 'high_suspicion'
+            elif suspicion_level > 40:
+                tag = 'medium_suspicion'
+            else:
+                tag = 'low_suspicion'
+
+            # Добавляем строку в таблицу
+            self.tests_tree.insert("", "end", values=(
+                test_display_name,
+                value_str,
+                interpretation
+            ), tags=(tag,))
+
+        # Настройка цветов строк в зависимости от уровня подозрительности
+        self.tests_tree.tag_configure('high_suspicion', background=self.colors["error"], foreground="white")
+        self.tests_tree.tag_configure('medium_suspicion', background=self.colors["warning"], foreground="black")
+        self.tests_tree.tag_configure('low_suspicion', background=self.colors["card"], foreground=self.colors["text"])
+
+        # Отображаем рекомендации
+        recommendations = results.get('recommendations', [])
+        self.recommendations_text.config(state='normal')
+        self.recommendations_text.delete("1.0", tk.END)
+
+        for rec in recommendations:
+            self.recommendations_text.insert(tk.END, f"• {rec}\n")
+
+        self.recommendations_text.config(state='disabled')
+
+        # Создаем визуализации
+        self.create_visualizations(results)
+
+        # Включаем кнопку экспорта
+        self.export_button.config(state="normal")
+
+        # Обновляем статус
+        analysis_time = results.get('analysis_time', 0)
+        self.status_label.config(text=f"✅ Анализ завершен за {analysis_time:.1f} сек")
+
+        # Записываем в лог
+        self.app.log_manager.add_entry(
+            "analyze",
+            "success",
+            {
+                "file": self.file_path.get(),
+                "suspicion_level": suspicion,
+                "tests_count": len(tests),
+                "analysis_time": analysis_time
+            }
+        )
+
+    def create_visualizations(self, results: dict):
+        """Создает интерактивные визуализации результатов"""
+        # Гистограмма
+        self.create_histogram(results)
+
+        # Анализ шума
+        self.create_noise_analysis(results)
+
+        # Статистика LSB
+        self.create_lsb_statistics(results)
+
+        # Корреляция пикселей
+        self.create_correlation_plot(results)
+
+    def create_histogram(self, results: dict):
+        """Создает интерактивную гистограмму распределения с числовыми метками"""
+        # Удаляем предыдущий график
+        for widget in self.histogram_frame.winfo_children():
+            widget.destroy()
+
+        tests = results.get('tests', {})
+        if 'histogram' not in tests:
+            label = ttk.Label(
+                self.histogram_frame,
+                text="Нет данных для гистограммы",
+                font=("Segoe UI", 10),
+                style="Secondary.TLabel"
+            )
+            label.pack(padx=20, pady=20)
+            return
+
+        histogram_data = tests['histogram']['details'].get('histogram', [])
+        if not histogram_data:
+            label = ttk.Label(
+                self.histogram_frame,
+                text="Нет данных для гистограммы",
+                font=("Segoe UI", 10),
+                style="Secondary.TLabel"
+            )
+            label.pack(padx=20, pady=20)
+            return
+
+        # Создаем фигуру с увеличенным размером
+        fig = Figure(figsize=(8, 5), dpi=100)
+        ax = fig.add_subplot(111)
+
+        # Рисуем гистограмму с интерактивностью
+        bars = ax.bar(range(256), histogram_data, color=self.colors["accent"], alpha=0.7, edgecolor='none')
+
+        # Добавляем подписи осей с белым цветом для темной темы
+        ax.set_xlabel('Значение пикселя/сэмпла', color=self.colors["text"], fontsize=10)
+        ax.set_ylabel('Частота', color=self.colors["text"], fontsize=10)
+        ax.set_title('Гистограмма распределения значений', color=self.colors["accent"], fontsize=12, fontweight='bold')
+
+        # Добавляем сетку с полупрозрачным цветом
+        ax.grid(True, linestyle='--', alpha=0.3, color=self.colors["text_secondary"])
+
+        # Добавляем числовые метки на осях
+        ax.tick_params(colors=self.colors["text"], labelsize=9)
+
+        # Настройка цветов фона
+        fig.patch.set_facecolor(self.colors["card"])
+        ax.set_facecolor(self.colors["card"])
+
+        # Добавляем легенду
+        ax.legend(['Распределение значений'], loc='upper right', fontsize=9, facecolor=self.colors["card"],
+                  edgecolor=self.colors["border"])
+
+        # Создаем canvas с возможностью взаимодействия
+        canvas = FigureCanvasTkAgg(fig, master=self.histogram_frame)
+        canvas.draw()
+
+        # Добавляем обработчик наведения мыши для отображения значений
+        def on_hover(event):
+            if event.inaxes == ax:
+                x, y = int(event.xdata), int(event.ydata)
+                if 0 <= x < 256:
+                    value = histogram_data[x]
+                    ax.set_title(f'Гистограмма распределения значений | Значение {x}: {value} раз',
+                                 color=self.colors["accent"], fontsize=12, fontweight='bold')
+                    canvas.draw()
+
+        canvas.mpl_connect('motion_notify_event', on_hover)
+
+        # Размещаем canvas
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Добавляем подпись с информацией
+        stats = tests['histogram']['details']
+        info_text = f"Пики: {stats['peaks_count']} | Провалы: {stats['valleys_count']} | Периодичность: {stats['periodicity_score']:.2f}"
+        ttk.Label(
+            self.histogram_frame,
+            text=info_text,
+            font=("Segoe UI", 8),
+            style="Secondary.TLabel"
+        ).pack(pady=(5, 0))
+
+    def create_noise_analysis(self, results: dict):
+        """Создает интерактивный график анализа шума с числовыми метками"""
+        # Удаляем предыдущий график
+        for widget in self.noise_frame.winfo_children():
+            widget.destroy()
+
+        tests = results.get('tests', {})
+        if 'noise_pattern' not in tests:
+            label = ttk.Label(
+                self.noise_frame,
+                text="Нет данных для анализа шума",
+                font=("Segoe UI", 10),
+                style="Secondary.TLabel"
+            )
+            label.pack(padx=20, pady=20)
+            return
+
+        noise_data = tests['noise_pattern']['details']
+
+        # Создаем фигуру
+        fig = Figure(figsize=(8, 5), dpi=100)
+        ax = fig.add_subplot(111)
+
+        # Генерируем данные для визуализации нормального распределения
+        x = np.linspace(-5, 5, 200)
+        std_dev = noise_data.get('std_deviation', 1.0)
+
+        # Нормальное распределение
+        y = np.exp(-0.5 * (x / std_dev) ** 2) / (std_dev * np.sqrt(2 * np.pi))
+
+        # Рисуем график с толстой линией
+        line, = ax.plot(x, y, color=self.colors["accent"], linewidth=2.5, label=f'σ = {std_dev:.2f}')
+
+        # Заливаем область под кривой
+        ax.fill_between(x, y, color=self.colors["accent"], alpha=0.3)
+
+        # Добавляем вертикальные линии для стандартных отклонений
+        for i in range(1, 4):
+            ax.axvline(i * std_dev, color='red', linestyle='--', alpha=0.3, linewidth=1)
+            ax.axvline(-i * std_dev, color='red', linestyle='--', alpha=0.3, linewidth=1)
+
+        # Добавляем подписи осей
+        ax.set_xlabel('Нормализованная амплитуда шума', color=self.colors["text"], fontsize=10)
+        ax.set_ylabel('Плотность вероятности', color=self.colors["text"], fontsize=10)
+        ax.set_title(f'Анализ шумового распределения (σ = {std_dev:.2f})',
+                     color=self.colors["accent"], fontsize=12, fontweight='bold')
+
+        # Добавляем сетку
+        ax.grid(True, linestyle='--', alpha=0.3, color=self.colors["text_secondary"])
+
+        # Настройка цветов
+        fig.patch.set_facecolor(self.colors["card"])
+        ax.set_facecolor(self.colors["card"])
+        ax.tick_params(colors=self.colors["text"], labelsize=9)
+
+        # Добавляем легенду
+        ax.legend(loc='upper right', fontsize=9, facecolor=self.colors["card"], edgecolor=self.colors["border"])
+
+        # Создаем canvas
+        canvas = FigureCanvasTkAgg(fig, master=self.noise_frame)
+        canvas.draw()
+
+        # Добавляем обработчик наведения мыши
+        def on_hover(event):
+            if event.inaxes == ax:
+                x_val, y_val = event.xdata, event.ydata
+                if x_val is not None and y_val is not None:
+                    # Рассчитываем вероятность для текущей точки
+                    prob = np.exp(-0.5 * (x_val / std_dev) ** 2) / (std_dev * np.sqrt(2 * np.pi))
+                    ax.set_title(f'Анализ шума | x={x_val:.2f}, p={prob:.4f} (σ = {std_dev:.2f})',
+                                 color=self.colors["accent"], fontsize=12, fontweight='bold')
+                    canvas.draw()
+
+        canvas.mpl_connect('motion_notify_event', on_hover)
+
+        # Размещаем canvas
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Добавляем подпись с дополнительной информацией
+        skewness = noise_data.get('skewness', 0.0)
+        info_text = f"Стандартное отклонение: {std_dev:.2f} | Асимметрия: {skewness:.2f}"
+        ttk.Label(
+            self.noise_frame,
+            text=info_text,
+            font=("Segoe UI", 8),
+            style="Secondary.TLabel"
+        ).pack(pady=(5, 0))
+
+    def create_lsb_statistics(self, results: dict):
+        """Создает интерактивную круговую диаграмму распределения младших битов"""
+        # Удаляем предыдущий график
+        for widget in self.stats_frame.winfo_children():
+            widget.destroy()
+
+        tests = results.get('tests', {})
+        if 'lsb_distribution' not in tests:
+            label = ttk.Label(
+                self.stats_frame,
+                text="Нет данных для статистики младших битов",
+                font=("Segoe UI", 10),
+                style="Secondary.TLabel"
+            )
+            label.pack(padx=20, pady=20)
+            return
+
+        lsb_data = tests['lsb_distribution']['details']
+        zeros = lsb_data.get('zeros_count', 0)
+        ones = lsb_data.get('ones_count', 0)
+        total = zeros + ones
+
+        if total == 0:
+            label = ttk.Label(
+                self.stats_frame,
+                text="Нет данных для статистики",
+                font=("Segoe UI", 10),
+                style="Secondary.TLabel"
+            )
+            label.pack(padx=20, pady=20)
+            return
+
+        # Создаем фигуру
+        fig = Figure(figsize=(8, 5), dpi=100)
+        ax = fig.add_subplot(111)
+
+        # Данные для круговой диаграммы
+        labels = ['Нули (0)', 'Единицы (1)']
+        sizes = [zeros, ones]
+        colors = [self.colors["success"], self.colors["error"]]
+        explode = (0.05, 0)  # Слегка выделяем сектор с нулями
+
+        # Рисуем круговую диаграмму
+        wedges, texts, autotexts = ax.pie(
+            sizes,
+            labels=labels,
+            colors=colors,
+            autopct=lambda pct: f'{pct:.1f}%\n({int(pct * total / 100)})',
+            startangle=90,
+            explode=explode,
+            shadow=True,
+            textprops={'color': 'white', 'fontsize': 10, 'weight': 'bold'}
+        )
+
+        # Добавляем заголовок
+        balance = lsb_data.get('balance', 0.0)
+        ax.set_title(f'Распределение младших битов (баланс: {balance:.3f})',
+                     color=self.colors["accent"], fontsize=12, fontweight='bold', pad=20)
+
+        # Настройка цветов
+        fig.patch.set_facecolor(self.colors["card"])
+        ax.set_facecolor(self.colors["card"])
+
+        # Создаем легенду
+        legend_labels = [
+            f'Нули: {zeros} ({zeros / total * 100:.1f}%)',
+            f'Единицы: {ones} ({ones / total * 100:.1f}%)'
+        ]
+        ax.legend(legend_labels, loc='lower center', fontsize=9,
+                  facecolor=self.colors["card"], edgecolor=self.colors["border"])
+
+        # Создаем canvas
+        canvas = FigureCanvasTkAgg(fig, master=self.stats_frame)
+        canvas.draw()
+
+        # Размещаем canvas
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Добавляем подпись с интерпретацией
+        deviation = lsb_data.get('deviation', 0.0)
+        interpretation = lsb_data.get('interpretation', 'N/A')
+        info_text = f"Отклонение от 50/50: {deviation:.3f} | Интерпретация: {interpretation}"
+        ttk.Label(
+            self.stats_frame,
+            text=info_text,
+            font=("Segoe UI", 8),
+            style="Secondary.TLabel"
+        ).pack(pady=(5, 0))
+
+    def create_correlation_plot(self, results: dict):
+        """Создает график корреляции соседних пикселей"""
+        # Удаляем предыдущий график
+        for widget in self.correlation_frame.winfo_children():
+            widget.destroy()
+
+        tests = results.get('tests', {})
+        if 'pixel_correlation' not in tests:
+            label = ttk.Label(
+                self.correlation_frame,
+                text="Нет данных для анализа корреляции",
+                font=("Segoe UI", 10),
+                style="Secondary.TLabel"
+            )
+            label.pack(padx=20, pady=20)
+            return
+
+        corr_data = tests['pixel_correlation']['details']
+
+        # Создаем фигуру
+        fig = Figure(figsize=(8, 5), dpi=100)
+        ax = fig.add_subplot(111)
+
+        # Данные для графика
+        categories = ['Горизонтальная', 'Вертикальная', 'Средняя']
+        values = [
+            abs(corr_data.get('horizontal_corr', 0.0)),
+            abs(corr_data.get('vertical_corr', 0.0)),
+            corr_data.get('avg_corr', 0.0)
+        ]
+        colors = [self.colors["accent"], self.colors["warning"], self.colors["success"]]
+
+        # Рисуем столбчатую диаграмму
+        bars = ax.bar(categories, values, color=colors, alpha=0.8, edgecolor='white', linewidth=1.5)
+
+        # Добавляем горизонтальную линию для порога естественной корреляции
+        ax.axhline(y=0.8, color='green', linestyle='--', alpha=0.7, linewidth=2,
+                   label='Порог естественной корреляции (0.8)')
+
+        # Добавляем подписи осей
+        ax.set_xlabel('Тип корреляции', color=self.colors["text"], fontsize=10)
+        ax.set_ylabel('Коэффициент корреляции', color=self.colors["text"], fontsize=10)
+        ax.set_title('Корреляция соседних пикселей',
+                     color=self.colors["accent"], fontsize=12, fontweight='bold')
+
+        # Ограничиваем ось Y от 0 до 1
+        ax.set_ylim(0, 1.05)
+
+        # Добавляем сетку
+        ax.grid(True, linestyle='--', alpha=0.3, color=self.colors["text_secondary"], axis='y')
+
+        # Добавляем числовые метки над столбцами
+        for bar, value in zip(bars, values):
+            height = bar.get_height()
+            ax.text(bar.get_x() + bar.get_width() / 2., height + 0.02,
+                    f'{value:.2f}',
+                    ha='center', va='bottom', fontsize=9, color=self.colors["text"])
+
+        # Настройка цветов
+        fig.patch.set_facecolor(self.colors["card"])
+        ax.set_facecolor(self.colors["card"])
+        ax.tick_params(colors=self.colors["text"], labelsize=9)
+
+        # Добавляем легенду
+        ax.legend(loc='lower right', fontsize=9, facecolor=self.colors["card"], edgecolor=self.colors["border"])
+
+        # Создаем canvas
+        canvas = FigureCanvasTkAgg(fig, master=self.correlation_frame)
+        canvas.draw()
+
+        # Размещаем canvas
+        canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+
+        # Добавляем подпись с интерпретацией
+        interpretation = corr_data.get('interpretation', 'N/A')
+        info_text = f"Интерпретация: {interpretation} | Чем выше корреляция (>0.8), тем естественнее изображение"
+        ttk.Label(
+            self.correlation_frame,
+            text=info_text,
+            font=("Segoe UI", 8),
+            style="Secondary.TLabel"
+        ).pack(pady=(5, 0))
+
+    def clear_results(self):
+        """Очищает результаты анализа"""
+        # Очищаем метаданные
+        self.metadata_text.config(state='normal')
+        self.metadata_text.delete("1.0", tk.END)
+        self.metadata_text.config(state='disabled')
+
+        # Сбрасываем индикатор подозрительности
+        self.suspicion_label.config(text="—")
+        self.suspicion_bar.config(value=0, style="TProgressbar")
+        self.suspicion_text.config(text="Нет данных", foreground=self.colors["text_secondary"])
+
+        # Очищаем таблицу тестов
+        for item in self.tests_tree.get_children():
+            self.tests_tree.delete(item)
+
+        # Очищаем рекомендации
+        self.recommendations_text.config(state='normal')
+        self.recommendations_text.delete("1.0", tk.END)
+        self.recommendations_text.config(state='disabled')
+
+        # Очищаем визуализации
+        for widget in self.histogram_frame.winfo_children():
+            widget.destroy()
+        for widget in self.noise_frame.winfo_children():
+            widget.destroy()
+        for widget in self.stats_frame.winfo_children():
+            widget.destroy()
+        for widget in self.correlation_frame.winfo_children():
+            widget.destroy()
+
+        # Сбрасываем результаты
+        self.analysis_results = None
+
+        # Обновляем статус
+        self.status_label.config(text="✅ Готов к анализу")
+
+        # Отключаем кнопку экспорта
+        self.export_button.config(state="disabled")
+
+    def restore_buttons(self):
+        """Восстанавливает состояние кнопок после анализа"""
+        self.analyze_button.config(state="normal")
+        self.cancel_button.config(state="disabled")
+
+    def cancel_analysis(self):
+        """Отменяет анализ"""
+        self.cancel_event.set()
+        self.status_label.config(text="⏳ Отмена анализа...")
+        self.cancel_button.config(state="disabled")
+
+    def export_report(self):
+        """Экспортирует отчет об анализе"""
+        if not self.analysis_results:
+            messagebox.showwarning("⚠️ Предупреждение", "Нет результатов для экспорта")
+            return
+
+        file_path = filedialog.asksaveasfilename(
+            title="Сохранить отчет об анализе",
+            defaultextension=".json",
+            filetypes=[("JSON файлы", "*.json"), ("Все файлы", "*.*")],
+            initialdir=self.app.last_save_dir,
+            initialfile=f"analysis_report_{os.path.basename(self.file_path.get())}.json"
+        )
+
+        if not file_path:
+            return
+
+        try:
+            # Добавляем дополнительную информацию в отчет
+            report = self.analysis_results.copy()
+            report['export_date'] = time.strftime("%Y-%m-%d %H:%M:%S")
+            report['export_version'] = VERSION
+            report['app_version'] = VERSION
+
+            # Сохраняем в JSON с отступами для читаемости
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(report, f, indent=2, ensure_ascii=False)
+
+            messagebox.showinfo(
+                "✅ Успех",
+                f"Отчет успешно сохранен:\n{file_path}"
+            )
+
+            self.app.last_save_dir = os.path.dirname(file_path)
+            self.app.show_toast("✅ Отчет экспортирован")
+
+            # Записываем в лог
+            self.app.log_manager.add_entry(
+                "export_analysis",
+                "success",
+                {
+                    "file": file_path,
+                    "original_file": self.file_path.get(),
+                    "suspicion_level": report.get('overall_suspicion', 0),
+                    "tests_count": len(report.get('tests', {}))
+                }
+            )
+
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка", f"Не удалось сохранить отчет:\n{str(e)}")
+            self.app.log_manager.add_entry("export_analysis", "error", {"error": str(e)})
+
+    def display_error(self, message: str):
+        """Отображает сообщение об ошибке"""
+        messagebox.showerror("❌ Ошибка", message)
+        self.status_label.config(text=f"❌ {message}")
+
+
+# ───────────────────────────────────────────────
 # 🎨 УЛУЧШЕННЫЙ КЛАСС ПРОВЕРКИ ПАРОЛЯ
 # ───────────────────────────────────────────────
 PASSWORD_FILE = "password_pro.json"
@@ -8879,43 +10692,31 @@ class JPEGStego:
     @staticmethod
     def hide_dct(container_path: str, data: bytes, output_path: str,
                  progress_callback=None, cancel_event=None) -> None:
-        """
-        Скрывает данные в JPEG изображении методом DCT.
-
-        Физический смысл:
-        1. Блоки 8x8 - JPEG использует разбиение на такие блоки для независимой обработки
-        2. DCT преобразует пространственную информацию в частотную
-        3. Среднечастотные коэффициенты лучше подходят для скрытия - они менее заметны для глаза
-           и менее подвержены сжатию
-        """
         try:
             # Загружаем изображение
             img = cv2.imread(container_path)
             if img is None:
                 raise ValueError("Не удалось загрузить изображение")
 
-            # Преобразуем в YCbCr (цветовое пространство JPEG)
+            # Проверяем, что изображение в формате JPEG (цветовое пространство YCbCr)
+            # Важно: работаем только с каналом яркости Y
             img_ycbcr = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
-
-            # Используем канал Y (яркость)
-            # Глаз менее чувствителен к изменениям яркости в высокочастотных компонентах
             y_channel = img_ycbcr[:, :, 0].astype(np.float32)
 
-            # Получаем размеры
+            # Получаем размеры и выравниваем до кратных 8
             h, w = y_channel.shape
-
-            # Разбиваем на блоки 8x8
             h_blocks = h // 8
             w_blocks = w // 8
+
+            if h_blocks == 0 or w_blocks == 0:
+                raise ValueError("Изображение слишком маленькое для JPEG DCT стеганографии")
 
             # Упаковываем данные с заголовком
             full_data = JPEGStego._pack_data_with_header(data)
             data_bits = np.unpackbits(np.frombuffer(full_data, dtype=np.uint8))
 
-            # Проверяем вместимость
-            # В каждом блоке можно встроить 1 бит в один из среднечастотных коэффициентов
+            # Проверяем вместимость (1 бит на блок)
             max_capacity = h_blocks * w_blocks
-
             if len(data_bits) > max_capacity:
                 raise ValueError(
                     f"Данные слишком велики для изображения. "
@@ -8923,11 +10724,9 @@ class JPEGStego:
                 )
 
             # Коэффициенты DCT для встраивания (средние частоты)
-            # Выбираем коэффициенты (4,4) и (5,5) - они устойчивы к сжатию
             embed_positions = [(4, 4), (5, 5), (4, 5), (5, 4)]
-
             bit_index = 0
-            total_bits = len(data_bits)
+            total_blocks = h_blocks * w_blocks
 
             # Проходим по всем блокам
             for i in range(h_blocks):
@@ -8935,33 +10734,27 @@ class JPEGStego:
                     if cancel_event and cancel_event.is_set():
                         raise InterruptedError("Операция отменена пользователем")
 
-                    # Берём блок 8x8
-                    block = y_channel[i * 8:(i + 1) * 8, j * 8:(j + 1) * 8]
+                    # Берём блок 8x8 (гарантированно полный благодаря выравниванию)
+                    block = y_channel[i * 8:(i + 1) * 8, j * 8:(j + 1) * 8].copy()
 
-                    # Применяем DCT (2D DCT через два 1D DCT)
+                    # Применяем DCT
                     dct_block = dct(dct(block.T, norm='ortho').T, norm='ortho')
 
                     # Встраиваем данные если ещё есть биты
-                    if bit_index < total_bits:
-                        # Выбираем позицию для встраивания (чередуем для равномерности)
+                    if bit_index < len(data_bits):
+                        # Выбираем позицию для встраивания (циклически)
                         pos_idx = (i * w_blocks + j) % len(embed_positions)
                         u, v = embed_positions[pos_idx]
 
                         # Получаем текущее значение коэффициента
                         coeff = dct_block[u, v]
 
-                        # Встраиваем бит методом LSB
-                        bit = data_bits[bit_index]
-                        if bit == 1:
-                            # Устанавливаем младший бит в 1
-                            if int(coeff) % 2 == 0:
-                                dct_block[u, v] = coeff + 1 if coeff >= 0 else coeff - 1
-                        else:
-                            # Устанавливаем младший бит в 0
-                            if int(coeff) % 2 == 1:
-                                dct_block[u, v] = coeff - 1 if coeff >= 0 else coeff + 1
-
-                        bit_index += 1
+                        # Встраиваем бит методом LSB (только для коэффициентов > 1 для устойчивости)
+                        if abs(coeff) > 1.0:
+                            bit = data_bits[bit_index]
+                            if (int(coeff) % 2) != bit:
+                                dct_block[u, v] = coeff + (1 if bit else -1)
+                            bit_index += 1
 
                     # Обратное DCT
                     idct_block = idct(idct(dct_block.T, norm='ortho').T, norm='ortho')
@@ -8970,9 +10763,9 @@ class JPEGStego:
                     y_channel[i * 8:(i + 1) * 8, j * 8:(j + 1) * 8] = idct_block
 
                     # Обновляем прогресс
-                    if progress_callback and (i * w_blocks + j) % 100 == 0:
-                        progress = (i * w_blocks + j) / (h_blocks * w_blocks) * 100
-                        progress_callback(progress, f"Обработано блоков: {i * w_blocks + j}/{h_blocks * w_blocks}")
+                    if progress_callback and (i * w_blocks + j) % 50 == 0:
+                        progress = (i * w_blocks + j) / total_blocks * 100
+                        progress_callback(progress)
 
             # Обрезаем значения до допустимого диапазона
             y_channel = np.clip(y_channel, 0, 255)
@@ -8983,26 +10776,17 @@ class JPEGStego:
             # Конвертируем обратно в BGR
             img_stego = cv2.cvtColor(img_ycbcr, cv2.COLOR_YCrCb2BGR)
 
-            # Сохраняем с минимальным JPEG сжатием для сохранения данных
-            cv2.imwrite(output_path, img_stego, [cv2.IMWRITE_JPEG_QUALITY, 95])
+            # СОХРАНЯЕМ С МАКСИМАЛЬНЫМ КАЧЕСТВОМ (100%) для предотвращения потери данных!
+            cv2.imwrite(output_path, img_stego, [cv2.IMWRITE_JPEG_QUALITY, 100])
 
             if progress_callback:
-                progress_callback(100.0, "✅ Данные успешно скрыты")
+                progress_callback(100.0)
 
         except Exception as e:
             raise Exception(f"Ошибка при скрытии данных JPEG DCT: {str(e)}")
 
     @staticmethod
-    def extract_dct(stego_path: str, password: str, progress_callback=None, cancel_event=None) -> bytes:
-        """
-        Извлекает данные из JPEG изображения, скрытые методом DCT.
-
-        Процесс:
-        1. Разбиение на блоки 8x8
-        2. Применение DCT к каждому блоку
-        3. Чтение битов из тех же коэффициентов
-        4. Сбор данных и проверка целостности
-        """
+    def extract_dct(stego_path: str, progress_callback=None, cancel_event=None) -> bytes:
         try:
             # Загружаем изображение
             img = cv2.imread(stego_path)
@@ -9013,20 +10797,20 @@ class JPEGStego:
             img_ycbcr = cv2.cvtColor(img, cv2.COLOR_BGR2YCrCb)
             y_channel = img_ycbcr[:, :, 0].astype(np.float32)
 
-            # Размеры
+            # Размеры и выравнивание
             h, w = y_channel.shape
             h_blocks = h // 8
             w_blocks = w // 8
+            total_blocks = h_blocks * w_blocks
+
+            if h_blocks == 0 or w_blocks == 0:
+                raise ValueError("Изображение слишком маленькое для извлечения данных")
 
             # Коэффициенты для извлечения (должны совпадать с встраиванием)
             embed_positions = [(4, 4), (5, 5), (4, 5), (5, 4)]
 
-            # Максимальное количество бит, которое можно извлечь
-            max_bits = h_blocks * w_blocks
-
             # Собираем биты
             extracted_bits = []
-
             for i in range(h_blocks):
                 for j in range(w_blocks):
                     if cancel_event and cancel_event.is_set():
@@ -9048,30 +10832,49 @@ class JPEGStego:
                     extracted_bits.append(bit)
 
                     # Обновляем прогресс
-                    if progress_callback and (i * w_blocks + j) % 100 == 0:
-                        progress = (i * w_blocks + j) / (h_blocks * w_blocks) * 100
-                        progress_callback(progress, f"Извлечение блоков: {i * w_blocks + j}/{h_blocks * w_blocks}")
+                    if progress_callback and (i * w_blocks + j) % 50 == 0:
+                        progress = (i * w_blocks + j) / total_blocks * 100
+                        progress_callback(progress)
 
             # Преобразуем биты в байты
             extracted_bytes = np.packbits(extracted_bits).tobytes()
 
-            # Пытаемся распаковать данные
-            # Ищем заголовок в извлеченных данных
-            try:
-                # Пробуем разные смещения на случай ошибок синхронизации
-                for offset in range(0, min(100, len(extracted_bytes) - 12)):
+            # ЭФФЕКТИВНЫЙ ПОИСК ЗАГОЛОВКА (оптимизированный)
+            magic = b'JPEG'
+            magic_len = len(magic)
+            header_len = 12  # 4 (magic) + 4 (checksum) + 4 (length)
+
+            # Поиск заголовка с умным сканированием (проверяем каждые 8 бит = 1 байт)
+            max_search = min(2000, len(extracted_bytes) - header_len)  # Увеличен до 2000 байт
+
+            for offset in range(0, max_search, 8):  # Проверяем только границы байтов
+                if extracted_bytes[offset:offset + magic_len] == magic:
                     try:
+                        # Пытаемся распаковать данные
                         data = JPEGStego._unpack_data_with_header(extracted_bytes[offset:])
                         if progress_callback:
-                            progress_callback(100.0, "✅ Данные успешно извлечены")
+                            progress_callback(100.0)
                         return data
-                    except:
+                    except Exception:
+                        # Не валидные данные в этой позиции - продолжаем поиск
                         continue
 
-                raise ValueError("Не удалось найти валидные данные")
+            # Дополнительная проверка: если данные начинаются с заголовка
+            if extracted_bytes.startswith(magic):
+                try:
+                    data = JPEGStego._unpack_data_with_header(extracted_bytes)
+                    if progress_callback:
+                        progress_callback(100.0)
+                    return data
+                except Exception:
+                    pass
 
-            except Exception as e:
-                raise ValueError(f"Ошибка при распаковке данных: {str(e)}")
+            raise ValueError(
+                "Не удалось найти валидные данные. Возможные причины:\n"
+                "1. Файл не содержит скрытой информации методом JPEG DCT\n"
+                "2. Изображение было пересохранено с потерей качества (качество < 100%)\n"
+                "3. Использован другой метод стеганографии"
+            )
 
         except Exception as e:
             raise Exception(f"Ошибка при извлечении данных JPEG DCT: {str(e)}")
@@ -9273,7 +11076,6 @@ class ImageProcessor:
                 JPEGStego.hide_dct(
                     container_path=container_path,
                     data=data,
-                    password=password,
                     output_path=output_path,
                     progress_callback=progress_callback,
                     cancel_event=cancel_event
@@ -9329,7 +11131,7 @@ class ImageProcessor:
         if method:
             methods_to_try = [method]
         else:
-            methods_to_try = ["lsb", "noise", "aelsb", "hill"]
+            methods_to_try = ["lsb", "noise", "aelsb", "hill", "jpeg_dct"]
 
         last_error = None
         for method_name in methods_to_try:
@@ -9651,9 +11453,9 @@ class SteganographyUltimatePro:
         # Создаем вкладки
         self.create_hide_tab()
         self.create_extract_tab()
+        self.create_analysis_tab()
         self.create_settings_tab()
 
-        # Убедимся, что статистика и достижения создаются правильно
         self.create_statistics_tab()  # Создаем вкладку "Статистика"
         self.create_achievements_tab()  # Создаем вкладку "Достижения"
         self.create_help_tab()  # Создаем вкладку "Помощь"
@@ -9661,6 +11463,7 @@ class SteganographyUltimatePro:
         # Добавляем вкладки в notebook с правильными текстами и иконками
         self.notebook.add(self.hide_tab, text="📦 Скрыть данные")
         self.notebook.add(self.extract_tab, text="🔍 Извлечь данные")
+        self.notebook.add(self.analysis_tab, text="🔬 Анализ файла")
         self.notebook.add(self.settings_tab, text="⚙️ Настройки")
         self.notebook.add(self.statistics_tab, text="📊 Статистика")  # Правильное имя вкладки
         self.notebook.add(self.achievements_tab, text="🏆 Достижения")  # Правильное имя вкладки
@@ -9672,6 +11475,14 @@ class SteganographyUltimatePro:
 
         # Создаем панель быстрого доступа
         self.create_quick_access_panel(main_frame)
+
+    def create_analysis_tab(self) -> None:
+        """Создает вкладку анализа файла"""
+        self.analysis_tab = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.notebook.add(self.analysis_tab, text="🔬 Анализ файла")
+
+        # Инициализируем вкладку анализа
+        self.analysis_ui = AnalysisTab(self.analysis_tab, self)
 
     def create_header(self, parent: ttk.Frame) -> None:
         header_frame = ttk.Frame(parent, style="Card.TFrame")
@@ -12565,13 +14376,17 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
                 if messagebox.askyesno("📂 Открыть папку", "Открыть папку с сохраненным файлом?"):
                     Utils.open_in_file_manager(output)
                 # Показываем подсказку от ассистента
+                # В методе hide_data(), внутри after_success():
                 if self.settings.get("show_tips", True):
                     # Analyze the current situation to get a context
                     container_path = img_path
                     data_size = len(data)
-                    context = self.smart_assistant.analyze_situation(container_path, data_size)
-                    if context:
-                        tip = self.smart_assistant.get_contextual_tip(context)
+                    context_list = self.smart_assistant.analyze_situation(container_path, data_size)
+                    if context_list and isinstance(context_list, list) and len(context_list) > 0:
+                        # Извлекаем первый контекст из списка
+                        primary_context = context_list[0][0]  # Имя контекста
+                        analysis_data = context_list[0][2] if len(context_list[0]) > 2 else {}
+                        tip = self.smart_assistant.get_contextual_tip(primary_context, analysis_data)
                     else:
                         tip = self.smart_assistant.get_next_tip()
                     self.notification_manager.show_notification(tip, "info", 4000)
@@ -13494,22 +15309,30 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         self.notebook.select(self.help_tab)
 
     def show_container_info(self):
-        """Показывает информацию о контейнере"""
         path = self.img_path.get()
         if not path or not os.path.exists(path):
             messagebox.showwarning("❌ Ошибка", "Сначала выберите контейнер")
             return
 
         file_info = Utils.get_file_info(path)
-        info_text = f"""
-📁 Информация о контейнере
+        ext = os.path.splitext(path)[1].lower()
 
-Имя файла: {file_info['name']}
-Размер: {file_info['size_formatted']}
-Тип: {file_info['type']}
-Дата создания: {file_info['created']}
-Дата изменения: {file_info['modified']}
-"""
+        info_text = f"""
+    📁 Информация о контейнере
+    Имя файла: {file_info['name']}
+    Размер: {file_info['size_formatted']}
+    Тип: {file_info['type']}
+    Дата создания: {file_info['created']}
+    Дата изменения: {file_info['modified']}
+    """
+
+        if ext in ['.jpg', '.jpeg']:
+            info_text += """
+    ⚠️ ВАЖНО ДЛЯ JPEG:
+    • Для метода JPEG DCT требуется сохранение с качеством 100%
+    • Любое пересохранение с качеством < 100% уничтожит скрытые данные
+    • Рекомендуется использовать оригинальные JPEG файлы без повторной обработки
+    """
 
         if file_info['type'] == "image":
             info_text += f"""
