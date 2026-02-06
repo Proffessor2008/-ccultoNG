@@ -20,9 +20,7 @@ from typing import List, Tuple
 
 import matplotlib
 import matplotlib.pyplot as plt
-import pywt
-from scipy.stats import binomtest, kurtosis, skew
-from skimage.feature import graycomatrix, graycoprops
+from scipy.stats import binomtest, kurtosis, skew, normaltest
 
 matplotlib.use('TkAgg')
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -8817,8 +8815,8 @@ class FileAnalyzer:
     @staticmethod
     def analyze_texture_features(pixels: np.ndarray) -> dict:
         """
-        Анализирует текстурные признаки изображения через GLCM (Gray-Level Co-occurrence Matrix).
-        Стеганография изменяет текстурные характеристики изображения.
+        Анализирует текстурные признаки изображения через GLCM без использования skimage.
+        Результаты идентичны graycomatrix/graycoprops.
         """
         if pixels.ndim == 3:
             gray = cv2.cvtColor(pixels.astype(np.uint8), cv2.COLOR_RGB2GRAY)
@@ -8826,11 +8824,11 @@ class FileAnalyzer:
             gray = pixels.astype(np.uint8)
 
         # Нормализуем до 8 уровней для устойчивости GLCM
-        gray_8bit = (gray // 32).astype(np.uint8)
+        gray_8bit = (gray // 32).clip(0, 7).astype(np.uint8)
 
-        # Вычисляем GLCM для 4 направлений
         distances = [1]
         angles = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
+        levels = 8
 
         contrast_values = []
         homogeneity_values = []
@@ -8838,34 +8836,79 @@ class FileAnalyzer:
         correlation_values = []
 
         try:
+            h, w = gray_8bit.shape
             for angle in angles:
-                glcm = graycomatrix(gray_8bit, distances=distances, angles=[angle],
-                                    levels=8, symmetric=True, normed=True)
-                contrast_values.append(graycoprops(glcm, 'contrast')[0, 0])
-                homogeneity_values.append(graycoprops(glcm, 'homogeneity')[0, 0])
-                energy_values.append(graycoprops(glcm, 'energy')[0, 0])
-                correlation_values.append(graycoprops(glcm, 'correlation')[0, 0])
+                # 1. Вычисляем смещение (аналог skimage)
+                dx = int(round(np.cos(angle)))
+                dy = int(-round(np.sin(angle)))
 
-            # Статистика по всем направлениям
+                # Ограничиваем области для извлечения пар пикселей
+                y_slice = slice(max(0, dy), min(h, h + dy))
+                x_slice = slice(max(0, dx), min(w, w + dx))
+                y_neigh = slice(max(0, -dy), min(h, h - dy))
+                x_neigh = slice(max(0, -dx), min(w, w - dx))
+
+                target = gray_8bit[y_slice, x_slice].ravel()
+                neighbor = gray_8bit[y_neigh, x_neigh].ravel()
+
+                # 2. Строим матрицу совместной встречаемости (GLCM)
+                glcm = np.zeros((levels, levels), dtype=np.float64)
+                # Эффективный подсчет пар
+                for t, n in zip(target, neighbor):
+                    glcm[t, n] += 1
+
+                # symmetric=True
+                glcm += glcm.T
+
+                # normed=True
+                sum_glcm = np.sum(glcm)
+                if sum_glcm > 0:
+                    glcm /= sum_glcm
+
+                # 3. Вычисляем признаки (Props)
+                i, j = np.ogrid[:levels, :levels]
+
+                # Contrast
+                contrast = np.sum(glcm * (i - j) ** 2)
+                # Homogeneity
+                homogeneity = np.sum(glcm / (1.0 + (i - j) ** 2))
+                # Energy
+                energy = np.sqrt(np.sum(glcm ** 2))
+                # Correlation
+                mean_i = np.sum(i * glcm)
+                mean_j = np.sum(j * glcm)
+                std_i = np.sqrt(np.sum(glcm * (i - mean_i) ** 2))
+                std_j = np.sqrt(np.sum(glcm * (j - mean_j) ** 2))
+
+                if std_i > 1e-10 and std_j > 1e-10:
+                    correlation = np.sum(glcm * (i - mean_i) * (j - mean_j)) / (std_i * std_j)
+                else:
+                    correlation = 1.0
+
+                contrast_values.append(contrast)
+                homogeneity_values.append(homogeneity)
+                energy_values.append(energy)
+                correlation_values.append(correlation)
+
+            # Статистика (без изменений)
             contrast_mean = np.mean(contrast_values)
             contrast_std = np.std(contrast_values)
             homogeneity_mean = np.mean(homogeneity_values)
             energy_mean = np.mean(energy_values)
             correlation_mean = np.mean(correlation_values)
 
-            # Интерпретация: стеганография снижает контраст текстуры и повышает однородность
             suspicion_level = 0
             issues = []
 
-            if contrast_std < 0.05:  # Слишком однородная текстура во всех направлениях
+            if contrast_std < 0.05:
                 suspicion_level += 40
                 issues.append('Аномально однородная текстура во всех направлениях')
 
-            if homogeneity_mean > 0.9:  # Слишком высокая однородность
+            if homogeneity_mean > 0.9:
                 suspicion_level += 30
                 issues.append('Аномально высокая однородность текстуры')
 
-            if energy_mean > 0.15:  # Слишком высокая энергия (равномерное распределение)
+            if energy_mean > 0.15:
                 suspicion_level += 25
                 issues.append('Аномально высокая энергия GLCM')
 
@@ -8897,23 +8940,45 @@ class FileAnalyzer:
     @staticmethod
     def analyze_wavelet_features(pixels: np.ndarray) -> dict:
         """
-        Анализирует вейвлет-коэффициенты изображения.
-        Стеганография создает аномалии в распределении вейвлет-коэффициентов.
+        Анализирует вейвлет-коэффициенты изображения без использования pywt.
+        Реализовано двухуровневое разложение Хаара через numpy.
         """
         if pixels.ndim == 3:
             gray = cv2.cvtColor(pixels.astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
         else:
             gray = pixels.astype(np.float32)
 
-        try:
-            # Двухуровневое вейвлет-преобразование Хаара
-            coeffs = pywt.wavedec2(gray, 'haar', level=2)
+        def haar_step(image):
+            # Разделяем на четные и нечетные строки/столбцы
+            h, w = image.shape
+            # Если размеры нечетные — обрезаем (как это делает wavedec2 в определенных режимах)
+            img = image[:h - h % 2, :w - w % 2]
 
-            # Анализим детализирующие коэффициенты (высокие частоты)
+            # Вычисляем средние и разности (Haar)
+            # Вертикальные суммы и разности
+            row_sum = (img[0::2, :] + img[1::2, :]) / np.sqrt(2)
+            row_diff = (img[0::2, :] - img[1::2, :]) / np.sqrt(2)
+
+            # Горизонтальные суммы и разности
+            cA = (row_sum[:, 0::2] + row_sum[:, 1::2]) / np.sqrt(2)  # Аппроксимация
+            cH = (row_sum[:, 0::2] - row_sum[:, 1::2]) / np.sqrt(2)  # Горизонтальные детали
+            cV = (row_diff[:, 0::2] + row_diff[:, 1::2]) / np.sqrt(2)  # Вертикальные детали
+            cD = (row_diff[:, 0::2] - row_diff[:, 1::2]) / np.sqrt(2)  # Диагональные детали
+
+            return cA, (cH, cV, cD)
+
+        try:
+            # Уровень 1
+            cA1, details1 = haar_step(gray)
+            # Уровень 2
+            cA2, details2 = haar_step(cA1)
+
+            # Собираем детализирующие коэффициенты (как это делал pywt.wavedec2)
+            # В wavedec2 coeffs[1:] — это кортежи (cH, cV, cD) для каждого уровня
             detail_coeffs = []
-            for level_coeffs in coeffs[1:]:  # Пропускаем аппроксимацию (cA)
-                for detail in level_coeffs:  # cH, cV, cD
-                    detail_coeffs.extend(detail.flatten())
+            for level in [details1, details2]:
+                for detail_map in level:
+                    detail_coeffs.extend(detail_map.flatten())
 
             if len(detail_coeffs) == 0:
                 return {
@@ -8930,26 +8995,20 @@ class FileAnalyzer:
             coeff_skew = skew(detail_array)
             coeff_kurt = kurtosis(detail_array)
 
-            # Тест на нормальность распределения (Д'Агостино)
-            from scipy.stats import normaltest
             k2_stat, k2_pvalue = normaltest(detail_array)
 
-            # Интерпретация:
-            # Естественные изображения имеют субгауссовое распределение вейвлет-коэффициентов
-            # (отрицательный эксцесс, |коэффициент| < 0)
-            # Стеганография делает распределение более гауссовым или супергауссовым
             suspicion_level = 0
             issues = []
 
-            if coeff_kurt > -0.5:  # Слишком близко к нормальному или супергауссову
+            if coeff_kurt > -0.5:
                 suspicion_level += 45
                 issues.append('Аномально высокий эксцесс вейвлет-коэффициентов (%.2f)' % coeff_kurt)
 
-            if k2_pvalue > 0.1:  # Распределение слишком близко к нормальному
+            if k2_pvalue > 0.1:
                 suspicion_level += 35
                 issues.append('Распределение вейвлет-коэффициентов слишком близко к нормальному')
 
-            if coeff_std < 5.0:  # Слишком низкая вариативность
+            if coeff_std < 5.0:
                 suspicion_level += 25
                 issues.append('Аномально низкая вариативность вейвлет-коэффициентов')
 
@@ -13185,17 +13244,6 @@ class SteganographyUltimatePro:
         # Создаем тост
         self.create_toast()
 
-        # Создаем панель быстрого доступа
-        self.create_quick_access_panel(main_frame)
-
-    def create_analysis_tab(self) -> None:
-        """Создает вкладку анализа файла"""
-        self.analysis_tab = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.notebook.add(self.analysis_tab, text="🔬 Анализ файла")
-
-        # Инициализируем вкладку анализа
-        self.analysis_ui = AnalysisTab(self.analysis_tab, self)
-
     def create_header(self, parent: ttk.Frame) -> None:
         header_frame = ttk.Frame(parent, style="Card.TFrame")
         header_frame.pack(fill=tk.X, pady=(0, 15))
@@ -13233,51 +13281,41 @@ class SteganographyUltimatePro:
         )
         version_label.pack(side=tk.LEFT, padx=(8, 0), pady=(5, 0))
 
-    def create_quick_access_panel(self, parent: ttk.Frame) -> None:
-        """Создает панель быстрого доступа"""
-        quick_frame = ttk.Frame(parent, style="Card.TFrame")
-        quick_frame.pack(fill=tk.X, pady=(0, 10))
-        # Заголовок панели
-        ttk.Label(
-            quick_frame,
-            text="⚡ Быстрый доступ",
-            font=("Segoe UI", 12, "bold"),
-            foreground=self.colors["accent"],
-            style="TLabel"
-        ).pack(side=tk.LEFT, padx=(0, 20))
-        # Кнопки быстрого доступа
-        quick_buttons = [
-            ("📂 Открыть контейнер", self.select_image, "Ctrl+O"),
-            ("🔐 Скрыть данные", self.start_hide, "Ctrl+Enter"),
-            ("🔍 Извлечь данные", self.start_extract, "Ctrl+E"),
-            ("💾 Сохранить результат", self.save_extracted, "Ctrl+S"),
-            ("⚙️ Настройки", lambda: self.notebook.select(self.settings_tab), "Ctrl+,"),
-            ("📊 Статистика", lambda: self.notebook.select(self.statistics_tab), "Ctrl+Shift+S"),
-            ("🏆 Достижения", lambda: self.notebook.select(self.achievements_tab), "Ctrl+Shift+A"),
-            ("❓ Помощь", self.show_help, "F1")
-        ]
-        for text, command, shortcut in quick_buttons:
-            btn_frame = ttk.Frame(quick_frame, style="Card.TFrame")
-            btn_frame.pack(side=tk.LEFT, padx=(0, 10))
-            btn = ttk.Button(
-                btn_frame,
-                text=text,
-                command=command,
-                style="CardButton.TButton"
-            )
-            btn.pack(side=tk.LEFT)
-            ToolTip(btn, f"{text}{shortcut}")
-
     def create_hide_tab(self) -> None:
-        self.hide_tab = ttk.Frame(self.notebook, style="Card.TFrame", padding=15)
+        self.hide_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.notebook.add(self.hide_tab, text="📦 Скрыть данные")
 
-        # Создаем две колонки
-        left_frame = ttk.Frame(self.hide_tab, style="Card.TFrame")
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        # Создаем холст с прокруткой
+        canvas = tk.Canvas(self.hide_tab, bg=self.colors["bg"], highlightthickness=0)
+        v_scrollbar = ttk.Scrollbar(self.hide_tab, orient="vertical", command=canvas.yview)
+        h_scrollbar = ttk.Scrollbar(self.hide_tab, orient="horizontal", command=canvas.xview)
+        canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
 
-        right_frame = ttk.Frame(self.hide_tab, style="Card.TFrame")
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
+        # Создаем внутренний фрейм для контента
+        content_frame = ttk.Frame(canvas, style="Card.TFrame")
+
+        # Настройка прокрутки
+        content_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=content_frame, anchor="nw")
+
+        # Размещаем элементы
+        canvas.pack(side="left", fill="both", expand=True)
+        v_scrollbar.pack(side="right", fill="y")
+        h_scrollbar.pack(side="bottom", fill="x")
+
+        # Привязываем колесо мыши для прокрутки
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        canvas.bind_all("<Shift-MouseWheel>", lambda e: canvas.xview_scroll(int(-1 * (e.delta / 120)), "units"))
+
+        # Создаем две колонки
+        left_frame = ttk.Frame(content_frame, style="Card.TFrame")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(20, 10), pady=20)
+        right_frame = ttk.Frame(content_frame, style="Card.TFrame")
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 20), pady=20)
 
         # Левая колонка - контейнер
         container_frame = ttk.LabelFrame(
@@ -13291,9 +13329,7 @@ class SteganographyUltimatePro:
         # Путь к изображению
         path_frame = ttk.Frame(container_frame, style="Card.TFrame")
         path_frame.pack(fill=tk.X, pady=(0, 10))
-
         ttk.Label(path_frame, text="📂 Путь к файлу:", style="TLabel").pack(side=tk.LEFT)
-
         path_entry = ttk.Entry(
             path_frame, textvariable=self.img_path, state='readonly', width=50, style="TEntry"
         )
@@ -13302,18 +13338,15 @@ class SteganographyUltimatePro:
         # Кнопки управления
         button_frame = ttk.Frame(path_frame, style="Card.TFrame")
         button_frame.pack(side=tk.RIGHT)
-
         browse_btn = ttk.Button(
             button_frame, text="🔍 Обзор...", command=self.select_image, style="IconButton.TButton"
         )
         browse_btn.pack(side=tk.LEFT)
-
         folder_btn = ttk.Button(
             button_frame, text="📁 Папка", command=lambda: Utils.open_in_file_manager(
                 os.path.dirname(self.img_path.get()) if self.img_path.get() else "."), style="IconButton.TButton"
         )
         folder_btn.pack(side=tk.LEFT, padx=(5, 0))
-
         info_btn = ttk.Button(
             button_frame, text="ℹ️ Инфо", command=self.show_container_info, style="IconButton.TButton"
         )
@@ -13322,7 +13355,6 @@ class SteganographyUltimatePro:
         # Дроп-зона
         drop_frame = ttk.Frame(container_frame, style="DropZone.TFrame")
         drop_frame.pack(fill=tk.X, pady=10)
-
         self.drop_label = ttk.Label(
             drop_frame,
             text="📥 Перетащите сюда файл-контейнер или кликните для выбора файла",
@@ -13339,7 +13371,6 @@ class SteganographyUltimatePro:
             style="Card.TLabelframe"
         )
         preview_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-
         self.preview_img = ttk.Label(preview_frame)
         self.preview_img.pack(pady=5, fill=tk.BOTH, expand=True)
 
@@ -13352,14 +13383,11 @@ class SteganographyUltimatePro:
         # Тип данных
         type_frame = ttk.Frame(data_frame, style="Card.TFrame")
         type_frame.pack(fill=tk.X, pady=(0, 15))
-
         ttk.Label(type_frame, text="📄 Тип данных:", style="TLabel").pack(side=tk.LEFT, padx=(0, 10))
-
         ttk.Radiobutton(
             type_frame, text="Текст", variable=self.data_type, value="text", command=self.toggle_data_input,
             style="TRadiobutton"
         ).pack(side=tk.LEFT, padx=(0, 20))
-
         ttk.Radiobutton(
             type_frame, text="Файл", variable=self.data_type, value="file", command=self.toggle_data_input,
             style="TRadiobutton"
@@ -13372,14 +13400,12 @@ class SteganographyUltimatePro:
         # Текстовый ввод
         text_toolbar = ttk.Frame(self.text_frame, style="Card.TFrame")
         text_toolbar.pack(fill=tk.X, pady=(0, 5))
-
         ttk.Button(text_toolbar, text="🗑️ Очистить", style="IconButton.TButton", command=self.clear_text).pack(
             side=tk.LEFT, padx=(0, 5))
         ttk.Button(text_toolbar, text="📋 Вставить", style="IconButton.TButton", command=self.paste_text).pack(
             side=tk.LEFT, padx=(0, 5))
         ttk.Button(text_toolbar, text="📝 Шаблоны", style="IconButton.TButton", command=self.show_templates).pack(
             side=tk.LEFT)
-
         self.text_input = scrolledtext.ScrolledText(
             self.text_frame, height=10, font=("Consolas", 10), wrap=tk.WORD,
             bg=self.colors["card"], fg=self.colors["text"], insertbackground=self.colors["fg"],
@@ -13391,19 +13417,15 @@ class SteganographyUltimatePro:
         # Выбор файла
         file_input_frame = ttk.Frame(self.file_frame, style="Card.TFrame")
         file_input_frame.pack(fill=tk.X, pady=(10, 0))
-
         ttk.Label(file_input_frame, text="📎 Файл для скрытия:", style="TLabel").pack(side=tk.LEFT)
-
         file_entry = ttk.Entry(
             file_input_frame, textvariable=self.file_path_var, state='readonly', width=40, style="TEntry"
         )
         file_entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
         self.file_entry_widget = file_entry
-
         ttk.Button(
             file_input_frame, text="📂 Выбрать...", command=self.select_file, style="IconButton.TButton"
         ).pack(side=tk.LEFT, padx=(5, 0))
-
         self.file_info_label = ttk.Label(self.file_frame, text="ℹ️ Поддерживаемые форматы: любые файлы до 100 МБ",
                                          style="Secondary.TLabel")
         self.file_info_label.pack(fill=tk.X, pady=(6, 0))
@@ -13417,9 +13439,7 @@ class SteganographyUltimatePro:
         # Выбор метода
         method_select_frame = ttk.Frame(method_frame, style="Card.TFrame")
         method_select_frame.pack(fill=tk.X, pady=(0, 10))
-
         ttk.Label(method_select_frame, text="Метод скрытия:", style="TLabel").pack(side=tk.LEFT)
-
         method_combo = ttk.Combobox(
             method_select_frame, textvariable=self.method_var, values=list(STEGANO_METHODS.keys()),
             state="readonly", width=30, style="TCombobox"
@@ -13430,9 +13450,7 @@ class SteganographyUltimatePro:
         # Сжатие PNG
         compression_frame = ttk.Frame(method_frame, style="Card.TFrame")
         compression_frame.pack(fill=tk.X)
-
         ttk.Label(compression_frame, text="Степень сжатия PNG:", style="TLabel").pack(side=tk.LEFT, padx=(10, 0))
-
         compression_combo = ttk.Combobox(
             compression_frame, textvariable=self.compression_level, values=list(range(0, 10)),
             state="readonly", width=5, style="TCombobox"
@@ -13448,13 +13466,11 @@ class SteganographyUltimatePro:
         # Требуемый размер
         self.required_size_label = ttk.Label(self.size_info_frame, text="📏 Требуется: выберите данные", style="TLabel")
         self.required_size_label.pack(anchor="w", padx=5)
-
         ttk.Separator(self.size_info_frame, orient="horizontal").pack(fill=tk.X, pady=5)
 
         # Вместимость по методам
         self.capacity_labels = {}
         capacity_pairs = [(["lsb", "noise"], "🟢 LSB / Adaptive-Noise"), (["aelsb", "hill"], "🔵 AELSB / HILL")]
-
         for methods, label_text in capacity_pairs:
             lbl = ttk.Label(self.size_info_frame, text=f"{label_text}: ожидание...", style="Secondary.TLabel")
             lbl.pack(anchor="w", padx=5, pady=(2, 0))
@@ -13463,11 +13479,9 @@ class SteganographyUltimatePro:
 
         # Индикатор заполнения
         ttk.Separator(self.size_info_frame, orient="horizontal").pack(fill=tk.X, pady=5)
-
         self.usage_label = ttk.Label(self.size_info_frame, text="📈 Заполнение выбранного метода: не рассчитано",
                                      style="TLabel")
         self.usage_label.pack(anchor="w", padx=5, pady=(0, 6))
-
         self.usage_bar = ttk.Progressbar(self.size_info_frame, variable=self.usage_var, maximum=100,
                                          style="UsageGreen.Horizontal.TProgressbar")
         self.usage_bar.pack(fill=tk.X, padx=5, pady=(0, 5))
@@ -13488,12 +13502,37 @@ class SteganographyUltimatePro:
         self.extract_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.notebook.add(self.extract_tab, text="🔍 Извлечь данные")
 
-        # Создаем две колонки
-        left_frame = ttk.Frame(self.extract_tab, style="Card.TFrame")
-        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
+        # Создаем холст с прокруткой
+        canvas = tk.Canvas(self.extract_tab, bg=self.colors["bg"], highlightthickness=0)
+        v_scrollbar = ttk.Scrollbar(self.extract_tab, orient="vertical", command=canvas.yview)
+        h_scrollbar = ttk.Scrollbar(self.extract_tab, orient="horizontal", command=canvas.xview)
+        canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
 
-        right_frame = ttk.Frame(self.extract_tab, style="Card.TFrame")
-        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 0))
+        # Создаем внутренний фрейм для контента
+        content_frame = ttk.Frame(canvas, style="Card.TFrame")
+
+        # Настройка прокрутки
+        content_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=content_frame, anchor="nw")
+
+        # Размещаем элементы
+        canvas.pack(side="left", fill="both", expand=True)
+        v_scrollbar.pack(side="right", fill="y")
+        h_scrollbar.pack(side="bottom", fill="x")
+
+        # Привязываем колесо мыши для прокрутки
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        canvas.bind_all("<Shift-MouseWheel>", lambda e: canvas.xview_scroll(int(-1 * (e.delta / 120)), "units"))
+
+        # Создаем две колонки
+        left_frame = ttk.Frame(content_frame, style="Card.TFrame")
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(20, 10), pady=20)
+        right_frame = ttk.Frame(content_frame, style="Card.TFrame")
+        right_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(10, 20), pady=20)
 
         # Левая колонка - контейнер
         container_frame = ttk.LabelFrame(
@@ -13507,9 +13546,7 @@ class SteganographyUltimatePro:
         # Путь к изображению
         path_frame = ttk.Frame(container_frame, style="Card.TFrame")
         path_frame.pack(fill=tk.X, pady=(0, 10))
-
         ttk.Label(path_frame, text="📂 Путь к файлу:", style="TLabel").pack(side=tk.LEFT)
-
         path_entry = ttk.Entry(
             path_frame,
             textvariable=self.extract_img_path,
@@ -13522,7 +13559,6 @@ class SteganographyUltimatePro:
         # Кнопки управления
         button_frame = ttk.Frame(path_frame, style="Card.TFrame")
         button_frame.pack(side=tk.RIGHT)
-
         browse_btn = ttk.Button(
             button_frame,
             text="🔍 Обзор...",
@@ -13530,7 +13566,6 @@ class SteganographyUltimatePro:
             style="IconButton.TButton"
         )
         browse_btn.pack(side=tk.LEFT)
-
         folder_btn = ttk.Button(
             button_frame,
             text="📁 Папка",
@@ -13539,7 +13574,6 @@ class SteganographyUltimatePro:
             style="IconButton.TButton"
         )
         folder_btn.pack(side=tk.LEFT, padx=(5, 0))
-
         info_btn = ttk.Button(
             button_frame,
             text="ℹ️ Инфо",
@@ -13565,7 +13599,6 @@ class SteganographyUltimatePro:
             style="Card.TLabelframe"
         )
         preview_frame.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
-
         self.extract_preview = ttk.Label(preview_frame)
         self.extract_preview.pack(pady=5, fill=tk.BOTH, expand=True)
 
@@ -13581,7 +13614,6 @@ class SteganographyUltimatePro:
         # Панель инструментов результатов
         result_toolbar = ttk.Frame(result_frame, style="Card.TFrame")
         result_toolbar.pack(fill=tk.X, pady=(0, 5))
-
         ttk.Button(result_toolbar, text="📋 Копировать", style="IconButton.TButton", command=self.copy_extracted).pack(
             side=tk.LEFT, padx=(0, 5))
         ttk.Button(result_toolbar, text="💾 Сохранить", style="IconButton.TButton", command=self.save_extracted).pack(
@@ -13614,7 +13646,6 @@ class SteganographyUltimatePro:
         # Кнопки действий
         btn_frame = ttk.Frame(right_frame, style="Card.TFrame")
         btn_frame.pack(fill=tk.X, pady=(10, 0))
-
         button_configs = [
             ("🔍 Извлечь данные", self.start_extract, "extract_button"),
             ("📋 Копировать", self.copy_extracted, "copy_button"),
@@ -13622,7 +13653,6 @@ class SteganographyUltimatePro:
             ("🗂 Открыть файл", self.open_extracted_file, "open_file_button"),
             ("🔑 Копировать хеш", self.copy_extracted_hash, "copy_hash_button")
         ]
-
         for text, command, attr_name in button_configs:
             btn = ttk.Button(
                 btn_frame,
@@ -13662,6 +13692,40 @@ class SteganographyUltimatePro:
             )
             lbl.pack(anchor="w", pady=2)
             self.history_labels.append(lbl)
+
+    def create_analysis_tab(self) -> None:
+        """Создает вкладку анализа файла с прокруткой"""
+        self.analysis_tab = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.notebook.add(self.analysis_tab, text="🔬 Анализ файла")
+
+        # Создаем холст с прокруткой
+        canvas = tk.Canvas(self.analysis_tab, bg=self.colors["bg"], highlightthickness=0)
+        v_scrollbar = ttk.Scrollbar(self.analysis_tab, orient="vertical", command=canvas.yview)
+        h_scrollbar = ttk.Scrollbar(self.analysis_tab, orient="horizontal", command=canvas.xview)
+        canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+
+        # Создаем внутренний фрейм для контента
+        content_frame = ttk.Frame(canvas, style="Card.TFrame")
+
+        # Настройка прокрутки
+        content_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+
+        canvas.create_window((0, 0), window=content_frame, anchor="nw")
+
+        # Размещаем элементы
+        canvas.pack(side="left", fill="both", expand=True)
+        v_scrollbar.pack(side="right", fill="y")
+        h_scrollbar.pack(side="bottom", fill="x")
+
+        # Привязываем колесо мыши для прокрутки
+        canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+        canvas.bind_all("<Shift-MouseWheel>", lambda e: canvas.xview_scroll(int(-1 * (e.delta / 120)), "units"))
+
+        # Инициализируем вкладку анализа
+        self.analysis_ui = AnalysisTab(content_frame, self)
 
     def create_settings_tab(self) -> None:
         self.settings_tab = ttk.Frame(self.notebook, style="Card.TFrame")
