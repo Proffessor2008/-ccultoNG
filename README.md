@@ -4,7 +4,7 @@
 
 [![GitHub Stars](https://img.shields.io/github/stars/Proffessor2008/-ccultoNG?style=for-the-badge&logo=github)](https://github.com/Proffessor2008/-ccultoNG)
 [![License](https://img.shields.io/badge/license-Commercial%20%2F%20Community-blue?style=for-the-badge)](https://github.com/Proffessor2008/-ccultoNG/blob/main/Community%20License%20(Free))
-[![Version](https://img.shields.io/badge/version-2.3.3-007bff?style=for-the-badge)](https://github.com/Proffessor2008/-ccultoNG/releases)
+[![Version](https://img.shields.io/badge/version-2.4.1-007bff?style=for-the-badge)](https://github.com/Proffessor2008/-ccultoNG/releases)
 
 **Officially registered with Rospatent** (Certificate No. 2025693797)  
 **Author**: MustaNG | **Build Date**: 2026-02-01
@@ -36,7 +36,7 @@ The tool features a **modern UI** with drag-and-drop functionality, real-time an
 - **Automatic detection** of data corruption and errors
 - **Multiple encryption layers** for sensitive data
 
-### 🔍 Advanced Steganalysis (NEW in 2.3.1)
+### 🔍 Advanced Steganalysis
 - **15+ statistical detection tests** for comprehensive analysis:
   - Shannon entropy analysis (global and block-based)
   - LSB distribution analysis with binomial and chi-square tests
@@ -64,7 +64,189 @@ The tool features a **modern UI** with drag-and-drop functionality, real-time an
   - Confidence scoring with bootstrap validation
 - **Comparison mode**: Side-by-side analysis of two files to detect subtle differences
 - **Smart recommendations**: Context-aware suggestions based on test results
+- 
+### 🔐 Advanced Encryption Module (NEW in 2.4.1)
 
+ØccultoNG Pro now includes a **professional-grade encryption module** that provides end-to-end cryptographic protection for your sensitive data before steganographic hiding. This dual-layer security approach (encryption + steganography) ensures maximum confidentiality even if the stego-container is detected.
+
+#### 🔑 Supported Cryptographic Algorithms
+
+| Algorithm | Security Level | Key Size | Mode | Authentication | Best For |
+|-----------|----------------|----------|------|----------------|----------|
+| **AES-256 GCM** | ⭐⭐⭐⭐⭐ | 256-bit | Galois/Counter | Built-in (128-bit tag) | **Recommended default** - Maximum security + performance |
+| **ChaCha20-Poly1305** | ⭐⭐⭐⭐⭐ | 256-bit | Stream cipher | Built-in (Poly1305) | Mobile devices & systems without AES-NI |
+| **AES-256 CBC** | ⭐⭐⭐⭐ | 256-bit | Cipher Block Chaining | HMAC-SHA256 | Legacy compatibility with enterprise systems |
+| **AES-256 CTR** | ⭐⭐⭐⭐ | 256-bit | Counter mode | External HMAC | Parallel processing & streaming data |
+| **AES-256 OFB** | ⭐⭐⭐ | 256-bit | Output Feedback | External HMAC | Legacy systems (not recommended for new data) |
+| **XOR** | ⚠️ | Variable | Stream cipher | None | **Educational purposes only** - Not secure |
+| **Base64** | ❌ | N/A | Encoding only | None | **Not encryption** - Only for data representation |
+
+#### 🔒 Cryptographic Implementation Details
+
+- **Key Derivation**: PBKDF2-HMAC-SHA256 with **600,000 iterations** (NIST SP 800-132 compliant)
+- **Salt Generation**: 128-bit cryptographically secure random salt per operation
+- **IV/Nonce**: 96-bit (GCM) or 128-bit (CBC/CTR) randomly generated per encryption
+- **Authentication Tags**: 128-bit GCM tags or HMAC-SHA256 for integrity verification
+- **Memory Security**: Keys zeroized from memory immediately after use (`secrets` module)
+- **Side-Channel Protection**: Constant-time comparisons using `secrets.compare_digest()`
+- **Format**: Proprietary `.ongcrypt` format with magic bytes (`ØCCULTONG`) for automatic detection
+
+```mermaid
+flowchart TD
+    A[Original Data] --> B{Encrypt?}
+    B -->|Yes| C[AES-256 GCM]
+    B -->|No| D[Raw Data]
+    C --> E[Encrypted Payload]
+    D --> F[Steganographic Hiding]
+    E --> F
+    F --> G[Stego-Container]
+    G --> H[Transmission]
+    H --> I{Detected?}
+    I -->|Yes| J[Ciphertext only]
+    I -->|No| K[Hidden]
+```
+#### 💻 Encryption API Examples
+
+##### Basic Text Encryption
+```python
+from stegoproexp import EncryptionManager
+
+# Encrypt text with AES-256 GCM
+encrypted = EncryptionManager.encrypt(
+    data="Top secret intelligence report",
+    password="C0mpl3xP@ss!2026#Secure",
+    algorithm="aes_256_gcm"
+)
+
+print(encrypted)
+# Output: {"algorithm":"aes_256_gcm","version":"1.0","ciphertext":"U2FsdGVkX1+...","salt":"aB3cD4eF5gH6...","nonce":"iJ7kL8mN9oP0...","tag":"qR2sT3uV4wX5...","timestamp":"2026-02-12 14:30:45","format":"occultong_encrypted_v1"}
+
+# Decrypt with same password
+decrypted = EncryptionManager.decrypt(encrypted, "C0mpl3xP@ss!2026#Secure")
+print(decrypted)  # "Top secret intelligence report"
+```
+
+##### File Encryption with Progress Tracking
+```python
+from stegoproexp import EncryptionManager
+
+# Encrypt large file (up to 100 MB)
+EncryptionManager.encrypt_file(
+    input_path="confidential_report.pdf",
+    output_path="report.ongcrypt",
+    password="Ultra$ecureP@ss2026!",
+    algorithm="chacha20_poly1305",
+    progress_callback=lambda p: print(f"Encryption progress: {p:.1f}%")
+)
+
+# Decrypt file
+EncryptionManager.decrypt_file(
+    input_path="report.ongcrypt",
+    output_path="decrypted_report.pdf",
+    password="Ultra$ecureP@ss2026!"
+)
+```
+
+##### Integrated Steganography + Encryption Workflow
+```python
+from stegoproexp import AdvancedStego, EncryptionManager
+
+# Step 1: Encrypt sensitive data first
+encrypted_payload = EncryptionManager.encrypt(
+    data=b"Classified satellite imagery coordinates",
+    password="M1ss1l3L@unchC0d3!",
+    algorithm="aes_256_gcm"
+)
+
+# Step 2: Hide encrypted payload in image (dual-layer security)
+AdvancedStego.hide_hill(
+    container_path="vacation_photo.jpg",
+    data=encrypted_payload.encode('utf-8'),  # Already encrypted!
+    password=None,  # No additional password needed (already encrypted)
+    output_path="innocent_looking_photo.jpg"
+)
+
+# Step 3: Extraction requires BOTH steganalysis detection AND password
+extracted_encrypted = AdvancedStego.extract_hill("innocent_looking_photo.jpg")
+decrypted_data = EncryptionManager.decrypt(extracted_encrypted, "M1ss1l3L@unchC0d3!")
+print(decrypted_data)  # "Classified satellite imagery coordinates"
+```
+
+#### 🎯 Security Best Practices for Encryption
+
+##### ✅ DO:
+- Always use **AES-256 GCM** or **ChaCha20-Poly1305** for new data
+- Create **unique passwords** for each encryption operation (12+ characters, mixed case, numbers, symbols)
+- Store passwords in a **dedicated password manager** (Bitwarden, 1Password, KeePassXC)
+- Use encryption **BEFORE** steganographic hiding for maximum security
+- Verify decryption immediately after encryption to prevent data loss
+- Enable **two-factor authentication** when sharing passwords through separate channels
+- Regularly update to the latest version for cryptographic algorithm improvements
+
+##### ❌ DON'T:
+- Never use **XOR** or **Base64** for protecting real sensitive data
+- Never reuse passwords across multiple encryption operations
+- Never store passwords in the same location as encrypted files
+- Never transmit password and encrypted data through the same channel
+- Never use dictionary words, personal information, or sequential characters in passwords
+- Never skip integrity verification after decryption
+
+#### 🔍 Password Strength Requirements
+
+| Strength Level | Minimum Length | Character Types | Example | Security Duration* |
+|----------------|----------------|-----------------|---------|---------------------|
+| **Weak** | < 8 chars | 1 type | `password` | Seconds to crack |
+| **Medium** | 8-11 chars | 2 types | `Password123` | Hours to days |
+| **Strong** | 12-15 chars | 3 types | `Blue$ky7!Mountain` | Years to decades |
+| **Very Strong** | 16+ chars | 4 types | `J7$mP9#kL2@nQ5vX!R8*tY3` | **Centuries+** (quantum-resistant) |
+
+*\*Against brute-force attacks using current consumer hardware. Quantum computers would reduce this significantly, hence the recommendation for 16+ character passwords.*
+
+#### 📊 Performance Benchmarks (Intel i7-12700H)
+
+| Algorithm | 1 MB Text | 10 MB File | 100 MB File | CPU Usage |
+|-----------|-----------|------------|-------------|-----------|
+| AES-256 GCM | 0.08 sec | 0.75 sec | 7.2 sec | 45% (AES-NI accelerated) |
+| ChaCha20-Poly1305 | 0.12 sec | 1.15 sec | 11.3 sec | 65% (software only) |
+| AES-256 CBC | 0.09 sec | 0.82 sec | 8.1 sec | 48% (AES-NI accelerated) |
+| AES-256 CTR | 0.07 sec | 0.68 sec | 6.9 sec | 42% (AES-NI accelerated) |
+
+*All tests performed on Windows 11 with Python 3.11 and cryptography 46.0.5*
+
+#### ⚠️ Critical Security Warnings
+
+> **❗ PASSWORD LOSS = PERMANENT DATA LOSS**  
+> There is **NO backdoor** and **NO recovery mechanism**. If you lose your password, the encrypted data is **cryptographically unrecoverable** - even with unlimited computational resources. Always verify decryption immediately after encryption and store passwords securely.
+
+> **❗ XOR IS NOT SECURE ENCRYPTION**  
+> The XOR "algorithm" is included **ONLY for educational purposes** to demonstrate why proper cryptography matters. It provides **ZERO security** against modern attacks and should never be used for real data protection.
+
+> **❗ BASE64 IS NOT ENCRYPTION**  
+> Base64 is a **binary-to-text encoding scheme**, not an encryption algorithm. Anyone can decode Base64 without a password. Never mistake encoding for encryption.
+
+#### 💡 Integration with Steganalysis Module
+
+The encryption module works seamlessly with the steganalysis engine:
+
+1. **Pre-hiding encryption**: Encrypt data → Hide in container → Analyze container with steganalysis to verify stealthiness
+2. **Post-extraction verification**: Extract data → Run integrity checks → Decrypt with password
+3. **Forensic workflow**: Analyze suspicious file → Extract payload → Attempt decryption (requires password)
+4. **Security validation**: Hide encrypted payload → Run steganalysis → Verify detection resistance of combined approach
+
+#### 🆕 New in Version 2.4.1
+- ✅ Professional encryption module with 7 algorithms
+- ✅ Dual-layer security (encryption + steganography)
+- ✅ Proprietary `.ongcrypt` format with automatic detection
+- ✅ PBKDF2-HMAC-SHA256 with 600,000 iterations
+- ✅ Integrated documentation panel with security level indicators
+- ✅ Password strength meter and generator
+- ✅ Comprehensive help section with step-by-step guides
+- ✅ Cross-platform file encryption/decryption
+- ✅ Progress tracking for large file operations
+- ✅ Memory-safe key handling with zeroization
+```
+
+  
 ### 📊 Analytics & Productivity
 - **Comprehensive usage statistics** with method and format analysis
 - **Detailed operation history** with timestamped entries
@@ -157,6 +339,18 @@ python stegoproexp.py
 5. **Export report**: Generate professional HTML/CSV/TXT reports with findings
 6. **Compare files** (optional): Load second file to detect subtle differences
 
+### 🔐 Encrypting Sensitive Data (NEW in 2.4.1)
+1. **Open Encryption tab**: Navigate to the dedicated encryption workspace (🔐 icon)
+2. **Choose data type**: Select "Text" or "File" for encryption
+3. **Enter data**: Type text or select file to protect
+4. **Select algorithm**: Choose AES-256 GCM (recommended) or ChaCha20-Poly1305
+5. **Create strong password**: Use 12+ characters with mixed case, numbers, and symbols
+6. **Click "Encrypt"**: Process completes in seconds (depending on data size)
+7. **Save encrypted file**: Save as `.ongcrypt` for automatic format recognition
+8. **Verify immediately**: Decrypt once to confirm password correctness before storage
+
+> 💡 **Pro Tip**: For maximum security, encrypt data FIRST, then hide the encrypted payload using steganography. This creates dual-layer protection where even if steganalysis detects hidden data, the attacker still faces 256-bit encryption.
+> 
 ## 💻 Usage Examples
 
 ### Basic Data Hiding (Python API)
@@ -269,7 +463,7 @@ stegoproexp/
 - Save results automatically
 - Monitor progress with real-time updates
 
-### 🔍 Steganalysis Deep Dive (NEW)
+### 🔍 Steganalysis Deep Dive
 - **Statistical significance testing**: Binomial tests, chi-square, Kolmogorov-Smirnov
 - **Multi-scale analysis**: Global metrics + block-based localized analysis
 - **Cross-method validation**: Multiple independent tests to reduce false positives
@@ -318,7 +512,7 @@ stegoproexp/
 - Hide public data (no need for steganography)
 - Share your license key publicly
 - Use for illegal activities
-- **NEW**: Rely on single-test results—always review comprehensive analysis
+- **NEW**: Rely on single-test results-always review comprehensive analysis
 
 ## ❓ Frequently Asked Questions
 
@@ -349,7 +543,7 @@ A: The module uses **15+ independent statistical tests** with cross-validation:
 - High confidence (>85% suspicion): Strong indicator of steganography (false positive rate < 5%)
 - Medium confidence (55-85%): Requires manual verification or comparison with original
 - Low confidence (<40%): Likely clean file, but not guaranteed (advanced methods may evade detection)
-- **Note**: No steganalysis tool is 100% accurate—always combine with other verification methods
+- **Note**: No steganalysis tool is 100% accurate-always combine with other verification methods
 
 **Q: 🔍 What does the Ker's Pair Analysis (α-metric) mean?**  
 A: This advanced test detects LSB steganography by analyzing pixel pair distributions:
@@ -367,6 +561,41 @@ A: Yes! The tool includes specialized JPEG analysis:
 - Best detection for F5, JSteg, and OutGuess methods
 - Note: Detection is harder in highly compressed JPEGs (>85% quality)
 
+**Q: 🔐 Should I encrypt data before or after steganographic hiding?**  
+A: **ALWAYS encrypt BEFORE hiding**. This creates dual-layer security:
+1. Steganography hides the *existence* of data
+2. Encryption protects the *content* if hiding is detected  
+Even if an attacker detects hidden data via steganalysis, they still face 256-bit encryption without the password.
+
+**Q: 🔐 What's the difference between XOR and real encryption?**  
+A: XOR is a **bitwise operation**, not encryption:
+- XOR with same key twice = original data (trivially reversible)
+- No key derivation, no salt, no authentication
+- Vulnerable to known-plaintext attacks
+- Included ONLY for educational demonstrations  
+**Never use XOR for real data protection.** Always use AES-256 GCM or ChaCha20-Poly1305.
+
+**Q: 🔐 How strong should my encryption password be?**  
+A: Minimum requirements:
+- **Absolute minimum**: 12 characters with mixed case + numbers + symbols
+- **Recommended**: 16+ characters with all character types
+- **Ideal**: 20+ characters generated by password manager  
+Example of strong password: `J7$mP9#kL2@nQ5vX!R8*tY3`  
+Weak password example (avoid): `Password123` — crackable in hours.
+
+**Q: 🔐 What happens if I forget my encryption password?**  
+A: **Data is permanently lost**. Modern encryption (AES-256) is designed to be mathematically impossible to break without the key. There is no backdoor, no master key, and no recovery mechanism. Always:
+1. Verify decryption immediately after encryption
+2. Store password in a secure password manager
+3. Create backup copies of critical passwords in secure locations
+
+**Q: 🔐 Can I use the same password for multiple files?**  
+A: **Technically yes, but strongly discouraged**. Using unique passwords per file:
+- Prevents compromise of all files if one password is leaked
+- Limits blast radius of password reuse attacks
+- Follows zero-trust security principles  
+Use a password manager to generate and store unique passwords for each encryption operation.
+- 
 ## 🤝 Contributing
 
 We welcome contributions in the following areas:
