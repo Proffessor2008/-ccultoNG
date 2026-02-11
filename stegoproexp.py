@@ -7916,8 +7916,25 @@ class SmartAssistant:
                 print(f"Ошибка экспорта статистики подсказок: {e}")
 
 
+import os
+import json
+import time
+import base64
+import hashlib
+import secrets
+from typing import Dict, Any
+
+# Импорты из PyCryptodome
+from Crypto.Cipher import AES, ChaCha20, ChaCha20_Poly1305
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto.Hash import SHA256
+from Crypto.Util.Padding import pad, unpad
+from Crypto.Random import get_random_bytes
+
+
 class EncryptionManager:
-    """Полнофункциональный менеджер шифрования с поддержкой современных алгоритмов"""
+    """Полнофункциональный менеджер шифрования с поддержкой современных алгоритмов (реализация на PyCryptodome)"""
+
     SUPPORTED_ALGORITHMS = {
         # Симметричные алгоритмы
         "aes_256_cbc": "AES-256 CBC (Симметричное, стандартное)",
@@ -7942,7 +7959,7 @@ class EncryptionManager:
     }
 
     @staticmethod
-    def get_algorithm_info(algorithm: str) -> dict:
+    def get_algorithm_info(algorithm: str) -> Dict[str, Any]:
         """Возвращает подробную информацию об алгоритме для документации"""
         info = {
             "aes_256_cbc": {
@@ -8043,46 +8060,41 @@ class EncryptionManager:
 
     @staticmethod
     def _derive_key(password: str, salt: bytes, algorithm: str = "aes_256") -> bytes:
-        """Универсальная функция для генерации ключа из пароля"""
+        """Универсальная функция для генерации ключа из пароля (реализация на PyCryptodome)"""
         if not password or len(password) < 8:
             raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
 
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,  # 256 бит для AES-256
+        # Используем тот же алгоритм и параметры, что и в оригинале
+        key = PBKDF2(
+            password=password.encode('utf-8'),
             salt=salt,
-            iterations=600000,
-            backend=default_backend()
+            dkLen=32,  # 256 бит для AES-256
+            count=600000,  # Тот же параметр итераций
+            hmac_hash_module=SHA256
         )
-        return kdf.derive(password.encode('utf-8'))
+        return key
 
     @staticmethod
-    def encrypt_aes_cbc(data: bytes, password: str) -> dict:
-        """Шифрование с использованием AES-256 в режиме CBC"""
+    def encrypt_aes_cbc(data: bytes, password: str) -> Dict[str, Any]:
+        """Шифрование с использованием AES-256 в режиме CBC (реализация на PyCryptodome)"""
         if not password or len(password) < 8:
             raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
 
-        # Генерация соли и ключа
-        salt = os.urandom(16)
+        # Генерация соли и ключа (идентично оригиналу)
+        salt = get_random_bytes(16)
         key = EncryptionManager._derive_key(password, salt, "aes_256")
 
-        # Генерация IV
-        iv = os.urandom(16)
+        # Генерация IV (16 байт для AES)
+        iv = get_random_bytes(16)
 
-        # Добавление паддинга (PKCS7)
-        padder = padding.PKCS7(128).padder()
-        padded_data = padder.update(data) + padder.finalize()
+        # Добавление паддинга PKCS7 (идентично оригиналу)
+        padded_data = pad(data, AES.block_size)
 
         # Шифрование
-        cipher = Cipher(
-            algorithms.AES(key),
-            modes.CBC(iv),
-            backend=default_backend()
-        )
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+        cipher = AES.new(key, AES.MODE_CBC, iv)
+        ciphertext = cipher.encrypt(padded_data)
 
-        # Контрольная сумма для проверки целостности
+        # Контрольная сумма для проверки целостности (идентично оригиналу)
         checksum = hashlib.sha256(ciphertext).digest()
 
         return {
@@ -8095,58 +8107,46 @@ class EncryptionManager:
         }
 
     @staticmethod
-    def decrypt_aes_cbc(encrypted_data: dict, password: str) -> bytes:
-        """Дешифрование AES-256 CBC с проверкой целостности"""
+    def decrypt_aes_cbc(encrypted_data: Dict[str, Any], password: str) -> bytes:
+        """Дешифрование AES-256 CBC с проверкой целостности (реализация на PyCryptodome)"""
         required_keys = ['ciphertext', 'salt', 'iv', 'checksum', 'algorithm']
         if not all(key in encrypted_data for key in required_keys):
             raise ValueError("Неполные или поврежденные зашифрованные данные")
         if encrypted_data['algorithm'] != 'aes_256_cbc':
             raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
 
-        # Восстановление ключа
+        # Восстановление ключа (идентично оригиналу)
         key = EncryptionManager._derive_key(password, encrypted_data['salt'], "aes_256")
 
-        # Проверка целостности
+        # Проверка целостности (идентично оригиналу)
         actual_checksum = hashlib.sha256(encrypted_data['ciphertext']).digest()
         if not secrets.compare_digest(actual_checksum, encrypted_data['checksum']):
             raise ValueError("Данные повреждены (контрольная сумма не совпадает)")
 
         # Дешифрование
-        cipher = Cipher(
-            algorithms.AES(key),
-            modes.CBC(encrypted_data['iv']),
-            backend=default_backend()
-        )
-        decryptor = cipher.decryptor()
-        padded_plaintext = decryptor.update(encrypted_data['ciphertext']) + decryptor.finalize()
+        cipher = AES.new(key, AES.MODE_CBC, encrypted_data['iv'])
+        padded_plaintext = cipher.decrypt(encrypted_data['ciphertext'])
 
         # Удаление паддинга
-        unpadder = padding.PKCS7(128).unpadder()
-        plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
+        plaintext = unpad(padded_plaintext, AES.block_size)
         return plaintext
 
     @staticmethod
-    def encrypt_aes_gcm(data: bytes, password: str) -> dict:
-        """Шифрование с использованием AES-256 в режиме GCM (с аутентификацией)"""
+    def encrypt_aes_gcm(data: bytes, password: str) -> Dict[str, Any]:
+        """Шифрование с использованием AES-256 в режиме GCM (с аутентификацией) (реализация на PyCryptodome)"""
         if not password or len(password) < 8:
             raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
 
-        # Генерация соли и ключа
-        salt = os.urandom(16)
+        # Генерация соли и ключа (идентично оригиналу)
+        salt = get_random_bytes(16)
         key = EncryptionManager._derive_key(password, salt, "aes_256")
 
-        # Генерация nonce (12 байт для GCM)
-        nonce = os.urandom(12)
+        # Генерация nonce (12 байт для GCM - стандартное значение)
+        nonce = get_random_bytes(12)
 
         # Шифрование с аутентификацией
-        cipher = Cipher(
-            algorithms.AES(key),
-            modes.GCM(nonce),
-            backend=default_backend()
-        )
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(data) + encryptor.finalize()
-        tag = encryptor.tag
+        cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+        ciphertext, tag = cipher.encrypt_and_digest(data)
 
         return {
             'ciphertext': ciphertext,
@@ -8158,116 +8158,106 @@ class EncryptionManager:
         }
 
     @staticmethod
-    def decrypt_aes_gcm(encrypted_data: dict, password: str) -> bytes:
-        """Дешифрование AES-256 GCM с проверкой аутентификации"""
+    def decrypt_aes_gcm(encrypted_data: Dict[str, Any], password: str) -> bytes:
+        """Дешифрование AES-256 GCM с проверкой аутентификации (реализация на PyCryptodome)"""
         required_keys = ['ciphertext', 'salt', 'nonce', 'tag', 'algorithm']
         if not all(key in encrypted_data for key in required_keys):
             raise ValueError("Неполные или поврежденные зашифрованные данные")
         if encrypted_data['algorithm'] != 'aes_256_gcm':
             raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
 
-        # Восстановление ключа
+        # Восстановление ключа (идентично оригиналу)
         key = EncryptionManager._derive_key(password, encrypted_data['salt'], "aes_256")
 
         # Дешифрование с проверкой тега
-        cipher = Cipher(
-            algorithms.AES(key),
-            modes.GCM(encrypted_data['nonce'], encrypted_data['tag']),
-            backend=default_backend()
-        )
-        decryptor = cipher.decryptor()
+        cipher = AES.new(key, AES.MODE_GCM, nonce=encrypted_data['nonce'])
         try:
-            plaintext = decryptor.update(encrypted_data['ciphertext']) + decryptor.finalize()
+            plaintext = cipher.decrypt_and_verify(encrypted_data['ciphertext'], encrypted_data['tag'])
             return plaintext
-        except Exception as e:
+        except (ValueError, KeyError) as e:
             raise ValueError(f"Ошибка аутентификации или расшифровки: {str(e)}")
 
     @staticmethod
-    def encrypt_aes_ctr(data: bytes, password: str) -> dict:
-        """Шифрование с использованием AES-256 в режиме CTR"""
+    def encrypt_aes_ctr(data: bytes, password: str) -> Dict[str, Any]:
+        """Шифрование с использованием AES-256 в режиме CTR (исправленная реализация)"""
         if not password or len(password) < 8:
             raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
 
-        # Генерация соли и ключа
-        salt = os.urandom(16)
+        # Генерация соли и ключа (идентично оригиналу)
+        salt = get_random_bytes(16)
         key = EncryptionManager._derive_key(password, salt, "aes_256")
 
-        # Генерация nonce (8 байт) + начальное значение счётчика (8 байт)
-        nonce = os.urandom(8)
-        initial_counter = os.urandom(8)
+        # Исправление ошибки: nonce для AES-CTR должен быть 8 байт (а не 16)
+        # В PyCryptodome nonce для CTR режима должен быть 8 байт
+        nonce = get_random_bytes(8)
+
+        # Генерация начального значения счетчика (8 байт)
+        # Преобразуем байты в целое число (64-битное)
+        initial_counter = int.from_bytes(get_random_bytes(8), 'big')
 
         # Шифрование
-        cipher = Cipher(
-            algorithms.AES(key),
-            modes.CTR(nonce + initial_counter),
-            backend=default_backend()
-        )
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(data) + encryptor.finalize()
+        cipher = AES.new(key, AES.MODE_CTR, nonce=nonce, initial_value=initial_counter)
+        ciphertext = cipher.encrypt(data)
 
-        # Контрольная сумма для проверки целостности
+        # Контрольная сумма для проверки целостности (идентично оригиналу)
         checksum = hashlib.sha256(ciphertext).digest()
 
         return {
             'ciphertext': ciphertext,
             'salt': salt,
-            'nonce': nonce,
-            'initial_counter': initial_counter,
+            'nonce': nonce,  # 8 байт
+            'initial_counter': initial_counter,  # 64-битное целое число
             'checksum': checksum,
             'algorithm': 'aes_256_ctr',
             'version': '1.0'
         }
 
     @staticmethod
-    def decrypt_aes_ctr(encrypted_data: dict, password: str) -> bytes:
-        """Дешифрование AES-256 CTR с проверкой целостности"""
+    def decrypt_aes_ctr(encrypted_data: Dict[str, Any], password: str) -> bytes:
+        """Дешифрование AES-256 CTR с проверкой целостности (исправленная реализация)"""
         required_keys = ['ciphertext', 'salt', 'nonce', 'initial_counter', 'checksum', 'algorithm']
         if not all(key in encrypted_data for key in required_keys):
             raise ValueError("Неполные или поврежденные зашифрованные данные")
         if encrypted_data['algorithm'] != 'aes_256_ctr':
             raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
 
-        # Восстановление ключа
+        # Восстановление ключа (идентично оригиналу)
         key = EncryptionManager._derive_key(password, encrypted_data['salt'], "aes_256")
 
-        # Проверка целостности
+        # Проверка целостности (идентично оригиналу)
         actual_checksum = hashlib.sha256(encrypted_data['ciphertext']).digest()
         if not secrets.compare_digest(actual_checksum, encrypted_data['checksum']):
             raise ValueError("Данные повреждены (контрольная сумма не совпадает)")
 
         # Дешифрование
-        cipher = Cipher(
-            algorithms.AES(key),
-            modes.CTR(encrypted_data['nonce'] + encrypted_data['initial_counter']),
-            backend=default_backend()
+        # Важно: initial_counter должен быть целым числом (а не байтами)
+        cipher = AES.new(
+            key,
+            AES.MODE_CTR,
+            nonce=encrypted_data['nonce'],
+            initial_value=encrypted_data['initial_counter']
         )
-        decryptor = cipher.decryptor()
-        plaintext = decryptor.update(encrypted_data['ciphertext']) + decryptor.finalize()
+        plaintext = cipher.decrypt(encrypted_data['ciphertext'])
         return plaintext
 
     @staticmethod
-    def encrypt_aes_ofb(data: bytes, password: str) -> dict:
-        """Шифрование с использованием AES-256 в режиме OFB"""
+    def encrypt_aes_ofb(data: bytes, password: str) -> Dict[str, Any]:
+        """Шифрование с использованием AES-256 в режиме OFB (реализация на PyCryptodome)"""
         if not password or len(password) < 8:
             raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
 
-        # Генерация соли и ключа
-        salt = os.urandom(16)
+        # Генерация соли и ключа (идентично оригиналу)
+        salt = get_random_bytes(16)
         key = EncryptionManager._derive_key(password, salt, "aes_256")
 
-        # Генерация IV
-        iv = os.urandom(16)
+        # Генерация IV (16 байт для AES)
+        iv = get_random_bytes(16)
 
         # Шифрование
-        cipher = Cipher(
-            algorithms.AES(key),
-            modes.OFB(iv),
-            backend=default_backend()
-        )
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(data) + encryptor.finalize()
+        cipher = AES.new(key, AES.MODE_OFB, iv)
+        ciphertext = cipher.encrypt(data)
 
-        # Контрольная сумма
+        # Контрольная сумма (идентично оригиналу)
         checksum = hashlib.sha256(ciphertext).digest()
 
         return {
@@ -8280,55 +8270,46 @@ class EncryptionManager:
         }
 
     @staticmethod
-    def decrypt_aes_ofb(encrypted_data: dict, password: str) -> bytes:
-        """Дешифрование AES-256 OFB с проверкой целостности"""
+    def decrypt_aes_ofb(encrypted_data: Dict[str, Any], password: str) -> bytes:
+        """Дешифрование AES-256 OFB с проверкой целостности (реализация на PyCryptodome)"""
         required_keys = ['ciphertext', 'salt', 'iv', 'checksum', 'algorithm']
         if not all(key in encrypted_data for key in required_keys):
             raise ValueError("Неполные или поврежденные зашифрованные данные")
         if encrypted_data['algorithm'] != 'aes_256_ofb':
             raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
 
-        # Восстановление ключа
+        # Восстановление ключа (идентично оригиналу)
         key = EncryptionManager._derive_key(password, encrypted_data['salt'], "aes_256")
 
-        # Проверка целостности
+        # Проверка целостности (идентично оригиналу)
         actual_checksum = hashlib.sha256(encrypted_data['ciphertext']).digest()
         if not secrets.compare_digest(actual_checksum, encrypted_data['checksum']):
             raise ValueError("Данные повреждены (контрольная сумма не совпадает)")
 
         # Дешифрование
-        cipher = Cipher(
-            algorithms.AES(key),
-            modes.OFB(encrypted_data['iv']),
-            backend=default_backend()
-        )
-        decryptor = cipher.decryptor()
-        plaintext = decryptor.update(encrypted_data['ciphertext']) + decryptor.finalize()
+        cipher = AES.new(key, AES.MODE_OFB, encrypted_data['iv'])
+        plaintext = cipher.decrypt(encrypted_data['ciphertext'])
         return plaintext
 
     @staticmethod
-    def encrypt_chacha20(data: bytes, password: str) -> dict:
-        """Шифрование с использованием ChaCha20 (без аутентификации)"""
+    def encrypt_chacha20(data: bytes, password: str) -> Dict[str, Any]:
+        """Шифрование с использованием ChaCha20 (без аутентификации) (исправленная реализация)"""
         if not password or len(password) < 8:
             raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
 
-        # Генерация соли и ключа
-        salt = os.urandom(16)
+        # Генерация соли и ключа (идентично оригиналу)
+        salt = get_random_bytes(16)
         key = EncryptionManager._derive_key(password, salt, "chacha20")
 
-        # Генерация nonce (16 байт для ChaCha20)
-        nonce = os.urandom(16)
+        # Исправление ошибки: nonce для ChaCha20 должен быть 12 байт (а не 16)
+        # Согласно ошибке, nonce должен быть 8/12 байт для ChaCha20
+        nonce = get_random_bytes(12)
 
         # Шифрование
-        cipher = Cipher(
-            algorithms.ChaCha20(key, nonce),
-            mode=None,
-            backend=default_backend()
-        )
-        encryptor = cipher.encryptor()
-        ciphertext = encryptor.update(data) + encryptor.finalize()
+        cipher = ChaCha20.new(key=key, nonce=nonce)
+        ciphertext = cipher.encrypt(data)
 
-        # Контрольная сумма
+        # Контрольная сумма (идентично оригиналу)
         checksum = hashlib.sha256(ciphertext).digest()
 
         return {
@@ -8341,56 +8322,47 @@ class EncryptionManager:
         }
 
     @staticmethod
-    def decrypt_chacha20(encrypted_data: dict, password: str) -> bytes:
-        """Дешифрование ChaCha20 с проверкой целостности"""
+    def decrypt_chacha20(encrypted_data: Dict[str, Any], password: str) -> bytes:
+        """Дешифрование ChaCha20 с проверкой целостности (исправленная реализация)"""
         required_keys = ['ciphertext', 'salt', 'nonce', 'checksum', 'algorithm']
         if not all(key in encrypted_data for key in required_keys):
             raise ValueError("Неполные или поврежденные зашифрованные данные")
         if encrypted_data['algorithm'] != 'chacha20':
             raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
 
-        # Восстановление ключа
+        # Восстановление ключа (идентично оригиналу)
         key = EncryptionManager._derive_key(password, encrypted_data['salt'], "chacha20")
 
-        # Проверка целостности
+        # Проверка целостности (идентично оригиналу)
         actual_checksum = hashlib.sha256(encrypted_data['ciphertext']).digest()
         if not secrets.compare_digest(actual_checksum, encrypted_data['checksum']):
             raise ValueError("Данные повреждены (контрольная сумма не совпадает)")
 
         # Дешифрование
-        cipher = Cipher(
-            algorithms.ChaCha20(key, encrypted_data['nonce']),
-            mode=None,
-            backend=default_backend()
-        )
-        decryptor = cipher.decryptor()
-        plaintext = decryptor.update(encrypted_data['ciphertext']) + decryptor.finalize()
+        cipher = ChaCha20.new(key=key, nonce=encrypted_data['nonce'])
+        plaintext = cipher.decrypt(encrypted_data['ciphertext'])
         return plaintext
 
     @staticmethod
-    def encrypt_chacha20_poly1305(data: bytes, password: str) -> dict:
-        """Шифрование с аутентификацией через ChaCha20-Poly1305"""
+    def encrypt_chacha20_poly1305(data: bytes, password: str) -> Dict[str, Any]:
+        """Шифрование с аутентификацией через ChaCha20-Poly1305 (реализация на PyCryptodome)"""
         if not password or len(password) < 8:
             raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
 
-        # Генерация соли и ключа
-        salt = os.urandom(16)
+        # Генерация соли и ключа (идентично оригиналу)
+        salt = get_random_bytes(16)
         key = EncryptionManager._derive_key(password, salt, "chacha20")
 
-        # Генерация nonce (12 байт для Poly1305)
-        nonce = os.urandom(12)
+        # Генерация nonce (12 байт для Poly1305 - стандартное значение)
+        nonce = get_random_bytes(12)
 
-        # Используем встроенную реализацию ChaCha20Poly1305 из cryptography
-        from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
-
-        chacha = ChaCha20Poly1305(key)
-        # Дополнительные аутентифицированные данные (AAD)
+        # Дополнительные аутентифицированные данные (AAD) - идентично оригиналу
         aad = b"occultong_chacha20_poly1305_v1"
-        ciphertext_with_tag = chacha.encrypt(nonce, data, aad)
 
-        # Разделяем шифротекст и тег (последние 16 байт)
-        tag = ciphertext_with_tag[-16:]
-        ciphertext = ciphertext_with_tag[:-16]
+        # Шифрование с аутентификацией
+        cipher = ChaCha20_Poly1305.new(key=key, nonce=nonce)
+        cipher.update(aad)
+        ciphertext, tag = cipher.encrypt_and_digest(data)
 
         return {
             'ciphertext': ciphertext,
@@ -8403,40 +8375,31 @@ class EncryptionManager:
         }
 
     @staticmethod
-    def decrypt_chacha20_poly1305(encrypted_data: dict, password: str) -> bytes:
-        """Дешифрование с проверкой аутентификации ChaCha20-Poly1305"""
+    def decrypt_chacha20_poly1305(encrypted_data: Dict[str, Any], password: str) -> bytes:
+        """Дешифрование с проверкой аутентификации ChaCha20-Poly1305 (реализация на PyCryptodome)"""
         required_keys = ['ciphertext', 'salt', 'nonce', 'tag', 'aad', 'algorithm']
         if not all(key in encrypted_data for key in required_keys):
             raise ValueError("Неполные или поврежденные зашифрованные данные")
         if encrypted_data['algorithm'] != 'chacha20_poly1305':
             raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
 
-        # Восстановление ключа
+        # Восстановление ключа (идентично оригиналу)
         key = EncryptionManager._derive_key(password, encrypted_data['salt'], "chacha20")
 
         # Дешифрование с проверкой тега
-        from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
-
-        chacha = ChaCha20Poly1305(key)
-
+        cipher = ChaCha20_Poly1305.new(key=key, nonce=encrypted_data['nonce'])
+        cipher.update(encrypted_data['aad'])
         try:
-            # Объединяем шифротекст и тег для дешифрования
-            ciphertext_with_tag = encrypted_data['ciphertext'] + encrypted_data['tag']
-            plaintext = chacha.decrypt(
-                encrypted_data['nonce'],
-                ciphertext_with_tag,
-                encrypted_data['aad']
-            )
+            plaintext = cipher.decrypt_and_verify(encrypted_data['ciphertext'], encrypted_data['tag'])
             return plaintext
-        except Exception as e:
+        except (ValueError, KeyError) as e:
             raise ValueError(f"Ошибка аутентификации или расшифровки: {str(e)}")
 
     @staticmethod
-    def encrypt_xor(data: bytes, key: str) -> dict:
-        """Учебное шифрование XOR (НЕ БЕЗОПАСНО!)"""
+    def encrypt_xor(data: bytes, key: str) -> Dict[str, Any]:
+        """Учебное шифрование XOR (НЕ БЕЗОПАСНО!) - без изменений (не зависит от криптобиблиотеки)"""
         if not key:
             raise ValueError("Ключ XOR не может быть пустым")
-
         key_bytes = key.encode('utf-8')
         if len(key_bytes) == 0:
             raise ValueError("Ключ должен содержать хотя бы один символ")
@@ -8455,8 +8418,8 @@ class EncryptionManager:
         }
 
     @staticmethod
-    def decrypt_xor(encrypted_data: dict) -> bytes:
-        """Дешифрование XOR (НЕ БЕЗОПАСНО!)"""
+    def decrypt_xor(encrypted_data: Dict[str, Any]) -> bytes:
+        """Дешифрование XOR (НЕ БЕЗОПАСНО!) - без изменений (не зависит от криптобиблиотеки)"""
         required_keys = ['ciphertext', 'key', 'algorithm']
         if not all(key in encrypted_data for key in required_keys):
             raise ValueError("Неполные зашифрованные данные")
@@ -8474,8 +8437,8 @@ class EncryptionManager:
         return plaintext
 
     @staticmethod
-    def encrypt_base64(data: bytes) -> dict:
-        """Кодирование Base64 (НЕ ШИФРОВАНИЕ!)"""
+    def encrypt_base64(data: bytes) -> Dict[str, Any]:
+        """Кодирование Base64 (НЕ ШИФРОВАНИЕ!) - без изменений (стандартная библиотека)"""
         encoded = base64.b64encode(data)
         return {
             'encoded': encoded,
@@ -8484,14 +8447,13 @@ class EncryptionManager:
         }
 
     @staticmethod
-    def decrypt_base64(encrypted_data: dict) -> bytes:
-        """Декодирование Base64 (НЕ ДЕШИФРОВАНИЕ!)"""
+    def decrypt_base64(encrypted_data: Dict[str, Any]) -> bytes:
+        """Декодирование Base64 (НЕ ДЕШИФРОВАНИЕ!) - без изменений (стандартная библиотека)"""
         required_keys = ['encoded', 'algorithm']
         if not all(key in encrypted_data for key in required_keys):
             raise ValueError("Неполные закодированные данные")
         if encrypted_data['algorithm'] != 'base64':
             raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
-
         try:
             decoded = base64.b64decode(encrypted_data['encoded'])
             return decoded
@@ -8499,8 +8461,8 @@ class EncryptionManager:
             raise ValueError(f"Ошибка декодирования Base64: {str(e)}")
 
     @staticmethod
-    def serialize_encrypted_data(encrypted_data: dict) -> str:
-        """Сериализация зашифрованных данных в строку JSON с Base64"""
+    def serialize_encrypted_data(encrypted_data: Dict[str, Any]) -> str:
+        """Сериализация зашифрованных данных в строку JSON с Base64 (без изменений)"""
         serializable = {}
         # Обработка бинарных данных
         for key, value in encrypted_data.items():
@@ -8514,8 +8476,8 @@ class EncryptionManager:
         return json.dumps(serializable, ensure_ascii=False, indent=2)
 
     @staticmethod
-    def deserialize_encrypted_data(serialized: str) -> dict:
-        """Десериализация зашифрованных данных из строки JSON"""
+    def deserialize_encrypted_data(serialized: str) -> Dict[str, Any]:
+        """Десериализация зашифрованных данных из строки JSON (без изменений)"""
         try:
             data = json.loads(serialized)
         except json.JSONDecodeError as e:
@@ -8537,8 +8499,8 @@ class EncryptionManager:
         return deserialized
 
     @staticmethod
-    def save_encrypted_file(encrypted_data: dict, filepath: str) -> None:
-        """Сохранение зашифрованных данных в файл с расширением .ongcrypt"""
+    def save_encrypted_file(encrypted_data: Dict[str, Any], filepath: str) -> None:
+        """Сохранение зашифрованных данных в файл с расширением .ongcrypt (без изменений)"""
         serialized = EncryptionManager.serialize_encrypted_data(encrypted_data)
         # Добавление сигнатуры файла для идентификации
         signature = b'ONGCRYPT\x01\x00\x00\x00'  # Магические байты + версия
@@ -8547,8 +8509,8 @@ class EncryptionManager:
             f.write(serialized.encode('utf-8'))
 
     @staticmethod
-    def load_encrypted_file(filepath: str) -> dict:
-        """Загрузка зашифрованных данных из файла .ongcrypt"""
+    def load_encrypted_file(filepath: str) -> Dict[str, Any]:
+        """Загрузка зашифрованных данных из файла .ongcrypt (без изменений)"""
         with open(filepath, 'rb') as f:
             # Проверка сигнатуры
             signature = f.read(12)
@@ -8563,8 +8525,8 @@ class EncryptionManager:
             return EncryptionManager.deserialize_encrypted_data(content)
 
     @staticmethod
-    def identify_data_type(data: bytes) -> dict:
-        """Определяет тип данных с расширенной информацией"""
+    def identify_data_type(data: bytes) -> Dict[str, Any]:
+        """Определяет тип данных с расширенной информацией (без изменений)"""
         # Попытка декодировать как UTF-8
         try:
             decoded = data.decode('utf-8')
@@ -15417,7 +15379,7 @@ class SteganographyUltimatePro:
     5. Скопируйте или сохраните результат
 
     Подробнее о шифровании см. раздел "🔐 Шифрование данных" в содержании.
-    
+
     📦 ПАКЕТНАЯ ОБРАБОТКА:
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Пакетное скрытие (до 5 файлов):
