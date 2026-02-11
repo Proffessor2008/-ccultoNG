@@ -17,7 +17,7 @@ import zlib
 from datetime import datetime, timedelta
 from io import BytesIO
 from tkinter import ttk, filedialog, messagebox, scrolledtext
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 
 import cv2
 import matplotlib
@@ -26,14 +26,15 @@ import numba
 import numpy as np
 from PIL import Image
 from PIL import ImageTk
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import hashes, padding
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from scipy import ndimage
 from scipy.fftpack import dct, idct
 from scipy.stats import binomtest, kurtosis, skew, normaltest
 from tkinterdnd2 import DND_FILES, TkinterDnD
+from Crypto.Cipher import AES, ChaCha20, ChaCha20_Poly1305
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto.Hash import SHA256
+from Crypto.Util.Padding import pad, unpad
+from Crypto.Random import get_random_bytes
 
 matplotlib.use('TkAgg')
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -7914,22 +7915,6 @@ class SmartAssistant:
                     json.dump(self.tip_effectiveness, f, indent=2, ensure_ascii=False)
             except Exception as e:
                 print(f"Ошибка экспорта статистики подсказок: {e}")
-
-
-import os
-import json
-import time
-import base64
-import hashlib
-import secrets
-from typing import Dict, Any
-
-# Импорты из PyCryptodome
-from Crypto.Cipher import AES, ChaCha20, ChaCha20_Poly1305
-from Crypto.Protocol.KDF import PBKDF2
-from Crypto.Hash import SHA256
-from Crypto.Util.Padding import pad, unpad
-from Crypto.Random import get_random_bytes
 
 
 class EncryptionManager:
