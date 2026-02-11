@@ -3,6 +3,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import secrets
 import shutil
 import subprocess
 import sys
@@ -18,27 +19,30 @@ from io import BytesIO
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from typing import List, Tuple
 
+import cv2
 import matplotlib
 import matplotlib.pyplot as plt
+import numba
+import numpy as np
+from PIL import Image
+from PIL import ImageTk
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives import hashes, padding
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from scipy import ndimage
+from scipy.fftpack import dct, idct
 from scipy.stats import binomtest, kurtosis, skew, normaltest
+from tkinterdnd2 import DND_FILES, TkinterDnD
 
 matplotlib.use('TkAgg')
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 
-import cv2
-import numba
-import numpy as np
-from PIL import Image
-from PIL import ImageTk
-from scipy import ndimage
-from scipy.fftpack import dct, idct
-from tkinterdnd2 import DND_FILES, TkinterDnD
-
 # ───────────────────────────────────────────────
 # 🎨 ГЛОБАЛЬНЫЕ НАСТРОЙКИ (УЛУЧШЕННЫЕ)
 # ───────────────────────────────────────────────
-VERSION = "2.3.1"
+VERSION = "2.4.3"
 AUTHOR = "MustaNG"
 BUILD_DATE = time.strftime("%Y-%m-%d")
 
@@ -48,7 +52,6 @@ PROGRESS_UPDATE_INTERVAL = 1000  # Частота обновления прог�
 MIN_DATA_LEN = 8  # Минимальный размер данных (биты)
 MAX_DATA_LEN = 100 * 1024 * 1024 * 8  # Максимальный размер данных (100 МБ в битах)
 
-# Улучшенные современные темы с плавными градиентами и закруглениями
 THEMES = {
     "Тёмная": {
         "name": "Тёмная",
@@ -291,7 +294,7 @@ STEGANO_METHODS = {
 SETTINGS_FILE = "stego_settings_pro.json"
 HISTORY_FILE = "stego_history_pro.json"
 MAX_HISTORY = 20
-MAX_FILE_SIZE_MB = 100  # Максимальный размер файла для скрытия (МБ)
+MAX_FILE_SIZE_MB = 100
 
 CONFIG = {
     "MAX_FILE_SIZE_MB": MAX_FILE_SIZE_MB,
@@ -305,7 +308,7 @@ CONFIG = {
 
 
 # ───────────────────────────────────────────────
-# 🛠️ УТИЛИТЫ (УЛУЧШЕННЫЕ)
+# 🛠️ УТИЛИТЫ
 # ───────────────────────────────────────────────
 class Utils:
     @staticmethod
@@ -541,7 +544,7 @@ class Utils:
 
 
 # ───────────────────────────────────────────────
-# 🛈 КЛАСС ПОДСКАЗОК (TOOLTIP) - УЛУЧШЕННЫЙ
+# 🛈 КЛАСС ПОДСКАЗОК (TOOLTIP)
 # ───────────────────────────────────────────────
 class ToolTip:
     def __init__(self, widget, text, bg="#333333", fg="#ffffff", delay=500, follow_mouse=True):
@@ -624,7 +627,7 @@ class ToolTip:
 
 
 # ───────────────────────────────────────────────
-# 🎨 КЛАСС ДЛЯ РАБОТЫ С ТЕМАМИ (УЛУЧШЕННЫЙ)
+# 🎨 КЛАСС ДЛЯ РАБОТЫ С ТЕМАМИ
 # ───────────────────────────────────────────────
 class ThemeManager:
     def __init__(self, root: tk.Tk):
@@ -924,7 +927,7 @@ class ThemeManager:
         self.style.configure("Success.TLabel", background=c["bg"], foreground=c["success"], font=("Segoe UI", 10))
         self.style.configure("Warning.TLabel", background=c["bg"], foreground=c["warning"], font=("Segoe UI", 10))
 
-        # Дроп-зона — теперь отдельным стилем метки
+        # Дроп-зона - теперь отдельным стилем метки
         self.style.configure(
             "DropLabel.TLabel",
             background=c["card"],
@@ -7913,8 +7916,721 @@ class SmartAssistant:
                 print(f"Ошибка экспорта статистики подсказок: {e}")
 
 
+class EncryptionManager:
+    """Полнофункциональный менеджер шифрования с поддержкой современных алгоритмов"""
+    SUPPORTED_ALGORITHMS = {
+        # Симметричные алгоритмы
+        "aes_256_cbc": "AES-256 CBC (Симметричное, стандартное)",
+        "aes_256_gcm": "AES-256 GCM (С аутентификацией данных)",
+        "aes_256_ctr": "AES-256 CTR (Потоковый режим, высокая скорость)",
+        "aes_256_ofb": "AES-256 OFB (Устойчивость к ошибкам)",
+        "chacha20_poly1305": "ChaCha20-Poly1305 (Высокая скорость + аутентификация)",
+        "chacha20": "ChaCha20 (Высокая скорость, без аутентификации)",
+        "xor": "XOR (Учебный, НЕ для реального использования)",
+        "base64": "Base64 (Кодирование, не шифрование)"
+    }
+
+    SECURITY_LEVELS = {
+        "aes_256_cbc": "high",
+        "aes_256_gcm": "very_high",
+        "aes_256_ctr": "high",
+        "aes_256_ofb": "medium",
+        "chacha20_poly1305": "very_high",
+        "chacha20": "high",
+        "xor": "none",
+        "base64": "none"
+    }
+
+    @staticmethod
+    def get_algorithm_info(algorithm: str) -> dict:
+        """Возвращает подробную информацию об алгоритме для документации"""
+        info = {
+            "aes_256_cbc": {
+                "name": "AES-256 CBC",
+                "description": "Блочный шифр с 256-битным ключом в режиме сцепления блоков шифротекста",
+                "security": "Высокая (при правильной реализации)",
+                "use_cases": "Общее шифрование файлов и данных",
+                "limitations": "Требует паддинг, уязвим к атакам на повторение блоков без случайного IV",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
+                "iv_size": "16 байт",
+                "authentication": "Нет (рекомендуется использовать с отдельной MAC)",
+                "performance": "Высокая скорость шифрования/дешифрования"
+            },
+            "aes_256_gcm": {
+                "name": "AES-256 GCM",
+                "description": "Режим Галуа/Счётчика с встроенной аутентификацией данных (AEAD)",
+                "security": "Очень высокая (рекомендуется для новых систем)",
+                "use_cases": "Защита конфиденциальности и целостности данных",
+                "limitations": "Ограничение на размер данных (~64 ГБ на ключ)",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
+                "iv_size": "12 байт (рекомендуется)",
+                "authentication": "Встроенная (128-битный тег аутентификации)",
+                "performance": "Высокая скорость с аппаратной поддержкой на современных CPU"
+            },
+            "aes_256_ctr": {
+                "name": "AES-256 CTR",
+                "description": "Режим счётчика, преобразует блочный шифр в потоковый",
+                "security": "Высокая (при уникальном nonce)",
+                "use_cases": "Параллельная обработка, шифрование потоков",
+                "limitations": "Критически важно никогда не повторять nonce с одним ключом",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
+                "iv_size": "16 байт (8 байт nonce + 8 байт счётчик)",
+                "authentication": "Нет (рекомендуется комбинировать с HMAC)",
+                "performance": "Очень высокая, поддерживает параллелизм"
+            },
+            "aes_256_ofb": {
+                "name": "AES-256 OFB",
+                "description": "Режим обратной связи вывода, создаёт потоковый шифр",
+                "security": "Средняя (устаревший режим)",
+                "use_cases": "Шифрование в средах с высоким уровнем ошибок",
+                "limitations": "Не обеспечивает аутентификацию, уязвим к атакам на битовые флипы",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
+                "iv_size": "16 байт",
+                "authentication": "Нет",
+                "performance": "Хорошая скорость, но не рекомендуется для новых систем"
+            },
+            "chacha20_poly1305": {
+                "name": "ChaCha20-Poly1305",
+                "description": "Современный потоковый шифр с аутентификацией (стандарт IETF RFC 8439)",
+                "security": "Очень высокая (рекомендуется для мобильных устройств)",
+                "use_cases": "TLS 1.3, защищённая передача данных, мобильные приложения",
+                "limitations": "Ограничение на 2^32 блоков на ключ/nonce",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
+                "nonce_size": "12 байт",
+                "authentication": "Встроенная (128-битный тег Poly1305)",
+                "performance": "Высокая скорость на CPU без аппаратного ускорения AES"
+            },
+            "chacha20": {
+                "name": "ChaCha20",
+                "description": "Потоковый шифр без встроенной аутентификации",
+                "security": "Высокая (но без проверки целостности)",
+                "use_cases": "Когда аутентификация обеспечивается отдельно",
+                "limitations": "Требует отдельной аутентификации для защиты от модификации",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
+                "nonce_size": "16 байт",
+                "authentication": "Нет",
+                "performance": "Очень высокая скорость на всех платформах"
+            },
+            "xor": {
+                "name": "XOR",
+                "description": "Простейшая операция побитового исключающего ИЛИ",
+                "security": "Отсутствует (тривиально взламывается)",
+                "use_cases": "Только для образовательных целей",
+                "limitations": "Полностью небезопасен, не скрывает статистические паттерны",
+                "key_derivation": "Нет (ключ используется напрямую)",
+                "authentication": "Нет",
+                "performance": "Максимальная скорость",
+                "warning": "НИКОГДА не используйте для защиты реальных данных!"
+            },
+            "base64": {
+                "name": "Base64",
+                "description": "Кодирование двоичных данных в текстовый формат ASCII",
+                "security": "Отсутствует (обратимое преобразование без ключа)",
+                "use_cases": "Передача двоичных данных в текстовых протоколах (email, JSON)",
+                "limitations": "Не является шифрованием, данные легко декодируются",
+                "authentication": "Нет",
+                "performance": "Высокая скорость",
+                "warning": "Base64 НЕ ЗАЩИЩАЕТ данные! Это просто кодирование."
+            }
+        }
+        return info.get(algorithm, {
+            "name": algorithm,
+            "description": "Информация недоступна",
+            "security": "Неизвестно",
+            "use_cases": "Неизвестно",
+            "limitations": "Неизвестно"
+        })
+
+    @staticmethod
+    def _derive_key(password: str, salt: bytes, algorithm: str = "aes_256") -> bytes:
+        """Универсальная функция для генерации ключа из пароля"""
+        if not password or len(password) < 8:
+            raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
+
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,  # 256 бит для AES-256
+            salt=salt,
+            iterations=600000,
+            backend=default_backend()
+        )
+        return kdf.derive(password.encode('utf-8'))
+
+    @staticmethod
+    def encrypt_aes_cbc(data: bytes, password: str) -> dict:
+        """Шифрование с использованием AES-256 в режиме CBC"""
+        if not password or len(password) < 8:
+            raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
+
+        # Генерация соли и ключа
+        salt = os.urandom(16)
+        key = EncryptionManager._derive_key(password, salt, "aes_256")
+
+        # Генерация IV
+        iv = os.urandom(16)
+
+        # Добавление паддинга (PKCS7)
+        padder = padding.PKCS7(128).padder()
+        padded_data = padder.update(data) + padder.finalize()
+
+        # Шифрование
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.CBC(iv),
+            backend=default_backend()
+        )
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(padded_data) + encryptor.finalize()
+
+        # Контрольная сумма для проверки целостности
+        checksum = hashlib.sha256(ciphertext).digest()
+
+        return {
+            'ciphertext': ciphertext,
+            'salt': salt,
+            'iv': iv,
+            'checksum': checksum,
+            'algorithm': 'aes_256_cbc',
+            'version': '1.0'
+        }
+
+    @staticmethod
+    def decrypt_aes_cbc(encrypted_data: dict, password: str) -> bytes:
+        """Дешифрование AES-256 CBC с проверкой целостности"""
+        required_keys = ['ciphertext', 'salt', 'iv', 'checksum', 'algorithm']
+        if not all(key in encrypted_data for key in required_keys):
+            raise ValueError("Неполные или поврежденные зашифрованные данные")
+        if encrypted_data['algorithm'] != 'aes_256_cbc':
+            raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
+
+        # Восстановление ключа
+        key = EncryptionManager._derive_key(password, encrypted_data['salt'], "aes_256")
+
+        # Проверка целостности
+        actual_checksum = hashlib.sha256(encrypted_data['ciphertext']).digest()
+        if not secrets.compare_digest(actual_checksum, encrypted_data['checksum']):
+            raise ValueError("Данные повреждены (контрольная сумма не совпадает)")
+
+        # Дешифрование
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.CBC(encrypted_data['iv']),
+            backend=default_backend()
+        )
+        decryptor = cipher.decryptor()
+        padded_plaintext = decryptor.update(encrypted_data['ciphertext']) + decryptor.finalize()
+
+        # Удаление паддинга
+        unpadder = padding.PKCS7(128).unpadder()
+        plaintext = unpadder.update(padded_plaintext) + unpadder.finalize()
+        return plaintext
+
+    @staticmethod
+    def encrypt_aes_gcm(data: bytes, password: str) -> dict:
+        """Шифрование с использованием AES-256 в режиме GCM (с аутентификацией)"""
+        if not password or len(password) < 8:
+            raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
+
+        # Генерация соли и ключа
+        salt = os.urandom(16)
+        key = EncryptionManager._derive_key(password, salt, "aes_256")
+
+        # Генерация nonce (12 байт для GCM)
+        nonce = os.urandom(12)
+
+        # Шифрование с аутентификацией
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.GCM(nonce),
+            backend=default_backend()
+        )
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(data) + encryptor.finalize()
+        tag = encryptor.tag
+
+        return {
+            'ciphertext': ciphertext,
+            'salt': salt,
+            'nonce': nonce,
+            'tag': tag,
+            'algorithm': 'aes_256_gcm',
+            'version': '1.0'
+        }
+
+    @staticmethod
+    def decrypt_aes_gcm(encrypted_data: dict, password: str) -> bytes:
+        """Дешифрование AES-256 GCM с проверкой аутентификации"""
+        required_keys = ['ciphertext', 'salt', 'nonce', 'tag', 'algorithm']
+        if not all(key in encrypted_data for key in required_keys):
+            raise ValueError("Неполные или поврежденные зашифрованные данные")
+        if encrypted_data['algorithm'] != 'aes_256_gcm':
+            raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
+
+        # Восстановление ключа
+        key = EncryptionManager._derive_key(password, encrypted_data['salt'], "aes_256")
+
+        # Дешифрование с проверкой тега
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.GCM(encrypted_data['nonce'], encrypted_data['tag']),
+            backend=default_backend()
+        )
+        decryptor = cipher.decryptor()
+        try:
+            plaintext = decryptor.update(encrypted_data['ciphertext']) + decryptor.finalize()
+            return plaintext
+        except Exception as e:
+            raise ValueError(f"Ошибка аутентификации или расшифровки: {str(e)}")
+
+    @staticmethod
+    def encrypt_aes_ctr(data: bytes, password: str) -> dict:
+        """Шифрование с использованием AES-256 в режиме CTR"""
+        if not password or len(password) < 8:
+            raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
+
+        # Генерация соли и ключа
+        salt = os.urandom(16)
+        key = EncryptionManager._derive_key(password, salt, "aes_256")
+
+        # Генерация nonce (8 байт) + начальное значение счётчика (8 байт)
+        nonce = os.urandom(8)
+        initial_counter = os.urandom(8)
+
+        # Шифрование
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.CTR(nonce + initial_counter),
+            backend=default_backend()
+        )
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(data) + encryptor.finalize()
+
+        # Контрольная сумма для проверки целостности
+        checksum = hashlib.sha256(ciphertext).digest()
+
+        return {
+            'ciphertext': ciphertext,
+            'salt': salt,
+            'nonce': nonce,
+            'initial_counter': initial_counter,
+            'checksum': checksum,
+            'algorithm': 'aes_256_ctr',
+            'version': '1.0'
+        }
+
+    @staticmethod
+    def decrypt_aes_ctr(encrypted_data: dict, password: str) -> bytes:
+        """Дешифрование AES-256 CTR с проверкой целостности"""
+        required_keys = ['ciphertext', 'salt', 'nonce', 'initial_counter', 'checksum', 'algorithm']
+        if not all(key in encrypted_data for key in required_keys):
+            raise ValueError("Неполные или поврежденные зашифрованные данные")
+        if encrypted_data['algorithm'] != 'aes_256_ctr':
+            raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
+
+        # Восстановление ключа
+        key = EncryptionManager._derive_key(password, encrypted_data['salt'], "aes_256")
+
+        # Проверка целостности
+        actual_checksum = hashlib.sha256(encrypted_data['ciphertext']).digest()
+        if not secrets.compare_digest(actual_checksum, encrypted_data['checksum']):
+            raise ValueError("Данные повреждены (контрольная сумма не совпадает)")
+
+        # Дешифрование
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.CTR(encrypted_data['nonce'] + encrypted_data['initial_counter']),
+            backend=default_backend()
+        )
+        decryptor = cipher.decryptor()
+        plaintext = decryptor.update(encrypted_data['ciphertext']) + decryptor.finalize()
+        return plaintext
+
+    @staticmethod
+    def encrypt_aes_ofb(data: bytes, password: str) -> dict:
+        """Шифрование с использованием AES-256 в режиме OFB"""
+        if not password or len(password) < 8:
+            raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
+
+        # Генерация соли и ключа
+        salt = os.urandom(16)
+        key = EncryptionManager._derive_key(password, salt, "aes_256")
+
+        # Генерация IV
+        iv = os.urandom(16)
+
+        # Шифрование
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.OFB(iv),
+            backend=default_backend()
+        )
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(data) + encryptor.finalize()
+
+        # Контрольная сумма
+        checksum = hashlib.sha256(ciphertext).digest()
+
+        return {
+            'ciphertext': ciphertext,
+            'salt': salt,
+            'iv': iv,
+            'checksum': checksum,
+            'algorithm': 'aes_256_ofb',
+            'version': '1.0'
+        }
+
+    @staticmethod
+    def decrypt_aes_ofb(encrypted_data: dict, password: str) -> bytes:
+        """Дешифрование AES-256 OFB с проверкой целостности"""
+        required_keys = ['ciphertext', 'salt', 'iv', 'checksum', 'algorithm']
+        if not all(key in encrypted_data for key in required_keys):
+            raise ValueError("Неполные или поврежденные зашифрованные данные")
+        if encrypted_data['algorithm'] != 'aes_256_ofb':
+            raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
+
+        # Восстановление ключа
+        key = EncryptionManager._derive_key(password, encrypted_data['salt'], "aes_256")
+
+        # Проверка целостности
+        actual_checksum = hashlib.sha256(encrypted_data['ciphertext']).digest()
+        if not secrets.compare_digest(actual_checksum, encrypted_data['checksum']):
+            raise ValueError("Данные повреждены (контрольная сумма не совпадает)")
+
+        # Дешифрование
+        cipher = Cipher(
+            algorithms.AES(key),
+            modes.OFB(encrypted_data['iv']),
+            backend=default_backend()
+        )
+        decryptor = cipher.decryptor()
+        plaintext = decryptor.update(encrypted_data['ciphertext']) + decryptor.finalize()
+        return plaintext
+
+    @staticmethod
+    def encrypt_chacha20(data: bytes, password: str) -> dict:
+        """Шифрование с использованием ChaCha20 (без аутентификации)"""
+        if not password or len(password) < 8:
+            raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
+
+        # Генерация соли и ключа
+        salt = os.urandom(16)
+        key = EncryptionManager._derive_key(password, salt, "chacha20")
+
+        # Генерация nonce (16 байт для ChaCha20)
+        nonce = os.urandom(16)
+
+        # Шифрование
+        cipher = Cipher(
+            algorithms.ChaCha20(key, nonce),
+            mode=None,
+            backend=default_backend()
+        )
+        encryptor = cipher.encryptor()
+        ciphertext = encryptor.update(data) + encryptor.finalize()
+
+        # Контрольная сумма
+        checksum = hashlib.sha256(ciphertext).digest()
+
+        return {
+            'ciphertext': ciphertext,
+            'salt': salt,
+            'nonce': nonce,
+            'checksum': checksum,
+            'algorithm': 'chacha20',
+            'version': '1.0'
+        }
+
+    @staticmethod
+    def decrypt_chacha20(encrypted_data: dict, password: str) -> bytes:
+        """Дешифрование ChaCha20 с проверкой целостности"""
+        required_keys = ['ciphertext', 'salt', 'nonce', 'checksum', 'algorithm']
+        if not all(key in encrypted_data for key in required_keys):
+            raise ValueError("Неполные или поврежденные зашифрованные данные")
+        if encrypted_data['algorithm'] != 'chacha20':
+            raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
+
+        # Восстановление ключа
+        key = EncryptionManager._derive_key(password, encrypted_data['salt'], "chacha20")
+
+        # Проверка целостности
+        actual_checksum = hashlib.sha256(encrypted_data['ciphertext']).digest()
+        if not secrets.compare_digest(actual_checksum, encrypted_data['checksum']):
+            raise ValueError("Данные повреждены (контрольная сумма не совпадает)")
+
+        # Дешифрование
+        cipher = Cipher(
+            algorithms.ChaCha20(key, encrypted_data['nonce']),
+            mode=None,
+            backend=default_backend()
+        )
+        decryptor = cipher.decryptor()
+        plaintext = decryptor.update(encrypted_data['ciphertext']) + decryptor.finalize()
+        return plaintext
+
+    @staticmethod
+    def encrypt_chacha20_poly1305(data: bytes, password: str) -> dict:
+        """Шифрование с аутентификацией через ChaCha20-Poly1305"""
+        if not password or len(password) < 8:
+            raise ValueError("Пароль должен содержать минимум 8 символов для безопасности")
+
+        # Генерация соли и ключа
+        salt = os.urandom(16)
+        key = EncryptionManager._derive_key(password, salt, "chacha20")
+
+        # Генерация nonce (12 байт для Poly1305)
+        nonce = os.urandom(12)
+
+        # Используем встроенную реализацию ChaCha20Poly1305 из cryptography
+        from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+
+        chacha = ChaCha20Poly1305(key)
+        # Дополнительные аутентифицированные данные (AAD)
+        aad = b"occultong_chacha20_poly1305_v1"
+        ciphertext_with_tag = chacha.encrypt(nonce, data, aad)
+
+        # Разделяем шифротекст и тег (последние 16 байт)
+        tag = ciphertext_with_tag[-16:]
+        ciphertext = ciphertext_with_tag[:-16]
+
+        return {
+            'ciphertext': ciphertext,
+            'salt': salt,
+            'nonce': nonce,
+            'tag': tag,
+            'aad': aad,
+            'algorithm': 'chacha20_poly1305',
+            'version': '1.0'
+        }
+
+    @staticmethod
+    def decrypt_chacha20_poly1305(encrypted_data: dict, password: str) -> bytes:
+        """Дешифрование с проверкой аутентификации ChaCha20-Poly1305"""
+        required_keys = ['ciphertext', 'salt', 'nonce', 'tag', 'aad', 'algorithm']
+        if not all(key in encrypted_data for key in required_keys):
+            raise ValueError("Неполные или поврежденные зашифрованные данные")
+        if encrypted_data['algorithm'] != 'chacha20_poly1305':
+            raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
+
+        # Восстановление ключа
+        key = EncryptionManager._derive_key(password, encrypted_data['salt'], "chacha20")
+
+        # Дешифрование с проверкой тега
+        from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
+
+        chacha = ChaCha20Poly1305(key)
+
+        try:
+            # Объединяем шифротекст и тег для дешифрования
+            ciphertext_with_tag = encrypted_data['ciphertext'] + encrypted_data['tag']
+            plaintext = chacha.decrypt(
+                encrypted_data['nonce'],
+                ciphertext_with_tag,
+                encrypted_data['aad']
+            )
+            return plaintext
+        except Exception as e:
+            raise ValueError(f"Ошибка аутентификации или расшифровки: {str(e)}")
+
+    @staticmethod
+    def encrypt_xor(data: bytes, key: str) -> dict:
+        """Учебное шифрование XOR (НЕ БЕЗОПАСНО!)"""
+        if not key:
+            raise ValueError("Ключ XOR не может быть пустым")
+
+        key_bytes = key.encode('utf-8')
+        if len(key_bytes) == 0:
+            raise ValueError("Ключ должен содержать хотя бы один символ")
+
+        # Повторяем ключ для соответствия длине данных
+        extended_key = (key_bytes * (len(data) // len(key_bytes) + 1))[:len(data)]
+
+        # XOR операция
+        ciphertext = bytes([b ^ k for b, k in zip(data, extended_key)])
+
+        return {
+            'ciphertext': ciphertext,
+            'key': key,
+            'algorithm': 'xor',
+            'version': '1.0'
+        }
+
+    @staticmethod
+    def decrypt_xor(encrypted_data: dict) -> bytes:
+        """Дешифрование XOR (НЕ БЕЗОПАСНО!)"""
+        required_keys = ['ciphertext', 'key', 'algorithm']
+        if not all(key in encrypted_data for key in required_keys):
+            raise ValueError("Неполные зашифрованные данные")
+        if encrypted_data['algorithm'] != 'xor':
+            raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
+
+        data = encrypted_data['ciphertext']
+        key = encrypted_data['key'].encode('utf-8')
+
+        # Повторяем ключ для соответствия длине данных
+        extended_key = (key * (len(data) // len(key) + 1))[:len(data)]
+
+        # XOR операция (обратима)
+        plaintext = bytes([b ^ k for b, k in zip(data, extended_key)])
+        return plaintext
+
+    @staticmethod
+    def encrypt_base64(data: bytes) -> dict:
+        """Кодирование Base64 (НЕ ШИФРОВАНИЕ!)"""
+        encoded = base64.b64encode(data)
+        return {
+            'encoded': encoded,
+            'algorithm': 'base64',
+            'version': '1.0'
+        }
+
+    @staticmethod
+    def decrypt_base64(encrypted_data: dict) -> bytes:
+        """Декодирование Base64 (НЕ ДЕШИФРОВАНИЕ!)"""
+        required_keys = ['encoded', 'algorithm']
+        if not all(key in encrypted_data for key in required_keys):
+            raise ValueError("Неполные закодированные данные")
+        if encrypted_data['algorithm'] != 'base64':
+            raise ValueError(f"Несовместимый алгоритм: {encrypted_data['algorithm']}")
+
+        try:
+            decoded = base64.b64decode(encrypted_data['encoded'])
+            return decoded
+        except Exception as e:
+            raise ValueError(f"Ошибка декодирования Base64: {str(e)}")
+
+    @staticmethod
+    def serialize_encrypted_data(encrypted_data: dict) -> str:
+        """Сериализация зашифрованных данных в строку JSON с Base64"""
+        serializable = {}
+        # Обработка бинарных данных
+        for key, value in encrypted_data.items():
+            if isinstance(value, bytes):
+                serializable[key] = base64.b64encode(value).decode('utf-8')
+            else:
+                serializable[key] = value
+        # Добавление метаданных
+        serializable['timestamp'] = time.strftime('%Y-%m-%d %H:%M:%S')
+        serializable['format'] = 'occultong_encrypted_v1'
+        return json.dumps(serializable, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def deserialize_encrypted_data(serialized: str) -> dict:
+        """Десериализация зашифрованных данных из строки JSON"""
+        try:
+            data = json.loads(serialized)
+        except json.JSONDecodeError as e:
+            raise ValueError(f"Неверный формат данных: {str(e)}")
+        # Проверка формата
+        if data.get('format') != 'occultong_encrypted_v1':
+            raise ValueError("Неподдерживаемый формат зашифрованных данных")
+        # Восстановление бинарных данных
+        deserialized = {}
+        binary_keys = ['ciphertext', 'salt', 'iv', 'tag', 'nonce', 'checksum', 'initial_counter', 'encoded', 'aad']
+        for key, value in data.items():
+            if key in binary_keys and isinstance(value, str):
+                try:
+                    deserialized[key] = base64.b64decode(value.encode('utf-8'))
+                except Exception as e:
+                    raise ValueError(f"Ошибка декодирования {key}: {str(e)}")
+            else:
+                deserialized[key] = value
+        return deserialized
+
+    @staticmethod
+    def save_encrypted_file(encrypted_data: dict, filepath: str) -> None:
+        """Сохранение зашифрованных данных в файл с расширением .ongcrypt"""
+        serialized = EncryptionManager.serialize_encrypted_data(encrypted_data)
+        # Добавление сигнатуры файла для идентификации
+        signature = b'ONGCRYPT\x01\x00\x00\x00'  # Магические байты + версия
+        with open(filepath, 'wb') as f:
+            f.write(signature)
+            f.write(serialized.encode('utf-8'))
+
+    @staticmethod
+    def load_encrypted_file(filepath: str) -> dict:
+        """Загрузка зашифрованных данных из файла .ongcrypt"""
+        with open(filepath, 'rb') as f:
+            # Проверка сигнатуры
+            signature = f.read(12)
+            expected_signature = b'ONGCRYPT\x01\x00\x00\x00'
+            if signature != expected_signature:
+                # Попытка загрузить как обычный JSON (без сигнатуры)
+                f.seek(0)
+                content = f.read().decode('utf-8')
+                return EncryptionManager.deserialize_encrypted_data(content)
+            # Загрузка основного содержимого
+            content = f.read().decode('utf-8')
+            return EncryptionManager.deserialize_encrypted_data(content)
+
+    @staticmethod
+    def identify_data_type(data: bytes) -> dict:
+        """Определяет тип данных с расширенной информацией"""
+        # Попытка декодировать как UTF-8
+        try:
+            decoded = data.decode('utf-8')
+            # Проверка, что большая часть данных - текст
+            text_ratio = sum(1 for c in decoded if c.isprintable() or c in '\n\r\t') / len(decoded)
+            if text_ratio > 0.8:
+                return {
+                    'type': 'text',
+                    'encoding': 'utf-8',
+                    'preview': decoded[:100],
+                    'is_text': True
+                }
+        except UnicodeDecodeError:
+            pass
+
+        # Проверка на изображение
+        try:
+            from PIL import Image
+            import io
+            img = Image.open(io.BytesIO(data))
+            return {
+                'type': 'image',
+                'format': img.format,
+                'dimensions': f"{img.width}x{img.height}",
+                'mode': img.mode,
+                'size': len(data),
+                'is_text': False
+            }
+        except:
+            pass
+
+        # Проверка на аудио
+        try:
+            import wave
+            import io
+            with wave.open(io.BytesIO(data), 'rb') as wav:
+                return {
+                    'type': 'audio',
+                    'channels': wav.getnchannels(),
+                    'sample_rate': wav.getframerate(),
+                    'frames': wav.getnframes(),
+                    'duration': f"{wav.getnframes() / wav.getframerate():.2f} sec",
+                    'size': len(data),
+                    'is_text': False
+                }
+        except:
+            pass
+
+        # Проверка на архив
+        if data[:4] in [b'PK\x03\x04', b'Rar!', b'7z\xBC\xAF']:
+            return {
+                'type': 'archive',
+                'size': len(data),
+                'is_text': False
+            }
+
+        # По умолчанию - бинарные данные
+        return {
+            'type': 'binary',
+            'size': len(data),
+            'is_text': False
+        }
+
+
 # ───────────────────────────────────────────────
-# 📊 КЛАСС АНАЛИЗА ФАЙЛОВ ДЛЯ СТЕГАНОГРАФИИ (ОБНОВЛЕННЫЙ С 9 ТЕСТАМИ)
+# 📊 КЛАСС АНАЛИЗА ФАЙЛОВ ДЛЯ СТЕГАНОГРАФИИ
 # ───────────────────────────────────────────────
 class FileAnalyzer:
     """Класс для анализа файлов на наличие стеганографических данных с расширенным набором тестов (15+ метрик)"""
@@ -8202,7 +8918,7 @@ class FileAnalyzer:
             'avg_corr': float(avg_corr),
             'suspicion_level': suspicion_level,
             'interpretation': interpretation,
-            'description': 'Естественные изображения имеют высокую положительную корреляцию соседних пикселей (>0.8). Стеганография снижает корреляцию, делая изображение более "случайным". Отрицательная корреляция — сильный признак аномалии.'
+            'description': 'Естественные изображения имеют высокую положительную корреляцию соседних пикселей (>0.8). Стеганография снижает корреляцию, делая изображение более "случайным". Отрицательная корреляция - сильный признак аномалии.'
         }
 
     @staticmethod
@@ -8951,7 +9667,7 @@ class FileAnalyzer:
         def haar_step(image):
             # Разделяем на четные и нечетные строки/столбцы
             h, w = image.shape
-            # Если размеры нечетные — обрезаем (как это делает wavedec2 в определенных режимах)
+            # Если размеры нечетные - обрезаем (как это делает wavedec2 в определенных режимах)
             img = image[:h - h % 2, :w - w % 2]
 
             # Вычисляем средние и разности (Haar)
@@ -8974,7 +9690,7 @@ class FileAnalyzer:
             cA2, details2 = haar_step(cA1)
 
             # Собираем детализирующие коэффициенты (как это делал pywt.wavedec2)
-            # В wavedec2 coeffs[1:] — это кортежи (cH, cV, cD) для каждого уровня
+            # В wavedec2 coeffs[1:] - это кортежи (cH, cV, cD) для каждого уровня
             detail_coeffs = []
             for level in [details1, details2]:
                 for detail_map in level:
@@ -9131,19 +9847,19 @@ class FileAnalyzer:
             # α > 0.2 → естественное изображение (выраженная асимметрия)
             if alpha < 0.03:
                 suspicion_level = 95
-                interpretation = f'Крайне подозрительно: α={alpha:.4f} (<0.03) — сильное выравнивание частот пар'
+                interpretation = f'Крайне подозрительно: α={alpha:.4f} (<0.03) - сильное выравнивание частот пар'
             elif alpha < 0.05:
                 suspicion_level = 90
-                interpretation = f'Подозрительно: α={alpha:.4f} (<0.05) — выравнивание частот пар (метод Кера)'
+                interpretation = f'Подозрительно: α={alpha:.4f} (<0.05) - выравнивание частот пар (метод Кера)'
             elif alpha < 0.1:
                 suspicion_level = 70
-                interpretation = f'Умеренно подозрительно: α={alpha:.4f} (<0.10) — частичное выравнивание частот'
+                interpretation = f'Умеренно подозрительно: α={alpha:.4f} (<0.10) - частичное выравнивание частот'
             elif alpha < 0.2:
                 suspicion_level = 40
-                interpretation = f'Нейтрально: α={alpha:.4f} — умеренная асимметрия частот'
+                interpretation = f'Нейтрально: α={alpha:.4f} - умеренная асимметрия частот'
             else:
                 suspicion_level = 15
-                interpretation = f'Естественное изображение: α={alpha:.4f} (>0.20) — выраженная асимметрия частот пар'
+                interpretation = f'Естественное изображение: α={alpha:.4f} (>0.20) - выраженная асимметрия частот пар'
 
             # Дополнительная проверка: очень большое количество пар с разницей 1 тоже подозрительно
             ratio_close_pairs = total_valid / len(all_pairs)
@@ -9890,9 +10606,8 @@ class FileAnalyzer:
 
 
 # ───────────────────────────────────────────────
-# 📊 ВКЛАДКА АНАЛИЗА ФАЙЛА (ОБНОВЛЕННАЯ С ИНТЕРАКТИВНЫМИ ГРАФИКАМИ)
+# 📊 ВКЛАДКА АНАЛИЗА ФАЙЛА
 # ───────────────────────────────────────────────
-
 class AnalysisTab:
     """Вкладка для анализа файлов на наличие стеганографических данных с расширенными визуализациями и экспортом"""
 
@@ -10117,7 +10832,7 @@ class AnalysisTab:
         # Уменьшенный шрифт для процента
         self.suspicion_label = ttk.Label(
             suspicion_frame,
-            text="—",
+            text="-",
             font=("Segoe UI", 18, "bold"),  # Уменьшено с 28 до 18
             style="TLabel"
         )
@@ -10141,7 +10856,7 @@ class AnalysisTab:
 
         self.confidence_label = ttk.Label(
             suspicion_frame,
-            text="Уверенность: —",
+            text="Уверенность: -",
             font=("Segoe UI", 8),  # Уменьшено с 9 до 8
             style="Secondary.TLabel"
         )
@@ -11418,10 +12133,10 @@ class AnalysisTab:
         self.metadata_text.config(state='disabled')
 
         # Сбрасываем индикатор подозрительности
-        self.suspicion_label.config(text="—")
+        self.suspicion_label.config(text="-")
         self.suspicion_bar.config(value=0, style="TProgressbar")
         self.suspicion_text.config(text="Нет данных", foreground=self.colors["text_secondary"])
-        self.confidence_label.config(text="Уверенность: —")
+        self.confidence_label.config(text="Уверенность: -")
 
         # Очищаем таблицу тестов
         for item in self.tests_tree.get_children():
@@ -11489,7 +12204,7 @@ class AnalysisTab:
 
 
 # ───────────────────────────────────────────────
-# 🎨 УЛУЧШЕННЫЙ КЛАСС ПРОВЕРКИ ПАРОЛЯ
+# 🎨КЛАСС ПРОВЕРКИ ПАРОЛЯ
 # ───────────────────────────────────────────────
 PASSWORD_FILE = "password_pro.json"
 
@@ -11923,7 +12638,7 @@ def _generate_rng(password: str, method: str) -> np.random.Generator:
 
 
 # ───────────────────────────────────────────────
-# 🧠 КЛАСС ПРОДВИНУТЫХ СТЕГО-МЕТОДОВ (БЕЗ ИЗМЕНЕНИЙ)
+# 🧠 КЛАСС СТЕГО-МЕТОДОВ
 # ───────────────────────────────────────────────
 class AdvancedStego:
     # ---------- Вспомогательные методы для работы с данными и заголовками ----------
@@ -12328,9 +13043,9 @@ class AdvancedStego:
         cost_q = np.round(cost_map * 1e7).astype(np.int64)  # (h, w) int64
         # Повтор на каналы
         cost_flat = np.repeat(cost_q.reshape(-1), 3)  # (h*w*3,) int64
-        # Целочисленный тай-брейк от RNG — строго детерминирован
+        # Целочисленный тай-брейк от RNG - строго детерминирован
         tie = rng.integers(0, np.iinfo(np.int64).max, size=cost_flat.size, dtype=np.int64)
-        # np.lexsort: последний ключ — первичный
+        # np.lexsort: последний ключ - первичный
         order = np.lexsort((tie, cost_flat))  # сначала cost, потом tie
         chosen = order[:needed_elements]
         pixel_idx = (chosen // 3).astype(np.int64)
@@ -12399,7 +13114,7 @@ class AdvancedStego:
                 total_bits_needed = (HEADER_FULL_LEN + data_len) * 8
                 total_groups = (total_bits_needed + r - 1) // r
                 total_elements = total_groups * n
-                # Переинициализируем RNG — порядок должен совпасть полностью
+                # Переинициализируем RNG - порядок должен совпасть полностью
                 rng_order = _generate_rng(password or "", "hill_order")
                 pix_idx_all, ch_idx_all = AdvancedStego._rank_indices_by_hill(img_rgb, rng_order, total_elements)
                 if cancel_event and cancel_event.is_set():
@@ -12749,7 +13464,7 @@ class AudioStego:
 
 
 # ───────────────────────────────────────────────
-# 🖼️ КЛАСС ДЛЯ РАБОТЫ С ИЗОБРАЖЕНИЯМИ (БЕЗ ИЗМЕНЕНИЙ)
+# 🖼️ КЛАСС ДЛЯ РАБОТЫ С ИЗОБРАЖЕНИЯМИ
 # ───────────────────────────────────────────────
 class ImageProcessor:
     @staticmethod
@@ -12952,7 +13667,7 @@ class ImageProcessor:
 
 
 # ───────────────────────────────────────────────
-# 🎯 ОСНОВНОЙ КЛАСС ПРИЛОЖЕНИЯ (ПОЛНОСТЬЮ ПЕРЕРАБОТАННЫЙ ИНТЕРФЕЙС)
+# 🎯 ОСНОВНОЙ КЛАСС ПРИЛОЖЕНИЯ
 # ───────────────────────────────────────────────
 class SteganographyUltimatePro:
     def __init__(self):
@@ -13184,17 +13899,6 @@ class SteganographyUltimatePro:
             5000
         )
 
-    def create_batch_tab(self):
-        """Создает вкладку пакетной обработки"""
-        self.batch_tab = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.notebook.add(self.batch_tab, text="📦 Пакетная обработка")
-
-        # Инициализация UI пакетной обработки
-        self.batch_ui = BatchProcessingUI(self.batch_tab, self)
-
-        # Обновляем SmartAssistant
-        self.smart_assistant = SmartAssistant(self)
-
     def initialize_plugins(self):
         """Инициализирует плагины"""
         plugins = self.plugin_manager.get_plugins()
@@ -13226,7 +13930,7 @@ class SteganographyUltimatePro:
         self.create_extract_tab()
         self.create_analysis_tab()
         self.create_settings_tab()
-
+        self.create_encryption_tab()
         self.create_statistics_tab()  # Создаем вкладку "Статистика"
         self.create_achievements_tab()  # Создаем вкладку "Достижения"
         self.create_help_tab()  # Создаем вкладку "Помощь"
@@ -13235,11 +13939,12 @@ class SteganographyUltimatePro:
         self.notebook.add(self.hide_tab, text="📦 Скрыть данные")
         self.notebook.add(self.extract_tab, text="🔍 Извлечь данные")
         self.notebook.add(self.analysis_tab, text="🔬 Анализ файла")
-        self.notebook.add(self.settings_tab, text="⚙️ Настройки")
-        self.notebook.add(self.statistics_tab, text="📊 Статистика")  # Правильное имя вкладки
-        self.notebook.add(self.achievements_tab, text="🏆 Достижения")  # Правильное имя вкладки
+        self.notebook.add(self.encryption_tab, text="🔐 Шифрование")
+        self.create_batch_tab()
+        self.notebook.add(self.statistics_tab, text="📊 Статистика")
+        self.notebook.add(self.achievements_tab, text="🏆 Достижения")
         self.notebook.add(self.help_tab, text="❓ Помощь")
-        self.create_batch_tab()  # Создаем вкладку пакетной обработки
+        self.notebook.add(self.settings_tab, text="⚙️ Настройки")
 
         # Создаем тост
         self.create_toast()
@@ -13727,6 +14432,49 @@ class SteganographyUltimatePro:
         # Инициализируем вкладку анализа
         self.analysis_ui = AnalysisTab(content_frame, self)
 
+    def create_encryption_tab(self) -> None:
+        """Создает полнофункциональную вкладку шифрования и дешифрования"""
+        self.encryption_tab = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.notebook.add(self.encryption_tab, text="🔐 Шифрование")
+
+        # Основной контейнер с прокруткой
+        main_canvas = tk.Canvas(self.encryption_tab, bg=self.colors["bg"], highlightthickness=0)
+        v_scrollbar = ttk.Scrollbar(self.encryption_tab, orient="vertical", command=main_canvas.yview)
+        h_scrollbar = ttk.Scrollbar(self.encryption_tab, orient="horizontal", command=main_canvas.xview)
+        main_canvas.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+
+        scrollable_frame = ttk.Frame(main_canvas, style="Card.TFrame")
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+        )
+        main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+
+        # Размещение элементов
+        main_canvas.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
+        v_scrollbar.pack(side="right", fill="y")
+        h_scrollbar.pack(side="bottom", fill="x")
+
+        # Привязка колеса мыши
+        def _on_mousewheel(event):
+            main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Создаем содержимое
+        self._create_encryption_content(scrollable_frame)
+
+    def create_batch_tab(self):
+        """Создает вкладку пакетной обработки"""
+        self.batch_tab = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.notebook.add(self.batch_tab, text="📦 Пакетная обработка")
+
+        # Инициализация UI пакетной обработки
+        self.batch_ui = BatchProcessingUI(self.batch_tab, self)
+
+        # Обновляем SmartAssistant
+        self.smart_assistant = SmartAssistant(self)
+
     def create_settings_tab(self) -> None:
         self.settings_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.notebook.add(self.settings_tab, text="⚙️ Настройки")
@@ -13916,18 +14664,18 @@ class SteganographyUltimatePro:
 🌟 ØccultoNG Pro v{VERSION} • Made with ❤️ by {AUTHOR}
 📅 Сборка от: {BUILD_DATE}
 🧩 Что внутри?
-• Python 3.10+ — платформа приложения
-• Pillow — работа с изображениями (PNG/BMP/TIFF/TGA/JPG)
-• NumPy + Numba — быстрые битовые операции/индексация
-• SciPy (ndimage) — фильтры/карты стоимости для адаптивных методов
-• tkinter + tkinterdnd2 — UI и drag‑and‑drop
-• wave — чтение/запись PCM‑сэмплов для WAV‑LSB
+• Python 3.10+ - платформа приложения
+• Pillow - работа с изображениями (PNG/BMP/TIFF/TGA/JPG)
+• NumPy + Numba - быстрые битовые операции/индексация
+• SciPy (ndimage) - фильтры/карты стоимости для адаптивных методов
+• tkinter + tkinterdnd2 - UI и drag‑and‑drop
+• wave - чтение/запись PCM‑сэмплов для WAV‑LSB
 📦 Контейнеры: PNG • BMP • TIFF • TGA • JPG • WAV
-🛡 Методы: LSB • Adaptive‑Noise • AELSB(Hamming) • HILL‑CA • WAV LSB
-📜 Лицензия: MIT — используйте, модифицируйте, делитесь свободно.
+🛡 Методы: LSB • Adaptive‑Noise • AELSB(Hamming) • HILL‑CA • WAV LSB • JPEG DCT
+📜 Лицензия: MIT - используйте, модифицируйте, делитесь свободно.
 💡 Советы:
-• Для изображений — используйте lossless‑форматы (PNG/BMP/TIFF).
-• Для аудио — используйте несжатый WAV; любое перекодирование/сжатие может разрушить скрытые биты.
+• Для изображений - используйте lossless‑форматы (PNG/BMP/TIFF).
+• Для аудио - используйте несжатый WAV; любое перекодирование/сжатие может разрушить скрытые биты.
 • Регулярно создавайте резервные копии важных файлов.
 • Используйте историю для быстрого доступа к недавно использованным файлам.
 """
@@ -14353,10 +15101,11 @@ class SteganographyUltimatePro:
             ("2. Поддерживаемые методы", self.show_help_methods),
             ("3. Быстрый старт", self.show_help_quickstart),
             ("4. Пакетная обработка", self.show_help_batch),
-            ("5. Советы и рекомендации", self.show_help_tips),
-            ("6. Горячие клавиши", self.show_help_shortcuts),
-            ("7. Часто задаваемые вопросы", self.show_help_faq),
-            ("8. Техническая поддержка", self.show_help_support)
+            ("5. 🔐 Шифрование данных", self.show_help_encryption),
+            ("6. Советы и рекомендации", self.show_help_tips),
+            ("7. Горячие клавиши", self.show_help_shortcuts),
+            ("8. Часто задаваемые вопросы", self.show_help_faq),
+            ("9. Техническая поддержка", self.show_help_support)
         ]
 
         for i, (title, command) in enumerate(contents):
@@ -14455,7 +15204,7 @@ class SteganographyUltimatePro:
         help_text = f"""
     🎯 Добро пожаловать в ØccultoNG Pro v{VERSION}!
 
-    ØccultoNG Pro — это профессиональный инструмент для стеганографии,
+    ØccultoNG Pro - это профессиональный инструмент для стеганографии,
     позволяющий скрывать тексты и файлы внутри изображений и аудиофайлов
     без потерь, с автоматическим извлечением и проверкой целостности.
 
@@ -14469,13 +15218,13 @@ class SteganographyUltimatePro:
     • Поддержка плагинов и расширений
 
     📋 ОСНОВНЫЕ ВКЛАДКИ:
-    1. 📦 Скрыть данные — скрытие данных в одном контейнере
-    2. 🔍 Извлечь данные — извлечение скрытых данных
-    3. 📦 Пакетная обработка — одновременная обработка до 5 файлов
-    4. ⚙️ Настройки — настройка программы и темы
-    5. 📊 Статистика — просмотр статистики использования
-    6. 🏆 Достижения — ваши достижения в программе
-    7. ❓ Помощь — это окно с руководством
+    1. 📦 Скрыть данные - скрытие данных в одном контейнере
+    2. 🔍 Извлечь данные - извлечение скрытых данных
+    3. 📦 Пакетная обработка - одновременная обработка до 5 файлов
+    4. ⚙️ Настройки - настройка программы и темы
+    5. 📊 Статистика - просмотр статистики использования
+    6. 🏆 Достижения - ваши достижения в программе
+    7. ❓ Помощь - это окно с руководством
 
     💡 СОВЕТ: Начните с выбора вкладки "Скрыть данные" или "Извлечь данные"
     в верхней части окна. Для работы с несколькими файлами используйте
@@ -14510,7 +15259,7 @@ class SteganographyUltimatePro:
        • Выберите до 5 файлов-контейнеров
        • Укажите данные для скрытия (текст или файл)
        • Выберите метод и настройки
-       • Начните обработку — все файлы будут обработаны автоматически
+       • Начните обработку - все файлы будут обработаны автоматически
 
     2. 📥 ПАКЕТНОЕ ИЗВЛЕЧЕНИЕ:
        • Выберите до 5 стего-файлов
@@ -14525,7 +15274,7 @@ class SteganographyUltimatePro:
        • Определит тип возможных скрытых данных
 
     🎯 ПРЕИМУЩЕСТВА ПАКЕТНОЙ ОБРАБОТКИ:
-    • Экономия времени — не нужно обрабатывать каждый файл отдельно
+    • Экономия времени - не нужно обрабатывать каждый файл отдельно
     • Единые настройки для всех файлов
     • Автоматическое создание резервных копий
     • Подробный отчет о результатах
@@ -14545,10 +15294,10 @@ class SteganographyUltimatePro:
     5. Следите за прогрессом в статусной панели
 
     🔧 РЕШЕНИЕ ПРОБЛЕМ:
-    • Если кнопки остаются заблокированными — нажмите "Очистить все"
-    • Если обработка зависла — используйте кнопку "Остановить обработку"
-    • Если файлы не обрабатываются — проверьте формат и права доступа
-    • Для повторной обработки тех же файлов — очистите список и добавьте заново
+    • Если кнопки остаются заблокированными - нажмите "Очистить все"
+    • Если обработка зависла - используйте кнопку "Остановить обработку"
+    • Если файлы не обрабатываются - проверьте формат и права доступа
+    • Для повторной обработки тех же файлов - очистите список и добавьте заново
 
     📊 ЭКСПОРТ РЕЗУЛЬТАТОВ:
     После завершения обработки вы можете экспортировать результаты в JSON:
@@ -14570,10 +15319,10 @@ class SteganographyUltimatePro:
     7. Просмотрите или экспортируйте результаты
 
     🎮 ДОСТИЖЕНИЯ, связанные с пакетной обработкой:
-    • "Конвейер" — выполните первую пакетную операцию
-    • "Мультитаскинг" — обработайте 5 файлов одновременно
-    • "Эксперт по анализу" — проанализируйте 10 файлов
-    • "Массовое скрытие" — скройте данные в 3 разных типах контейнеров
+    • "Конвейер" - выполните первую пакетную операцию
+    • "Мультитаскинг" - обработайте 5 файлов одновременно
+    • "Эксперт по анализу" - проанализируйте 10 файлов
+    • "Массовое скрытие" - скройте данные в 3 разных типах контейнеров
     """
         self.display_help_text(help_text)
 
@@ -14620,8 +15369,10 @@ class SteganographyUltimatePro:
         """Показывает быстрый старт"""
         help_text = """
     🚀 БЫСТРЫЙ СТАРТ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     ОСНОВНАЯ РАБОТА:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     Скрыть данные в изображении:
     1. Перейдите на вкладку "📦 Скрыть данные"
@@ -14648,8 +15399,27 @@ class SteganographyUltimatePro:
     4. Дождитесь завершения операции
     5. Скопируйте или сохраните извлеченные данные
 
-    📦 ПАКЕТНАЯ ОБРАБОТКА (НОВОЕ!):
+    🔐 ШИФРОВАНИЕ ДАННЫХ:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    1. Перейдите на вкладку "🔐 Шифрование"
+    2. Выберите тип данных: текст или файл
+    3. Введите текст или выберите файл для шифрования
+    4. Выберите алгоритм (рекомендуется AES-256 GCM)
+    5. Введите надежный пароль (минимум 8 символов)
+    6. Нажмите "🔐 Зашифровать"
+    7. Сохраните результат в файл .ongcrypt
 
+    ДЕШИФРОВАНИЕ ДАННЫХ:
+    1. Перейдите на вкладку "🔐 Шифрование"
+    2. Вставьте зашифрованные данные или загрузите файл
+    3. Введите пароль
+    4. Нажмите "🔓 Расшифровать"
+    5. Скопируйте или сохраните результат
+
+    Подробнее о шифровании см. раздел "🔐 Шифрование данных" в содержании.
+    
+    📦 ПАКЕТНАЯ ОБРАБОТКА:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Пакетное скрытие (до 5 файлов):
     1. Перейдите на вкладку "📦 Пакетная обработка"
     2. Выберите вкладку "📤 Скрытие"
@@ -14675,7 +15445,7 @@ class SteganographyUltimatePro:
     5. Просмотрите результаты в поле ниже
 
     ⚡ ПРОДВИНУТЫЕ ВОЗМОЖНОСТИ:
-
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Интеллектуальный ассистент:
     • Программа анализирует ваши действия и дает советы
     • Автоматически рекомендует оптимальные методы
@@ -14699,6 +15469,7 @@ class SteganographyUltimatePro:
     • Создавайте резервные копии важных файлов
     • Экспортируйте результаты для отчетности
     • Используйте пакетную обработку для экономии времени
+
     """
         self.display_help_text(help_text)
 
@@ -14729,7 +15500,7 @@ class SteganographyUltimatePro:
     • Используйте одну и ту же папку для сохранения результатов
     • Экспортируйте результаты обработки для ведения учета
     • Ограничение в 5 файлов установлено для стабильности работы
-    • Если нужно обработать больше файлов — разбейте на несколько партий
+    • Если нужно обработать больше файлов - разбейте на несколько партий
 
     🔐 СОВЕТЫ ПО БЕЗОПАСНОСТИ:
     • Всегда используйте пароли для конфиденциальных данных
@@ -14784,74 +15555,74 @@ class SteganographyUltimatePro:
     ⌨️ ГОРЯЧИЕ КЛАВИШИ
 
     ОСНОВНЫЕ:
-    • F1 — Открыть помощь
-    • Esc — Отменить текущую операцию
-    • Ctrl+Enter — Выполнить основное действие на активной вкладке
-    • Ctrl+O — Выбрать контейнер (на активной вкладке)
-    • Ctrl+E — Извлечь данные
-    • Ctrl+S — Сохранить извлеченные данные
-    • Ctrl+L — Очистить текстовое поле
-    • Ctrl+T — Переключить тему
+    • F1 - Открыть помощь
+    • Esc - Отменить текущую операцию
+    • Ctrl+Enter - Выполнить основное действие на активной вкладке
+    • Ctrl+O - Выбрать контейнер (на активной вкладке)
+    • Ctrl+E - Извлечь данные
+    • Ctrl+S - Сохранить извлеченные данные
+    • Ctrl+L - Очистить текстовое поле
+    • Ctrl+T - Переключить тему
 
     НА ВКЛАДКЕ "СКРЫТЬ ДАННЫЕ":
-    • Ctrl+1 — Выбрать метод "Классический LSB"
-    • Ctrl+2 — Выбрать метод "Adaptive-Noise"
-    • Ctrl+3 — Выбрать метод "Adaptive-Edge-LSB"
-    • Ctrl+4 — Выбрать метод "HILL-CA"
-    • Ctrl+5 — Выбрать метод "WAV LSB"
-    • Ctrl+6 — Выбрать метод "JPEG DCT"
+    • Ctrl+1 - Выбрать метод "Классический LSB"
+    • Ctrl+2 - Выбрать метод "Adaptive-Noise"
+    • Ctrl+3 - Выбрать метод "Adaptive-Edge-LSB"
+    • Ctrl+4 - Выбрать метод "HILL-CA"
+    • Ctrl+5 - Выбрать метод "WAV LSB"
+    • Ctrl+6 - Выбрать метод "JPEG DCT"
 
     НА ВКЛАДКЕ "ИЗВЛЕЧЬ ДАННЫЕ":
-    • Ctrl+R — Обновить предпросмотр
-    • Ctrl+C — Копировать извлеченные данные
-    • Ctrl+H — Копировать хеш извлеченных данных
-    • Ctrl+F — Найти в извлеченных данных
+    • Ctrl+R - Обновить предпросмотр
+    • Ctrl+C - Копировать извлеченные данные
+    • Ctrl+H - Копировать хеш извлеченных данных
+    • Ctrl+F - Найти в извлеченных данных
 
     НА ВКЛАДКЕ "ПАКЕТНАЯ ОБРАБОТКА" (НОВОЕ!):
-    • Ctrl+B — Переключиться на вкладку пакетной обработки
-    • Ctrl+Shift+H — Быстрый доступ к пакетному скрытию
-    • Ctrl+Shift+E — Быстрый доступ к пакетному извлечению
-    • Ctrl+Shift+A — Быстрый доступ к пакетному анализу
-    • Ctrl+Shift+C — Очистить все списки в пакетной обработке
-    • Ctrl+Shift+X — Экспорт результатов пакетной обработки
+    • Ctrl+B - Переключиться на вкладку пакетной обработки
+    • Ctrl+Shift+H - Быстрый доступ к пакетному скрытию
+    • Ctrl+Shift+E - Быстрый доступ к пакетному извлечению
+    • Ctrl+Shift+A - Быстрый доступ к пакетному анализу
+    • Ctrl+Shift+C - Очистить все списки в пакетной обработке
+    • Ctrl+Shift+X - Экспорт результатов пакетной обработки
 
     ОБЩИЕ:
-    • Ctrl+Tab — Переключиться на следующую вкладку
-    • Ctrl+Shift+Tab — Переключиться на предыдущую вкладку
-    • Ctrl+, — Открыть настройки
-    • Ctrl+Q — Выйти из программы
-    • Ctrl+Shift+S — Открыть статистику
-    • Ctrl+Shift+D — Открыть достижения
+    • Ctrl+Tab - Переключиться на следующую вкладку
+    • Ctrl+Shift+Tab - Переключиться на предыдущую вкладку
+    • Ctrl+, - Открыть настройки
+    • Ctrl+Q - Выйти из программы
+    • Ctrl+Shift+S - Открыть статистику
+    • Ctrl+Shift+D - Открыть достижения
 
     РАБОТА С ФАЙЛАМИ:
-    • Ctrl+N — Создать новый проект
-    • Ctrl+O — Открыть файл
-    • Ctrl+Shift+O — Открыть несколько файлов (пакетная обработка)
-    • Ctrl+W — Закрыть текущий файл
-    • Ctrl+Shift+W — Закрыть все файлы
+    • Ctrl+N - Создать новый проект
+    • Ctrl+O - Открыть файл
+    • Ctrl+Shift+O - Открыть несколько файлов (пакетная обработка)
+    • Ctrl+W - Закрыть текущий файл
+    • Ctrl+Shift+W - Закрыть все файлы
 
     РЕДАКТИРОВАНИЕ:
-    • Ctrl+Z — Отменить
-    • Ctrl+Y — Повторить
-    • Ctrl+X — Вырезать
-    • Ctrl+C — Копировать
-    • Ctrl+V — Вставить
-    • Ctrl+A — Выделить все
-    • Ctrl+F — Найти
-    • Ctrl+H — Заменить
+    • Ctrl+Z - Отменить
+    • Ctrl+Y - Повторить
+    • Ctrl+X - Вырезать
+    • Ctrl+C - Копировать
+    • Ctrl+V - Вставить
+    • Ctrl+A - Выделить все
+    • Ctrl+F - Найти
+    • Ctrl+H - Заменить
 
     ПРОСМОТР:
-    • Ctrl++ — Увеличить масштаб
-    • Ctrl+- — Уменьшить масштаб
-    • Ctrl+0 — Сбросить масштаб
-    • F11 — Полноэкранный режим
-    • Alt+Enter — Свойства файла
+    • Ctrl++ - Увеличить масштаб
+    • Ctrl+- - Уменьшить масштаб
+    • Ctrl+0 - Сбросить масштаб
+    • F11 - Полноэкранный режим
+    • Alt+Enter - Свойства файла
 
     СИСТЕМНЫЕ:
-    • Alt+F4 — Закрыть программу
-    • Alt+Tab — Переключение между приложениями
-    • Win+D — Показать рабочий стол
-    • Win+E — Открыть проводник
+    • Alt+F4 - Закрыть программу
+    • Alt+Tab - Переключение между приложениями
+    • Win+D - Показать рабочий стол
+    • Win+E - Открыть проводник
 
     💡 СОВЕТ: Горячие клавиши можно изменить в настройках программы.
     """
@@ -14911,7 +15682,7 @@ class SteganographyUltimatePro:
 
     Q: Что делать, если кнопки пакетной обработки заблокировались?
     A: Нажмите кнопку "Очистить все" или переключитесь на другую
-       вкладку и обратно. Если не помогает — перезапустите программу.
+       вкладку и обратно. Если не помогает - перезапустите программу.
 
     Q: Как обработать больше 5 файлов?
     A: Разделите файлы на группы по 5 штук и обработайте каждую
@@ -14993,6 +15764,464 @@ class SteganographyUltimatePro:
 🙏 Благодарим за использование ØccultoNG Pro!
 Ваше мнение помогает нам улучшать продукт.
 """
+        self.display_help_text(help_text)
+
+    def show_help_encryption(self):
+        """Показывает подробную инструкцию по использованию вкладки шифрования"""
+        help_text = f"""
+    🔐 ПОДРОБНОЕ РУКОВОДСТВО ПО ШИФРОВАНИЮ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ОБЩАЯ ИНФОРМАЦИЯ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Вкладка "🔐 Шифрование" предоставляет профессиональные инструменты для
+    защиты ваших данных с использованием современных криптографических алгоритмов.
+
+    ОСНОВНЫЕ ВОЗМОЖНОСТИ:
+    • Шифрование текста и файлов
+    • Дешифрование зашифрованных данных
+    • Поддержка 8 современных алгоритмов шифрования
+    • Автоматическое определение алгоритма при загрузке
+    • Сохранение зашифрованных данных в формате .ongcrypt
+    • Подробная документация по каждому алгоритму
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ШИФРОВАНИЕ ДАННЫХ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ШАГ 1: ВЫБОР ТИПА ДАННЫХ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    В левой колонке выберите тип данных для шифрования:
+
+    1️⃣ ТЕКСТ (по умолчанию)
+    • Нажмите радиокнопку "Текст"
+    • Введите или вставьте текст в поле ввода
+    • Используйте кнопки на панели инструментов:
+      • 📋 Вставить - вставить из буфера обмена (Ctrl+V)
+      • 🗑️ Очистить - очистить поле ввода
+      • 📝 Шаблоны - использовать готовые шаблоны текста
+
+    2️⃣ ФАЙЛ
+    • Нажмите радиокнопку "Файл"
+    • Нажмите кнопку "📂 Выбрать..."
+    • Выберите файл любого формата (до 100 МБ)
+    • Информация о файле отобразится под полем выбора
+
+    ШАГ 2: ВЫБОР АЛГОРИТМА ШИФРОВАНИЯ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Из выпадающего списка выберите алгоритм шифрования:
+
+    РЕКОМЕНДУЕМЫЕ АЛГОРИТМЫ (высокая безопасность):
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    🟢 AES-256 GCM (рекомендуется по умолчанию)
+    • Самый безопасный вариант для большинства задач
+    • Встроенная аутентификация данных
+    • Высокая скорость на современных процессорах
+    • Используется в банковских и военных системах
+
+    🟢 AES-256 CBC
+    • Стандартный алгоритм, широко используемый в индустрии
+    • Хороший баланс между безопасностью и производительностью
+    • Требует надежного пароля
+
+    🟢 ChaCha20-Poly1305
+    • Отличный выбор для мобильных устройств
+    • Высокая скорость на CPU без аппаратного ускорения AES
+    • Используется в TLS 1.3 и современных мессенджерах
+
+    ДРУГИЕ АЛГОРИТМЫ:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    🟡 AES-256 CTR
+    • Потоковый режим, поддерживает параллельную обработку
+    • Очень высокая скорость
+    • Требует уникального nonce для каждого шифрования
+
+    🟡 AES-256 OFB
+    • Устаревший режим, не рекомендуется для новых систем
+    • Используйте только для совместимости со старыми системами
+
+    🔴 XOR (ТОЛЬКО ДЛЯ ОБУЧЕНИЯ!)
+    • НЕ ОБЕСПЕЧИВАЕТ РЕАЛЬНУЮ БЕЗОПАСНОСТЬ
+    • Тривиально взламывается
+    • Используйте только для образовательных целей
+
+    🔴 Base64 (НЕ ШИФРОВАНИЕ!)
+    • Это просто кодирование, НЕ шифрование
+    • Данные легко декодируются без пароля
+    • Используйте только для передачи бинарных данных в текстовых протоколах
+
+    ШАГ 3: ВВОД ПАРОЛЯ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Для надежных алгоритмов (AES, ChaCha20) требуется пароль:
+
+    ТРЕБОВАНИЯ К ПАРОЛЮ:
+    • Минимум 8 символов (рекомендуется 12+)
+    • Используйте смешанные регистры (заглавные и строчные буквы)
+    • Добавьте цифры и специальные символы (!@#$%^&*)
+    • Избегайте словарных слов и личной информации
+    • Используйте уникальный пароль для каждой операции
+
+    ПРИМЕРЫ ХОРОШИХ ПАРОЛЕЙ:
+    • J7$mP9#kL2@nQ5
+    • BlueDragon42!MountainSky
+    • 9T$hK3pL8@wN5vX
+
+    ПРИМЕРЫ ПЛОХИХ ПАРОЛЕЙ:
+    • password123 (слишком простой)
+    • qwerty (словарное слово)
+    • 12345678 (только цифры)
+    • admin (слишком короткий)
+
+    ПАНЕЛЬ УПРАВЛЕНИЯ ПАРОЛЕМ:
+    • Поле ввода пароля скрывает символы (●●●●●)
+    • Чекбокс "Показать" позволяет временно увидеть пароль
+    • ВНИМАНИЕ: никогда не показывайте пароль на публике!
+
+    ШАГ 4: ВЫПОЛНЕНИЕ ШИФРОВАНИЯ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Нажмите кнопку "🔐 Зашифровать"
+
+    ЧТО ПРОИСХОДИТ:
+    1. Программа проверяет корректность введенных данных
+    2. Генерируется случайная "соль" (salt) для защиты от атак по радужным таблицам
+    3. Из пароля с помощью PBKDF2-HMAC-SHA256 (600 000 итераций) генерируется 256-битный ключ
+    4. Данные шифруются выбранным алгоритмом
+    5. Для некоторых алгоритмов генерируется контрольная сумма или тег аутентификации
+    6. Результат сериализуется в формат JSON с метаданными
+
+    РЕЗУЛЬТАТ:
+    • Зашифрованные данные отображаются в нижнем поле результата
+    • Данные представлены в формате JSON с Base64-кодированием бинарных частей
+    • Формат включает: алгоритм, версию, временные метки, параметры шифрования
+
+    ШАГ 5: СОХРАНЕНИЕ ЗАШИФРОВАННЫХ ДАННЫХ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Нажмите кнопку "💾 Сохранить"
+
+    ВАРИАНТЫ СОХРАНЕНИЯ:
+    1️⃣ Формат .ongcrypt (РЕКОМЕНДУЕТСЯ)
+    • Специальный формат ØccultoNG Pro
+    • Включает магические байты для идентификации
+    • Поддерживает все метаданные и параметры
+    • Автоматически распознается при загрузке
+
+    2️⃣ Формат JSON
+    • Стандартный текстовый формат
+    • Может быть открыт в любом текстовом редакторе
+    • Подходит для передачи через текстовые каналы
+
+    ПРИМЕР СОДЕРЖИМОГО ФАЙЛА .ongcrypt:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    {{
+      "algorithm": "aes_256_gcm",
+      "version": "1.0",
+      "ciphertext": "U2FsdGVkX1+...",
+      "salt": "aB3cD4eF5gH6...",
+      "nonce": "iJ7kL8mN9oP0...",
+      "tag": "qR2sT3uV4wX5...",
+      "timestamp": "2026-02-11 14:30:45",
+      "format": "occultong_encrypted_v1"
+    }}
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ДЕШИФРОВАНИЕ ДАННЫХ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ШАГ 1: ЗАГРУЗКА ЗАШИФРОВАННЫХ ДАННЫХ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    В центральной колонке "🔓 Дешифрование данных":
+
+    СПОСОБ 1: ВСТАВКА ИЗ БУФЕРА ОБМЕНА
+    • Скопируйте зашифрованные данные (в формате JSON)
+    • Нажмите кнопку "📋 Вставить" на панели инструментов
+    • ИЛИ используйте сочетание клавиш Ctrl+V
+
+    СПОСОБ 2: ЗАГРУЗКА ИЗ ФАЙЛА
+    • Нажмите кнопку "📂 Загрузить"
+    • Выберите файл .ongcrypt или .json
+    • Данные автоматически загрузятся в поле ввода
+
+    СПОСОБ 3: РУЧНОЙ ВВОД
+    • Скопируйте содержимое файла .ongcrypt
+    • Вставьте в поле ввода вручную
+
+    АВТОМАТИЧЕСКОЕ ОПРЕДЕЛЕНИЕ АЛГОРИТМА:
+    • Программа автоматически определяет алгоритм из метаданных
+    • Информация об алгоритме отображается в документации справа
+    • Если формат не распознан - будет показана ошибка
+
+    ШАГ 2: ВВОД ПАРОЛЯ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    • Введите тот же пароль, который использовался для шифрования
+    • Используйте чекбокс "Показать" для проверки правильности ввода
+    • ВНИМАНИЕ: при неверном пароле дешифрование невозможно!
+
+    ШАГ 3: ВЫПОЛНЕНИЕ ДЕШИФРОВАНИЯ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Нажмите кнопку "🔓 Расшифровать"
+
+    ПРОЦЕСС ДЕШИФРОВАНИЯ:
+    1. Программа проверяет формат данных
+    2. Извлекает метаданные (алгоритм, параметры)
+    3. Восстанавливает ключ из пароля и соли
+    4. Проверяет целостность данных (контрольная сумма или тег)
+    5. Расшифровывает данные
+    6. Отображает результат
+
+    ВОЗМОЖНЫЕ ОШИБКИ:
+    • "Неверный пароль" - пароль не совпадает с использованным при шифровании
+    • "Поврежденные данные" - файл был изменен после шифрования
+    • "Несовместимый алгоритм" - алгоритм не поддерживается текущей версией
+
+    ШАГ 4: РАБОТА С РЕЗУЛЬТАТОМ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Результат отображается в нижнем поле:
+
+    ЕСЛИ РЕЗУЛЬТАТ - ТЕКСТ:
+    • Текст отображается в читаемом виде
+    • Доступны кнопки:
+      • 📋 Копировать - скопировать в буфер обмена
+      • 💾 Сохранить - сохранить в файл .txt или .json
+
+    ЕСЛИ РЕЗУЛЬТАТ - БИНАРНЫЕ ДАННЫЕ:
+    • Отображается информация о типе файла:
+      • Тип данных (изображение, аудио, архив и т.д.)
+      • Размер файла
+      • Хеш SHA-256 для проверки целостности
+    • Доступны кнопки:
+      • 💾 Сохранить - сохранить в файл с правильным расширением
+      • 🗂 Открыть файл - открыть в приложении по умолчанию
+      • 🔑 Копировать хеш - скопировать хеш для проверки
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ПОДРОБНАЯ ДОКУМЕНТАЦИЯ ПО АЛГОРИТМАМ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    В правой колонке отображается подробная документация по выбранному алгоритму:
+
+    ИНФОРМАЦИЯ ВКЛЮЧАЕТ:
+    1. Полное название алгоритма
+    2. Уровень безопасности (цветовая индикация)
+    3. Подробное описание принципа работы
+    4. Рекомендуемые сценарии использования
+    5. Ограничения и предостережения
+    6. Технические детали:
+       • Ключевая производная функция (KDF)
+       • Размер инициализирующего вектора (IV/nonce)
+       • Аутентификация данных
+       • Производительность
+
+    ЦВЕТОВАЯ ИНДИКАЦИЯ БЕЗОПАСНОСТИ:
+    • ✅ Зеленый - Очень высокий уровень безопасности (AES-256 GCM, ChaCha20-Poly1305)
+    • 🟢 Синий - Высокий уровень безопасности (AES-256 CBC/CTR, ChaCha20)
+    • 🟡 Желтый - Средний уровень безопасности (AES-256 OFB)
+    • ⚠️ Оранжевый - Низкий уровень безопасности
+    • ❌ Красный - НЕ БЕЗОПАСЕН (XOR, Base64)
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ПРАКТИЧЕСКИЕ ПРИМЕРЫ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ПРИМЕР 1: ШИФРОВАНИЕ КОНФИДЕНЦИАЛЬНОГО ТЕКСТА
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    1. Выберите тип данных: "Текст"
+    2. Введите текст: "Код доступа к серверу: XYZ-789-ABC"
+    3. Выберите алгоритм: "AES-256 GCM"
+    4. Введите надежный пароль: "S3cur3P@ss!2026"
+    5. Нажмите "🔐 Зашифровать"
+    6. Сохраните результат в файл "secret.ongcrypt"
+    7. Удалите исходный текст из поля ввода
+
+    ПРИМЕР 2: ШИФРОВАНИЕ ФАЙЛА С ПАРОЛЯМИ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    1. Выберите тип данных: "Файл"
+    2. Выберите файл: "passwords.xlsx"
+    3. Выберите алгоритм: "ChaCha20-Poly1305"
+    4. Введите пароль: "MyP@ssw0rdM@n@g3r!2026"
+    5. Нажмите "🔐 Зашифровать"
+    6. Сохраните в "passwords.ongcrypt"
+    7. Храните пароль в надежном менеджере паролей
+
+    ПРИМЕР 3: ДЕШИФРОВАНИЕ ПОЛУЧЕННЫХ ДАННЫХ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    1. Получите файл "message.ongcrypt" от отправителя
+    2. Нажмите "📂 Загрузить" и выберите файл
+    3. Введите пароль, полученный от отправителя (безопасным каналом!)
+    4. Нажмите "🔓 Расшифровать"
+    5. Проверьте результат
+    6. Скопируйте или сохраните расшифрованный текст
+
+    ПРИМЕР 4: ПЕРЕДАЧА ЗАШИФРОВАННЫХ ДАННЫХ ЧЕРЕЗ EMAIL
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    1. Зашифруйте текст с помощью AES-256 GCM
+    2. Скопируйте результат (в формате JSON)
+    3. Вставьте в письмо как обычный текст
+    4. Отправьте письмо получателю
+    5. Отправьте пароль отдельным каналом связи (мессенджер, звонок)
+    6. Получатель вставит текст в поле дешифрования и введет пароль
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    СОВЕТЫ ПО БЕЗОПАСНОСТИ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ✅ РЕКОМЕНДУЕТСЯ:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    1. Используйте только надежные алгоритмы (AES-256 GCM, ChaCha20-Poly1305)
+    2. Создавайте уникальные надежные пароли для каждой операции
+    3. Храните пароли в специализированных менеджерах паролей
+    4. Регулярно меняйте пароли для критически важных данных
+    5. Используйте двухфакторную аутентификацию при передаче паролей
+    6. Проверяйте целостность расшифрованных данных по хешу
+    7. Создавайте резервные копии зашифрованных файлов
+    8. Тестируйте процесс дешифрования сразу после шифрования
+
+    ❌ НЕ РЕКОМЕНДУЕТСЯ:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    1. Использовать простые или повторяющиеся пароли
+    2. Передавать пароль тем же каналом, что и зашифрованные данные
+    3. Использовать алгоритмы XOR и Base64 для защиты реальных данных
+    4. Хранить пароли в открытом виде на компьютере
+    5. Использовать один пароль для разных наборов данных
+    6. Забывать проверять результат дешифрования
+    7. Использовать устаревшие алгоритмы (AES-OFB) для новых данных
+    8. Игнорировать предупреждения о низком уровне безопасности
+
+    ⚠️ КРИТИЧЕСКИЕ ПРЕДУПРЕЖДЕНИЯ:
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    • При потере пароля восстановление данных НЕВОЗМОЖНО!
+    • Никогда не используйте XOR для защиты конфиденциальных данных
+    • Base64 - это кодирование, НЕ шифрование
+    • Даже самый надежный алгоритм бесполезен при слабом пароле
+    • Всегда проверяйте целостность расшифрованных данных
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    РЕШЕНИЕ ПРОБЛЕМ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ПРОБЛЕМА: "Неверный пароль"
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    РЕШЕНИЕ:
+    1. Проверьте раскладку клавиатуры (русская/английская)
+    2. Проверьте регистр символов (Caps Lock)
+    3. Проверьте наличие пробелов в начале или конце пароля
+    4. Убедитесь, что используете правильный пароль
+    5. Если пароль утерян - данные восстановить невозможно
+
+    ПРОБЛЕМА: "Поврежденные данные"
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    РЕШЕНИЕ:
+    1. Проверьте, не был ли файл изменен после шифрования
+    2. Убедитесь, что файл загружен полностью (проверьте размер)
+    3. Попробуйте загрузить файл заново
+    4. Проверьте контрольную сумму файла (если доступна)
+
+    ПРОБЛЕМА: "Несовместимый алгоритм"
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    РЕШЕНИЕ:
+    1. Убедитесь, что используете последнюю версию программы
+    2. Проверьте формат файла (должен быть .ongcrypt или JSON)
+    3. Если файл создан в другой программе - конвертируйте формат
+
+    ПРОБЛЕМА: "Данные слишком большие"
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    РЕШЕНИЕ:
+    1. Разбейте большой файл на части поменьше
+    2. Используйте архиватор для сжатия перед шифрованием
+    3. Для очень больших файлов используйте специализированные инструменты
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ГОРЯЧИЕ КЛАВИШИ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    • Ctrl+K - Переключиться на вкладку шифрования
+    • Ctrl+V - Вставить данные в поле шифрования/дешифрования
+    • Ctrl+C - Скопировать результат дешифрования
+    • Ctrl+S - Сохранить результат
+    • Ctrl+E - Начать дешифрование
+    • Enter - Выполнить шифрование (когда фокус на кнопке)
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ЧАСТО ЗАДАВАЕМЫЕ ВОПРОСЫ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ❓ Можно ли восстановить данные без пароля?
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НЕТ. Современные алгоритмы шифрования (AES-256, ChaCha20) криптографически
+    стойкие. Без правильного пароля восстановление данных вычислительно невозможно,
+    даже с использованием суперкомпьютеров.
+
+    ❓ Какой алгоритм самый безопасный?
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    На текущий момент наиболее безопасными являются:
+    • AES-256 GCM - для большинства задач
+    • ChaCha20-Poly1305 - для мобильных устройств и систем без аппаратного ускорения AES
+
+    Оба алгоритма обеспечивают 256-битный уровень безопасности и встроенную
+    аутентификацию данных.
+
+    ❓ Можно ли использовать один пароль для нескольких файлов?
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ТЕОРЕТИЧЕСКИ можно, но это снижает безопасность. Рекомендуется использовать
+    уникальный пароль для каждого набора данных. Если нужно зашифровать много файлов,
+    используйте менеджер паролей для генерации и хранения уникальных паролей.
+
+    ❓ Что такое "соль" (salt) и зачем она нужна?
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Соль - это случайные данные, добавляемые к паролю перед генерацией ключа.
+    Она предотвращает атаки по радужным таблицам и гарантирует, что даже при
+    использовании одинаковых паролей будут сгенерированы разные ключи.
+
+    ❓ Почему нужен такой сложный пароль?
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Длина и сложность пароля напрямую влияют на время, необходимое для взлома
+    методом перебора (brute force). Пароль из 8 случайных символов может быть
+    взломан за часы/дни, а пароль из 12+ символов со смешанными регистрами,
+    цифрами и символами - за миллионы лет.
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ТЕХНИЧЕСКИЕ ДЕТАЛИ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ИСПОЛЬЗУЕМЫЕ СТАНДАРТЫ:
+    • Криптография: библиотека `cryptography` (Python)
+    • Алгоритмы: реализации соответствуют стандартам NIST и IETF
+    • KDF: PBKDF2-HMAC-SHA256 с 600 000 итераций
+    • Формат: собственный формат с поддержкой версионирования
+
+    СИЛА КЛЮЧЕЙ:
+    • AES-256: 256-битный ключ (2^256 возможных комбинаций)
+    • ChaCha20: 256-битный ключ
+    • Соль: 128 бит случайных данных
+
+    ЗАЩИТА ОТ АТАК:
+    • Атаки по времени: защищено сравнением через secrets.compare_digest()
+    • Атаки по памяти: ключи очищаются после использования
+    • Атаки по радужным таблицам: защищено использованием соли
+    • Атаки повторного воспроизведения: защищено использованием nonce/IV
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    ЗАКЛЮЧЕНИЕ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Вкладка шифрования предоставляет профессиональные инструменты для защиты
+    ваших данных. Следуя рекомендациям из этого руководства, вы сможете
+    обеспечить высокий уровень безопасности вашей информации.
+
+    ПОМНИТЕ:
+    • Безопасность = Надежный алгоритм + Надежный пароль + Правильное использование
+    • Никогда не экономьте на безопасности паролей
+    • Регулярно тестируйте процесс дешифрования
+    • Храните пароли отдельно от зашифрованных данных
+
+    Успешного шифрования! 🔐
+    """
         self.display_help_text(help_text)
 
     def display_help_text(self, text):
@@ -15967,6 +17196,1051 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         except Exception as e:
             target_label.configure(image='', text=f'❌ Ошибка: {e}')
             target_label.image = None
+
+    def _create_encryption_content(self, parent: ttk.Frame) -> None:
+        """Создает содержимое вкладки шифрования с оптимизированным интерфейсом и подробной документацией"""
+        # Заголовок вкладки
+        header_frame = ttk.Frame(parent, style="Card.TFrame")
+        header_frame.pack(fill=tk.X, padx=20, pady=(20, 15))
+
+        ttk.Label(
+            header_frame,
+            text="🔐 Продвинутое шифрование и дешифрование",
+            font=("Segoe UI Variable Display", 24, "bold"),
+            foreground=self.colors["accent"],
+            style="Title.TLabel"
+        ).pack(side=tk.LEFT)
+
+        # Основной контент с тремя колонками
+        content_frame = ttk.Frame(parent, style="Card.TFrame")
+        content_frame.pack(fill=tk.BOTH, expand=True, padx=20, pady=(0, 20))
+
+        # Настройка пропорций колонок: шифрование (2) | дешифрование (2) | документация (1)
+        content_frame.grid_columnconfigure(0, weight=2)
+        content_frame.grid_columnconfigure(1, weight=2)
+        content_frame.grid_columnconfigure(2, weight=1)
+        content_frame.grid_rowconfigure(0, weight=1)
+
+        # === ЛЕВАЯ КОЛОНКА: ШИФРОВАНИЕ ===
+        encrypt_frame = ttk.LabelFrame(
+            content_frame,
+            text="🔒 Шифрование данных",
+            padding=15,
+            style="Card.TLabelframe"
+        )
+        encrypt_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+
+        # Тип данных для шифрования
+        data_type_frame = ttk.Frame(encrypt_frame, style="Card.TFrame")
+        data_type_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(data_type_frame, text="Тип данных:", style="TLabel").pack(side=tk.LEFT)
+
+        self.encrypt_data_type = tk.StringVar(value="text")
+        ttk.Radiobutton(
+            data_type_frame,
+            text="Текст",
+            variable=self.encrypt_data_type,
+            value="text",
+            command=self._toggle_encrypt_input,
+            style="TRadiobutton"
+        ).pack(side=tk.LEFT, padx=(10, 15))
+
+        ttk.Radiobutton(
+            data_type_frame,
+            text="Файл",
+            variable=self.encrypt_data_type,
+            value="file",
+            command=self._toggle_encrypt_input,
+            style="TRadiobutton"
+        ).pack(side=tk.LEFT)
+
+        # Ввод текста
+        self.encrypt_text_frame = ttk.Frame(encrypt_frame, style="Card.TFrame")
+        self.encrypt_text_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        ttk.Label(
+            self.encrypt_text_frame,
+            text="Введите текст для шифрования:",
+            style="Secondary.TLabel"
+        ).pack(anchor="w", pady=(0, 5))
+
+        # Панель инструментов текста
+        text_toolbar = ttk.Frame(self.encrypt_text_frame, style="Card.TFrame")
+        text_toolbar.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Button(
+            text_toolbar,
+            text="📋 Вставить",
+            style="IconButton.TButton",
+            command=self._paste_to_encrypt_text
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        ttk.Button(
+            text_toolbar,
+            text="🗑️ Очистить",
+            style="IconButton.TButton",
+            command=lambda: self.encrypt_text_input.delete("1.0", tk.END)
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        self.encrypt_text_input = scrolledtext.ScrolledText(
+            self.encrypt_text_frame,
+            height=6,
+            font=("Consolas", 10),
+            wrap=tk.WORD,
+            bg=self.colors["card"],
+            fg=self.colors["text"],
+            insertbackground=self.colors["fg"],
+            selectbackground=self.colors["accent"],
+            selectforeground="#ffffff"
+        )
+        self.encrypt_text_input.pack(fill=tk.BOTH, expand=True)
+
+        # Выбор файла
+        self.encrypt_file_frame = ttk.Frame(encrypt_frame, style="Card.TFrame")
+        self.encrypt_file_frame.pack(fill=tk.X, pady=(0, 10))
+        self.encrypt_file_frame.pack_forget()
+
+        file_input_frame = ttk.Frame(self.encrypt_file_frame, style="Card.TFrame")
+        file_input_frame.pack(fill=tk.X)
+
+        ttk.Label(file_input_frame, text="Файл для шифрования:", style="TLabel").pack(side=tk.LEFT)
+
+        self.encrypt_file_path = tk.StringVar()
+        file_entry = ttk.Entry(
+            file_input_frame,
+            textvariable=self.encrypt_file_path,
+            state='readonly',
+            style="TEntry"
+        )
+        file_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        ttk.Button(
+            file_input_frame,
+            text="📂 Выбрать...",
+            command=self._select_encrypt_file,
+            style="IconButton.TButton"
+        ).pack(side=tk.LEFT, padx=(5, 0))
+
+        # Выбор алгоритма с цветовой индикацией безопасности
+        algorithm_frame = ttk.Frame(encrypt_frame, style="Card.TFrame")
+        algorithm_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(algorithm_frame, text="Алгоритм шифрования:", style="TLabel").pack(side=tk.LEFT)
+
+        self.encrypt_algorithm = tk.StringVar(value="aes_256_gcm")
+        algorithm_combo = ttk.Combobox(
+            algorithm_frame,
+            textvariable=self.encrypt_algorithm,
+            values=list(EncryptionManager.SUPPORTED_ALGORITHMS.keys()),
+            state="readonly",
+            width=25,
+            style="TCombobox"
+        )
+        algorithm_combo.pack(side=tk.LEFT, padx=5)
+        algorithm_combo.bind("<<ComboboxSelected>>", self._update_encrypt_params_and_docs)
+
+        # Параметры шифрования
+        self.encrypt_params_frame = ttk.LabelFrame(
+            encrypt_frame,
+            text="Параметры шифрования",
+            padding=10,
+            style="Card.TLabelframe"
+        )
+        self.encrypt_params_frame.pack(fill=tk.X, pady=(0, 15))
+
+        # Пароль
+        password_frame = ttk.Frame(self.encrypt_params_frame, style="Card.TFrame")
+        password_frame.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Label(password_frame, text="Пароль:", style="TLabel").pack(side=tk.LEFT)
+
+        self.encrypt_password = tk.StringVar()
+        self.encrypt_password_entry = ttk.Entry(
+            password_frame,
+            textvariable=self.encrypt_password,
+            show="●",
+            style="TEntry"
+        )
+        self.encrypt_password_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        self.encrypt_show_password = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            password_frame,
+            text="Показать",
+            variable=self.encrypt_show_password,
+            command=self._toggle_encrypt_password_visibility,
+            style="TCheckbutton"
+        ).pack(side=tk.LEFT, padx=(5, 0))
+
+        # Кнопки действий
+        button_frame = ttk.Frame(encrypt_frame, style="Card.TFrame")
+        button_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(
+            button_frame,
+            text="🔐 Зашифровать",
+            style="Accent.TButton",
+            command=self._start_encryption
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        ttk.Button(
+            button_frame,
+            text="💾 Сохранить",
+            style="TButton",
+            command=self._save_encrypted_data
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # Результат шифрования
+        result_frame = ttk.LabelFrame(
+            encrypt_frame,
+            text="Результат шифрования",
+            padding=10,
+            style="Card.TLabelframe"
+        )
+        result_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.encrypt_result = scrolledtext.ScrolledText(
+            result_frame,
+            height=8,
+            font=("Consolas", 9),
+            wrap=tk.WORD,
+            state='disabled',
+            bg=self.colors["card"],
+            fg=self.colors["text"]
+        )
+        self.encrypt_result.pack(fill=tk.BOTH, expand=True)
+
+        # === ЦЕНТРАЛЬНАЯ КОЛОНКА: ДЕШИФРОВАНИЕ ===
+        decrypt_frame = ttk.LabelFrame(
+            content_frame,
+            text="🔓 Дешифрование данных",
+            padding=15,
+            style="Card.TLabelframe"
+        )
+        decrypt_frame.grid(row=0, column=1, sticky="nsew", padx=(10, 10))
+
+        # Ввод зашифрованных данных
+        ttk.Label(
+            decrypt_frame,
+            text="Зашифрованные данные:",
+            style="Secondary.TLabel"
+        ).pack(anchor="w", pady=(0, 5))
+
+        # Панель инструментов дешифрования
+        decrypt_toolbar = ttk.Frame(decrypt_frame, style="Card.TFrame")
+        decrypt_toolbar.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Button(
+            decrypt_toolbar,
+            text="📋 Вставить",
+            style="IconButton.TButton",
+            command=self._paste_to_decrypt_input
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        ttk.Button(
+            decrypt_toolbar,
+            text="📂 Загрузить",
+            style="IconButton.TButton",
+            command=self._load_encrypted_file
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        ttk.Button(
+            decrypt_toolbar,
+            text="🗑️ Очистить",
+            style="IconButton.TButton",
+            command=lambda: self.decrypt_input.delete("1.0", tk.END)
+        ).pack(side=tk.LEFT, padx=(0, 5))
+
+        self.decrypt_input = scrolledtext.ScrolledText(
+            decrypt_frame,
+            height=10,
+            font=("Consolas", 10),
+            wrap=tk.WORD,
+            bg=self.colors["card"],
+            fg=self.colors["text"],
+            insertbackground=self.colors["fg"],
+            selectbackground=self.colors["accent"],
+            selectforeground="#ffffff"
+        )
+        self.decrypt_input.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        # Пароль для дешифрования
+        decrypt_password_frame = ttk.Frame(decrypt_frame, style="Card.TFrame")
+        decrypt_password_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(decrypt_password_frame, text="Пароль:", style="TLabel").pack(side=tk.LEFT)
+
+        self.decrypt_password = tk.StringVar()
+        self.decrypt_password_entry = ttk.Entry(
+            decrypt_password_frame,
+            textvariable=self.decrypt_password,
+            show="●",
+            style="TEntry"
+        )
+        self.decrypt_password_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+        self.decrypt_show_password = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            decrypt_password_frame,
+            text="Показать",
+            variable=self.decrypt_show_password,
+            command=self._toggle_decrypt_password_visibility,
+            style="TCheckbutton"
+        ).pack(side=tk.LEFT, padx=(5, 0))
+
+        # Результат дешифрования
+        result_frame = ttk.LabelFrame(
+            decrypt_frame,
+            text="Результат дешифрования",
+            padding=10,
+            style="Card.TLabelframe"
+        )
+        result_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+
+        self.decrypt_result = scrolledtext.ScrolledText(
+            result_frame,
+            height=8,
+            font=("Consolas", 10),
+            wrap=tk.WORD,
+            state='disabled',
+            bg=self.colors["card"],
+            fg=self.colors["text"]
+        )
+        self.decrypt_result.pack(fill=tk.BOTH, expand=True)
+
+        # Кнопки действий
+        button_frame = ttk.Frame(decrypt_frame, style="Card.TFrame")
+        button_frame.pack(fill=tk.X, pady=(10, 0))
+
+        ttk.Button(
+            button_frame,
+            text="🔓 Расшифровать",
+            style="Accent.TButton",
+            command=self._start_decryption
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        ttk.Button(
+            button_frame,
+            text="📋 Копировать",
+            style="TButton",
+            command=self._copy_decrypt_result
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        ttk.Button(
+            button_frame,
+            text="💾 Сохранить",
+            style="TButton",
+            command=self._save_decrypt_result
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # === ПРАВАЯ КОЛОНКА: ДОКУМЕНТАЦИЯ (УМЕНЬШЕНА ПО ШИРИНЕ) ===
+        docs_frame = ttk.LabelFrame(
+            content_frame,
+            text="📚 Детальная документация",
+            padding=15,
+            style="Card.TLabelframe"
+        )
+        docs_frame.grid(row=0, column=2, sticky="nsew", padx=(10, 0))
+
+        # Заголовок документации
+        self.docs_title = ttk.Label(
+            docs_frame,
+            text="Выберите алгоритм для просмотра документации",
+            font=("Segoe UI", 14, "bold"),
+            style="TLabel"
+        )
+        self.docs_title.pack(anchor="w", pady=(0, 10))
+
+        # Фрейм для содержимого документации с прокруткой
+        docs_canvas = tk.Canvas(docs_frame, bg=self.colors["card"], highlightthickness=0)
+        docs_scrollbar = ttk.Scrollbar(docs_frame, orient="vertical", command=docs_canvas.yview)
+        docs_scrollable = ttk.Frame(docs_canvas, style="Card.TFrame")
+
+        docs_scrollable.bind(
+            "<Configure>",
+            lambda e: docs_canvas.configure(scrollregion=docs_canvas.bbox("all"))
+        )
+
+        docs_canvas.create_window((0, 0), window=docs_scrollable, anchor="nw")
+        docs_canvas.configure(yscrollcommand=docs_scrollbar.set)
+
+        # Размещение канваса и скроллбара
+        docs_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        docs_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Уровень безопасности
+        self.docs_security_label = ttk.Label(
+            docs_scrollable,
+            text="Уровень безопасности: ",
+            font=("Segoe UI", 11, "bold"),
+            style="Secondary.TLabel"
+        )
+        self.docs_security_label.pack(anchor="w", pady=(0, 5))
+
+        # Описание алгоритма
+        self.docs_desc_label = ttk.Label(
+            docs_scrollable,
+            text="Полное описание алгоритма...",
+            wraplength=350,  # Уменьшено для узкой колонки
+            justify=tk.LEFT,
+            style="Secondary.TLabel"
+        )
+        self.docs_desc_label.pack(anchor="w", pady=(0, 10))
+
+        ttk.Separator(docs_scrollable, orient="horizontal").pack(fill=tk.X, pady=10)
+
+        # Сценарии использования
+        self.docs_use_label = ttk.Label(
+            docs_scrollable,
+            text="Рекомендуемые сценарии:",
+            font=("Segoe UI", 10, "bold"),
+            style="TLabel"
+        )
+        self.docs_use_label.pack(anchor="w", pady=(0, 5))
+
+        self.docs_use_cases = ttk.Label(
+            docs_scrollable,
+            text="• Общее шифрование файлов",
+            wraplength=350,
+            justify=tk.LEFT,
+            style="Secondary.TLabel"
+        )
+        self.docs_use_cases.pack(anchor="w", pady=(0, 10))
+
+        ttk.Separator(docs_scrollable, orient="horizontal").pack(fill=tk.X, pady=10)
+
+        # Ключевая производная функция
+        self.docs_kdf_label = ttk.Label(
+            docs_scrollable,
+            text="Ключевая функция (KDF): PBKDF2-HMAC-SHA256",
+            wraplength=350,
+            justify=tk.LEFT,
+            style="Secondary.TLabel"
+        )
+        self.docs_kdf_label.pack(anchor="w", pady=(0, 5))
+
+        ttk.Separator(docs_scrollable, orient="horizontal").pack(fill=tk.X, pady=10)
+
+        # Размер инициализирующего вектора/нонса
+        self.docs_iv_label = ttk.Label(
+            docs_scrollable,
+            text="Размер IV/nonce: 16 байт",
+            wraplength=350,
+            justify=tk.LEFT,
+            style="Secondary.TLabel"
+        )
+        self.docs_iv_label.pack(anchor="w", pady=(0, 5))
+
+        ttk.Separator(docs_scrollable, orient="horizontal").pack(fill=tk.X, pady=10)
+
+        # Аутентификация данных
+        self.docs_auth_label = ttk.Label(
+            docs_scrollable,
+            text="Аутентификация: Встроенная (128-битный тег)",
+            wraplength=350,
+            justify=tk.LEFT,
+            style="Secondary.TLabel"
+        )
+        self.docs_auth_label.pack(anchor="w", pady=(0, 5))
+
+        ttk.Separator(docs_scrollable, orient="horizontal").pack(fill=tk.X, pady=10)
+
+        # Производительность
+        self.docs_perf_label = ttk.Label(
+            docs_scrollable,
+            text="Производительность: Высокая скорость шифрования",
+            wraplength=350,
+            justify=tk.LEFT,
+            style="Secondary.TLabel"
+        )
+        self.docs_perf_label.pack(anchor="w", pady=(0, 5))
+
+        ttk.Separator(docs_scrollable, orient="horizontal").pack(fill=tk.X, pady=10)
+
+        # Ограничения и предостережения
+        self.docs_limit_label = ttk.Label(
+            docs_scrollable,
+            text="Ограничения:",
+            font=("Segoe UI", 10, "bold"),
+            style="TLabel"
+        )
+        self.docs_limit_label.pack(anchor="w", pady=(0, 5))
+
+        self.docs_limitations = ttk.Label(
+            docs_scrollable,
+            text="• Требуется надежный пароль",
+            wraplength=350,
+            justify=tk.LEFT,
+            style="Warning.TLabel"
+        )
+        self.docs_limitations.pack(anchor="w", pady=(0, 10))
+
+        ttk.Separator(docs_scrollable, orient="horizontal").pack(fill=tk.X, pady=10)
+
+        # Рекомендации по паролям
+        self.docs_password_label = ttk.Label(
+            docs_scrollable,
+            text="Рекомендации по паролям:",
+            font=("Segoe UI", 10, "bold"),
+            style="TLabel"
+        )
+        self.docs_password_label.pack(anchor="w", pady=(0, 5))
+
+        self.docs_password_recommendations = ttk.Label(
+            docs_scrollable,
+            text="• Минимум 12 символов\n• Смешанные регистры, цифры, спецсимволы",
+            wraplength=350,
+            justify=tk.LEFT,
+            style="Secondary.TLabel"
+        )
+        self.docs_password_recommendations.pack(anchor="w", pady=(0, 10))
+
+        # Инициализация интерфейса
+        self._toggle_encrypt_input()
+        self._update_encrypt_params_and_docs()
+        self._update_algorithm_documentation("aes_256_gcm")
+
+    def _update_encrypt_params_and_docs(self, event=None):
+        """Обновляет параметры шифрования И документацию при смене алгоритма"""
+        algorithm = self.encrypt_algorithm.get()
+        self._reset_password_field()
+
+        # Очищаем фрейм параметров
+        for widget in self.encrypt_params_frame.winfo_children():
+            widget.destroy()
+
+        # Добавляем параметры в зависимости от алгоритма
+        if algorithm in ['xor', 'base64']:
+            # Для учебных алгоритмов пароль не обязателен
+            password_frame = ttk.Frame(self.encrypt_params_frame, style="Card.TFrame")
+            password_frame.pack(fill=tk.X, pady=(0, 5))
+            ttk.Label(
+                password_frame,
+                text="Ключ/пароль (опционально):",
+                style="TLabel"
+            ).pack(side=tk.LEFT)
+            self.encrypt_password_entry = ttk.Entry(
+                password_frame,
+                textvariable=self.encrypt_password,
+                style="TEntry"
+            )
+            self.encrypt_password_entry.pack(
+                side=tk.LEFT,
+                fill=tk.X,
+                expand=True,
+                padx=5
+            )
+
+            # Предупреждение для ненадежных алгоритмов
+            warning_label = ttk.Label(
+                self.encrypt_params_frame,
+                text="⚠️ ВНИМАНИЕ: Этот алгоритм НЕ обеспечивает реальную безопасность!",
+                foreground=self.colors["error"],
+                wraplength=300,
+                justify=tk.LEFT,
+                style="Error.TLabel"
+            )
+            warning_label.pack(fill=tk.X, pady=(5, 0))
+        else:
+            # Для надежных алгоритмов пароль обязателен
+            password_frame = ttk.Frame(self.encrypt_params_frame, style="Card.TFrame")
+            password_frame.pack(fill=tk.X, pady=(0, 5))
+            ttk.Label(
+                password_frame,
+                text="Пароль (минимум 8 символов):",
+                style="TLabel"
+            ).pack(side=tk.LEFT)
+            self.encrypt_password_entry = ttk.Entry(
+                password_frame,
+                textvariable=self.encrypt_password,
+                show="●",
+                style="TEntry"
+            )
+            self.encrypt_password_entry.pack(
+                side=tk.LEFT,
+                fill=tk.X,
+                expand=True,
+                padx=5
+            )
+            self.encrypt_show_password = tk.BooleanVar(value=False)
+            ttk.Checkbutton(
+                password_frame,
+                text="Показать",
+                variable=self.encrypt_show_password,
+                command=self._toggle_encrypt_password_visibility,
+                style="TCheckbutton"
+            ).pack(side=tk.LEFT, padx=(5, 0))
+
+        # Обновляем документацию
+        self._update_algorithm_documentation(algorithm)
+
+    def _update_algorithm_documentation(self, algorithm: str):
+        """Обновляет панель документации в зависимости от выбранного алгоритма"""
+        info = EncryptionManager.get_algorithm_info(algorithm)
+        security_level = EncryptionManager.SECURITY_LEVELS.get(algorithm, "unknown")
+
+        # Обновляем заголовок
+        algo_name = EncryptionManager.SUPPORTED_ALGORITHMS.get(algorithm, algorithm)
+        self.docs_title.config(text=f"Алгоритм: {algo_name}")
+
+        # Цветовая индикация уровня безопасности
+        security_colors = {
+            "none": self.colors["error"],
+            "low": "#FFA500",
+            "medium": "#FFD700",
+            "high": self.colors["success"],
+            "very_high": "#00CED1",
+            "unknown": self.colors["text_secondary"]
+        }
+        security_texts = {
+            "none": "❌ НЕ БЕЗОПАСЕН (только для обучения)",
+            "low": "⚠️ Низкий уровень безопасности",
+            "medium": "🟡 Средний уровень безопасности",
+            "high": "🟢 Высокий уровень безопасности",
+            "very_high": "✅ Очень высокий уровень безопасности",
+            "unknown": "❓ Уровень безопасности неизвестен"
+        }
+
+        # Обновляем метки документации
+        self.docs_security_label.config(
+            text=f"Уровень безопасности: {security_texts.get(security_level, security_texts['unknown'])}",
+            foreground=security_colors.get(security_level, security_colors["unknown"])
+        )
+        self.docs_desc_label.config(
+            text=info.get("description", "Описание недоступно")
+        )
+
+        # Форматируем сценарии использования
+        use_cases = info.get("use_cases", "Неизвестно").split(". ")
+        formatted_use = "\n".join([f"• {case.strip()}" for case in use_cases if case.strip()])
+        self.docs_use_cases.config(text=formatted_use)
+
+        # Форматируем ограничения
+        limitations = info.get("limitations", "Неизвестно").split(". ")
+        formatted_lim = "\n".join([f"⚠️ {lim.strip()}" for lim in limitations if lim.strip()])
+        self.docs_limitations.config(text=formatted_lim)
+
+        # Добавляем новые блоки документации:
+        # 1. Ключевая производная функция
+        kdf_info = info.get("key_derivation", "Неизвестно")
+        if hasattr(self, 'docs_kdf_label'):
+            self.docs_kdf_label.config(text=f"Ключевая производная функция: {kdf_info}")
+
+        # 2. Размер инициализирующего вектора/нонса
+        iv_info = info.get("iv_size", info.get("nonce_size", "Неизвестно"))
+        if hasattr(self, 'docs_iv_label'):
+            self.docs_iv_label.config(text=f"Размер инициализирующего вектора: {iv_info}")
+
+        # 3. Аутентификация
+        auth_info = info.get("authentication", "Неизвестно")
+        if hasattr(self, 'docs_auth_label'):
+            self.docs_auth_label.config(text=f"Аутентификация данных: {auth_info}")
+
+        # 4. Производительность
+        perf_info = info.get("performance", "Неизвестно")
+        if hasattr(self, 'docs_perf_label'):
+            self.docs_perf_label.config(text=f"Производительность: {perf_info}")
+
+        # Добавляем предупреждения для ненадёжных алгоритмов
+        if security_level in ["none", "low"]:
+            warning_text = info.get("warning", "Не рекомендуется для защиты реальных данных")
+            self.docs_limitations.config(
+                text=f"❌ КРИТИЧЕСКОЕ ПРЕДУПРЕЖДЕНИЕ:\n{warning_text}",
+                foreground=self.colors["error"],
+                font=("Segoe UI", 10, "bold")
+            )
+
+    def _reset_password_field(self):
+        """Сбрасывает состояние поля пароля при смене алгоритма"""
+        self.encrypt_password.set("")
+        self.encrypt_show_password.set(False)
+        if hasattr(self, 'encrypt_password_entry'):
+            self.encrypt_password_entry.config(show="●")
+
+    def _toggle_encrypt_password_visibility(self):
+        """Переключает видимость пароля для шифрования"""
+        if not hasattr(self, 'encrypt_password_entry') or not self.encrypt_password_entry:
+            return
+        if self.encrypt_show_password.get():
+            self.encrypt_password_entry.config(show="")
+        else:
+            self.encrypt_password_entry.config(show="●")
+
+    def _toggle_decrypt_password_visibility(self):
+        """Переключает видимость пароля для дешифрования"""
+        if not hasattr(self, 'decrypt_password_entry') or not self.decrypt_password_entry:
+            return
+        if self.decrypt_show_password.get():
+            self.decrypt_password_entry.config(show="")
+        else:
+            self.decrypt_password_entry.config(show="●")
+
+    def _select_encrypt_file(self):
+        """Выбирает файл для шифрования"""
+        path = filedialog.askopenfilename(
+            title="Выберите файл для шифрования",
+            initialdir=self.last_open_dir
+        )
+        if path:
+            self.encrypt_file_path.set(path)
+            self.last_open_dir = os.path.dirname(path)
+            self.show_toast("✅ Файл выбран для шифрования")
+            # Автоматически переключаем тип данных на "файл"
+            self.encrypt_data_type.set("file")
+            self._toggle_encrypt_input()
+
+    def _toggle_encrypt_input(self):
+        """Переключает между вводом текста и выбором файла"""
+        if self.encrypt_data_type.get() == "text":
+            self.encrypt_text_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
+            self.encrypt_file_frame.pack_forget()
+        else:
+            self.encrypt_text_frame.pack_forget()
+            self.encrypt_file_frame.pack(fill=tk.X, pady=(0, 10))
+
+    def _paste_to_encrypt_text(self):
+        """Вставляет текст из буфера обмена в поле шифрования"""
+        try:
+            text = self.root.clipboard_get()
+            self.encrypt_text_input.delete("1.0", tk.END)
+            self.encrypt_text_input.insert("1.0", text)
+            self.show_toast("✅ Текст вставлен из буфера обмена")
+        except tk.TclError:
+            messagebox.showwarning("⚠️ Буфер пуст", "Буфер обмена не содержит текста")
+
+    def _paste_to_decrypt_input(self):
+        """Вставляет данные из буфера обмена в поле дешифрования"""
+        try:
+            data = self.root.clipboard_get()
+            self.decrypt_input.delete("1.0", tk.END)
+            self.decrypt_input.insert("1.0", data)
+            self.show_toast("✅ Данные вставлены из буфера обмена")
+            # Автоматически пытаемся определить алгоритм из данных
+            self._auto_detect_algorithm(data)
+        except tk.TclError:
+            messagebox.showwarning("⚠️ Буфер пуст", "Буфер обмена не содержит данных")
+
+    def _auto_detect_algorithm(self, data: str):
+        """Пытается автоматически определить алгоритм из сериализованных данных"""
+        try:
+            encrypted_data = EncryptionManager.deserialize_encrypted_data(data.strip())
+            algorithm = encrypted_data.get('algorithm', 'unknown')
+            if algorithm != 'unknown' and algorithm in EncryptionManager.SUPPORTED_ALGORITHMS:
+                self.show_toast(
+                    f"🔍 Обнаружен алгоритм: {EncryptionManager.SUPPORTED_ALGORITHMS.get(algorithm, algorithm)}")
+        except:
+            pass  # Не удалось определить алгоритм - игнорируем
+
+    def _start_encryption(self):
+        """Запускает шифрование данных с поддержкой всех новых алгоритмов"""
+        try:
+            algorithm = self.encrypt_algorithm.get()
+
+            # Получаем данные для шифрования
+            if self.encrypt_data_type.get() == "text":
+                data = self.encrypt_text_input.get("1.0", tk.END).strip().encode('utf-8')
+                if not data:
+                    raise ValueError("Введите текст для шифрования")
+            else:
+                file_path = self.encrypt_file_path.get()
+                if not file_path or not os.path.exists(file_path):
+                    raise ValueError("Выберите файл для шифрования")
+                with open(file_path, 'rb') as f:
+                    data = f.read()
+
+            # Шифруем в зависимости от алгоритма
+            if algorithm == 'aes_256_cbc':
+                password = self.encrypt_password.get()
+                if not password or len(password) < 8:
+                    raise ValueError("Для AES требуется надежный пароль (минимум 8 символов)")
+                encrypted = EncryptionManager.encrypt_aes_cbc(data, password)
+            elif algorithm == 'aes_256_gcm':
+                password = self.encrypt_password.get()
+                if not password or len(password) < 8:
+                    raise ValueError("Для AES-GCM требуется надежный пароль (минимум 8 символов)")
+                encrypted = EncryptionManager.encrypt_aes_gcm(data, password)
+            elif algorithm == 'aes_256_ctr':
+                password = self.encrypt_password.get()
+                if not password or len(password) < 8:
+                    raise ValueError("Для AES-CTR требуется надежный пароль (минимум 8 символов)")
+                encrypted = EncryptionManager.encrypt_aes_ctr(data, password)
+            elif algorithm == 'aes_256_ofb':
+                password = self.encrypt_password.get()
+                if not password or len(password) < 8:
+                    raise ValueError("Для AES-OFB требуется надежный пароль (минимум 8 символов)")
+                encrypted = EncryptionManager.encrypt_aes_ofb(data, password)
+            elif algorithm == 'chacha20':
+                password = self.encrypt_password.get()
+                if not password or len(password) < 8:
+                    raise ValueError("Для ChaCha20 требуется надежный пароль (минимум 8 символов)")
+                encrypted = EncryptionManager.encrypt_chacha20(data, password)
+            elif algorithm == 'chacha20_poly1305':
+                password = self.encrypt_password.get()
+                if not password or len(password) < 8:
+                    raise ValueError("Для ChaCha20-Poly1305 требуется надежный пароль (минимум 8 символов)")
+                encrypted = EncryptionManager.encrypt_chacha20_poly1305(data, password)
+            elif algorithm == 'xor':
+                key = self.encrypt_password.get()
+                if not key:
+                    raise ValueError("Введите ключ для шифрования XOR")
+                encrypted = EncryptionManager.encrypt_xor(data, key)
+                messagebox.showwarning(
+                    "⚠️ Внимание",
+                    "XOR НЕ ЯВЛЯЕТСЯ НАДЕЖНЫМ ШИФРОВАНИЕМ!\n"
+                    "Используйте только для образовательных целей."
+                )
+            elif algorithm == 'base64':
+                encrypted = EncryptionManager.encrypt_base64(data)
+                messagebox.showinfo(
+                    "ℹ️ Информация",
+                    "Base64 - это кодирование, НЕ шифрование!\n"
+                    "Данные легко декодируются без пароля."
+                )
+            else:
+                raise ValueError(f"Неизвестный алгоритм: {algorithm}")
+
+            # Сериализуем результат
+            serialized = EncryptionManager.serialize_encrypted_data(encrypted)
+
+            # Отображаем результат
+            self.encrypt_result.config(state='normal')
+            self.encrypt_result.delete("1.0", tk.END)
+            self.encrypt_result.insert("1.0", serialized)
+            self.encrypt_result.config(state='disabled')
+
+            self.show_toast("✅ Шифрование успешно завершено!")
+            self.log_manager.add_entry("encryption", "success", {"algorithm": algorithm})
+
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка шифрования", str(e))
+            self.log_manager.add_entry("encryption", "error", {"error": str(e)})
+
+    def _start_decryption(self):
+        """Запускает дешифрование данных с поддержкой всех алгоритмов"""
+        try:
+            serialized = self.decrypt_input.get("1.0", tk.END).strip()
+            if not serialized:
+                raise ValueError("Введите зашифрованные данные или загрузите файл")
+
+            # Десериализуем данные
+            encrypted_data = EncryptionManager.deserialize_encrypted_data(serialized)
+            algorithm = encrypted_data.get('algorithm', 'aes_256_cbc')
+
+            # Дешифруем в зависимости от алгоритма
+            if algorithm in ['aes_256_cbc', 'aes_256_gcm', 'aes_256_ctr', 'aes_256_ofb',
+                             'chacha20', 'chacha20_poly1305']:
+                password = self.decrypt_password.get()
+                if not password:
+                    raise ValueError("Введите пароль для дешифрования")
+
+                if algorithm == 'aes_256_cbc':
+                    decrypted = EncryptionManager.decrypt_aes_cbc(encrypted_data, password)
+                elif algorithm == 'aes_256_gcm':
+                    decrypted = EncryptionManager.decrypt_aes_gcm(encrypted_data, password)
+                elif algorithm == 'aes_256_ctr':
+                    decrypted = EncryptionManager.decrypt_aes_ctr(encrypted_data, password)
+                elif algorithm == 'aes_256_ofb':
+                    decrypted = EncryptionManager.decrypt_aes_ofb(encrypted_data, password)
+                elif algorithm == 'chacha20':
+                    decrypted = EncryptionManager.decrypt_chacha20(encrypted_data, password)
+                elif algorithm == 'chacha20_poly1305':
+                    decrypted = EncryptionManager.decrypt_chacha20_poly1305(encrypted_data, password)
+
+            elif algorithm == 'xor':
+                decrypted = EncryptionManager.decrypt_xor(encrypted_data)
+                messagebox.showwarning(
+                    "⚠️ Внимание",
+                    "Данные расшифрованы алгоритмом XOR.\n"
+                    "XOR НЕ ЯВЛЯЕТСЯ НАДЕЖНЫМ ШИФРОВАНИЕМ!"
+                )
+
+            elif algorithm == 'base64':
+                decrypted = EncryptionManager.decrypt_base64(encrypted_data)
+
+            else:
+                raise ValueError(f"Неизвестный или неподдерживаемый алгоритм: {algorithm}")
+
+            # Сохраняем оригинальные данные для последующего сохранения
+            self.decrypt_result_data = decrypted
+
+            # Отображаем результат
+            self.decrypt_result.config(state='normal')
+            self.decrypt_result.delete("1.0", tk.END)
+
+            # Пытаемся декодировать как текст
+            try:
+                text = decrypted.decode('utf-8')
+                self.decrypt_result.insert("1.0", text)
+                self.decrypt_result_type = 'text'
+            except UnicodeDecodeError:
+                # Если это бинарные данные, показываем информацию
+                self._display_binary_data(decrypted)
+
+            self.decrypt_result.config(state='disabled')
+            self.show_toast("✅ Дешифрование успешно завершено!")
+            self.log_manager.add_entry("decryption", "success", {"algorithm": algorithm})
+
+        except Exception as e:
+            messagebox.showerror(
+                "❌ Ошибка дешифрования",
+                f"{str(e)}\n\n"
+                "Возможные причины:\n"
+                "• Неверный пароль\n"
+                "• Поврежденные данные\n"
+                "• Несовместимый алгоритм шифрования"
+            )
+            self.log_manager.add_entry("decryption", "error", {"error": str(e)})
+
+    def _display_binary_data(self, data: bytes):
+        """Отображает информацию о бинарных данных в поле результата"""
+        info = EncryptionManager.identify_data_type(data)
+        display_text = f"ТИП ДАННЫХ: {info['type'].upper()}\n\n"
+
+        if info['type'] == 'image':
+            display_text += f"Формат: {info['format']}\n"
+            display_text += f"Размер: {info['dimensions']}\n"
+            display_text += f"Режим: {info['mode']}\n"
+            display_text += f"Размер файла: {info['size']} байт"
+        elif info['type'] == 'audio':
+            display_text += f"Каналы: {info['channels']}\n"
+            display_text += f"Частота: {info['sample_rate']} Гц\n"
+            display_text += f"Длительность: {info['duration']}\n"
+            display_text += f"Размер файла: {info['size']} байт"
+        elif info['type'] == 'archive':
+            display_text += f"Тип архива: {info['type']}\n"
+            display_text += f"Размер: {info['size']} байт"
+        elif info['type'] == 'binary':
+            display_text += f"Размер: {info['size']} байт\n"
+            display_text += f"\nПервые 32 байта (hex):\n{data[:32].hex(' ')}"
+
+        self.decrypt_result.insert("1.0", display_text)
+
+    def _save_encrypted_data(self):
+        """Сохраняет зашифрованные данные в файл"""
+        data = self.encrypt_result.get("1.0", tk.END).strip()
+        if not data:
+            messagebox.showwarning("⚠️ Нет данных", "Нет зашифрованных данных для сохранения")
+            return
+
+        filepath = filedialog.asksaveasfilename(
+            title="Сохранить зашифрованные данные",
+            defaultextension=".ongcrypt",
+            filetypes=[
+                ("Occultong Encrypted", "*.ongcrypt"),
+                ("JSON", "*.json"),
+                ("Все файлы", "*.*")
+            ],
+            initialdir=self.last_open_dir
+        )
+
+        if filepath:
+            try:
+                # Если это .ongcrypt, сохраняем с сигнатурой
+                if filepath.endswith('.ongcrypt'):
+                    encrypted_data = EncryptionManager.deserialize_encrypted_data(data)
+                    EncryptionManager.save_encrypted_file(encrypted_data, filepath)
+                else:
+                    # Сохраняем как обычный JSON
+                    with open(filepath, 'w', encoding='utf-8') as f:
+                        f.write(data)
+
+                self.last_open_dir = os.path.dirname(filepath)
+                self.show_toast(f"✅ Данные сохранены: {os.path.basename(filepath)}")
+                self.log_manager.add_entry("file_save", "success", {"path": filepath, "type": "encrypted"})
+            except Exception as e:
+                messagebox.showerror("❌ Ошибка сохранения", str(e))
+                self.log_manager.add_entry("file_save", "error", {"error": str(e)})
+
+    def _load_encrypted_file(self):
+        """Загружает зашифрованные данные из файла"""
+        filepath = filedialog.askopenfilename(
+            title="Загрузить зашифрованные данные",
+            filetypes=[
+                ("Occultong Encrypted", "*.ongcrypt"),
+                ("JSON", "*.json"),
+                ("Все файлы", "*.*")
+            ],
+            initialdir=self.last_open_dir
+        )
+
+        if filepath:
+            try:
+                if filepath.endswith('.ongcrypt'):
+                    encrypted_data = EncryptionManager.load_encrypted_file(filepath)
+                    serialized = EncryptionManager.serialize_encrypted_data(encrypted_data)
+                else:
+                    with open(filepath, 'r', encoding='utf-8') as f:
+                        serialized = f.read()
+
+                self.decrypt_input.delete("1.0", tk.END)
+                self.decrypt_input.insert("1.0", serialized)
+                self.last_open_dir = os.path.dirname(filepath)
+                self.show_toast(f"✅ Данные загружены: {os.path.basename(filepath)}")
+                self.log_manager.add_entry("file_load", "success", {"path": filepath, "type": "encrypted"})
+            except Exception as e:
+                messagebox.showerror("❌ Ошибка загрузки", str(e))
+                self.log_manager.add_entry("file_load", "error", {"error": str(e)})
+
+    def _copy_decrypt_result(self):
+        """Копирует результат дешифрования в буфер обмена"""
+        if not hasattr(self, 'decrypt_result_data') or not self.decrypt_result_data:
+            messagebox.showwarning("⚠️ Нет данных", "Нет данных для копирования")
+            return
+
+        try:
+            # Пытаемся скопировать как текст
+            text = self.decrypt_result_data.decode('utf-8')
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.show_toast("✅ Результат скопирован в буфер обмена")
+        except UnicodeDecodeError:
+            messagebox.showinfo(
+                "ℹ️ Бинарные данные",
+                "Результат содержит бинарные данные.\n"
+                "Используйте кнопку 'Сохранить' для сохранения в файл."
+            )
+
+    def _save_decrypt_result(self):
+        """Сохраняет результат дешифрования в файл"""
+        if not hasattr(self, 'decrypt_result_data') or not self.decrypt_result_data:
+            messagebox.showwarning("⚠️ Нет данных", "Нет данных для сохранения")
+            return
+
+        # Определяем тип данных для предложения правильного расширения
+        info = EncryptionManager.identify_data_type(self.decrypt_result_data)
+        default_ext = ".txt"
+        filetypes = [("Все файлы", "*.*")]
+
+        if info['type'] == 'image':
+            default_ext = f".{info['format'].lower()}"
+            filetypes.insert(0, (f"Изображение {info['format']}", f"*{default_ext}"))
+        elif info['type'] == 'audio':
+            default_ext = ".wav"
+            filetypes.insert(0, ("Аудио WAV", "*.wav"))
+        elif info['type'] == 'text':
+            default_ext = ".txt"
+            filetypes.insert(0, ("Текст", "*.txt"))
+            filetypes.insert(1, ("JSON", "*.json"))
+
+        filepath = filedialog.asksaveasfilename(
+            title="Сохранить расшифрованные данные",
+            defaultextension=default_ext,
+            filetypes=filetypes,
+            initialdir=self.last_open_dir
+        )
+
+        if filepath:
+            try:
+                with open(filepath, 'wb') as f:
+                    f.write(self.decrypt_result_data)
+
+                self.last_open_dir = os.path.dirname(filepath)
+                self.show_toast(f"✅ Данные сохранены: {os.path.basename(filepath)}")
+                self.log_manager.add_entry("file_save", "success", {"path": filepath, "type": "decrypted"})
+            except Exception as e:
+                messagebox.showerror("❌ Ошибка сохранения", str(e))
+                self.log_manager.add_entry("file_save", "error", {"error": str(e)})
 
     def validate_before_hide(self) -> bool:
         import os
@@ -17388,9 +19662,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         # Закрываем окно
         self.root.destroy()
 
-    # ─────────────────────────────
-    # Доп. UX утилиты
-    # ─────────────────────────────
     def bind_shortcuts(self) -> None:
         self.root.bind_all("<F1>", lambda e: self.show_help())
         self.root.bind_all("<Escape>", lambda e: self.cancel_operation())
@@ -17413,6 +19684,7 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         self.root.bind_all("<Control-q>", lambda e: self.on_close())
         self.root.bind_all("<Control-Tab>", self.next_tab)
         self.root.bind_all("<Control-Shift-Tab>", self.prev_tab)
+        self.root.bind_all("<Control-k>", lambda e: self.notebook.select(self.encryption_tab))
 
     def toggle_theme(self, event=None):
         """Переключает между темной и светлой темой"""
