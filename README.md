@@ -17,7 +17,7 @@ The tool features a **modern UI** with drag-and-drop functionality, real-time an
 
 Advanced steganalysis module with 15+ statistical tests for detecting hidden data in images and audio files, complete with interactive visualizations and professional reporting.
 
-## Why ØccultoNG Pro? (Добавить в самый верх)
+## Why ØccultoNG Pro?
 
 | Feature | Your Current Tool | ØccultoNG Pro |
 |---------|-------------------|---------------|
