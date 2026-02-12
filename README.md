@@ -17,6 +17,21 @@ The tool features a **modern UI** with drag-and-drop functionality, real-time an
 
 Advanced steganalysis module with 15+ statistical tests for detecting hidden data in images and audio files, complete with interactive visualizations and professional reporting.
 
+## Why ØccultoNG Pro? (Добавить в самый верх)
+
+| Feature | Your Current Tool | ØccultoNG Pro |
+|---------|-------------------|---------------|
+| **Formats** | PNG/JPG only | PNG/BMP/TIFF/TGA/JPG/WAV |
+| **Stego Methods** | LSB only | 6+ advanced (HILL, DCT, AELSB) |
+| **Steganalysis** | ❌ None | **15+ tests** w/ visualizations |
+| **Encryption** | ❌ None | **AES-256 GCM** + ChaCha20 |
+| **Reports** | ❌ None | HTML/CSV w/ graphs |
+| **UI** | CLI/Basic GUI | **Modern 9-theme GUI** + drag-drop |
+| **API** | ❌ None | **Full Python API** + batch |
+| **Price** | Free (limited) | **$99/year** commercial |
+
+**TL;DR:** Professional forensics-grade stego toolkit with GUI, analytics, encryption. Free for education, $99/year for commercial.
+
 ## ✨ Key Features
 
 ### 🎨 User Interface
