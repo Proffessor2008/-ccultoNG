@@ -28,7 +28,7 @@ Advanced steganalysis module with 15+ statistical tests for detecting hidden dat
 | **Reports** | ❌ None | HTML/CSV w/ graphs |
 | **UI** | CLI/Basic GUI | **Modern 9-theme GUI** + drag-drop |
 | **API** | ❌ None | **Full Python API** + batch |
-| **Price** | Free (limited) | **$99/year** commercial |
+| **Price** | Free (limited) |Free\**$99/year** commercial |
 
 **TL;DR:** Professional forensics-grade stego toolkit with GUI, analytics, encryption. Free for education, $99/year for commercial.
 
