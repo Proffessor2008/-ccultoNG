@@ -213,7 +213,7 @@ print(decrypted_data)  # "Classified satellite imagery coordinates"
 | AES-256 CBC | 0.09 sec | 0.82 sec | 8.1 sec | 48% (AES-NI accelerated) |
 | AES-256 CTR | 0.07 sec | 0.68 sec | 6.9 sec | 42% (AES-NI accelerated) |
 
-*All tests performed on Windows 11 with Python 3.11 and cryptography 46.0.5*
+*All tests performed on Windows 11 with Python 3.11 and PyCryptodome 3.23.0*
 
 #### ⚠️ Critical Security Warnings
 
