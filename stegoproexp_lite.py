@@ -2323,6 +2323,45 @@ class BatchProcessingUI:
         """Обработка колеса мыши для прокрутки"""
         self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
 
+    def update_capacity_info(self):
+        """Обновляет информацию о вместимости контейнеров для пакетной обработки"""
+        if not self.selected_files:
+            self.capacity_label.config(
+                text="ℹ️ Выберите файлы для анализа вместимости",
+                style="Secondary.TLabel"
+            )
+            return
+
+        method = self.method_var.get()
+        total_capacity_bits = 0
+        valid_count = 0
+
+        for file_path in self.selected_files[:5]:  # Ограничение 5 файлов
+            try:
+                w, h, bits = ImageProcessor.get_image_info(file_path)
+                capacity = ImageProcessor.get_capacity_by_method(bits, method, w, h)
+                total_capacity_bits += capacity
+                valid_count += 1
+            except Exception:
+                continue
+
+        if total_capacity_bits > 0 and valid_count > 0:
+            total_bytes = total_capacity_bits // 8
+            self.capacity_label.config(
+                text=(
+                    f"📊 Файлов: {valid_count}\n"
+                    f"Метод: {STEGANO_METHODS.get(method, method)}\n"
+                    f"Общая вместимость: {Utils.format_size(total_bytes)}"
+                ),
+                style="Success.TLabel"
+            )
+        else:
+            self.capacity_label.config(
+                text="⚠️ Не удалось рассчитать вместимость\n"
+                     "Проверьте форматы файлов",
+                style="Warning.TLabel"
+            )
+
     def create_content(self):
         """Создает содержимое интерфейса с оптимизированной компоновкой для эффективного использования пространства"""
         # Создаем Notebook для разных операций в центре
@@ -10646,15 +10685,46 @@ class SteganographyUltimatePro:
             ("🗂 Открыть файл", self.open_extracted_file, "open_file_button"),
             ("🔑 Копировать хеш", self.copy_extracted_hash, "copy_hash_button")
         ]
-        for text, command, attr_name in button_configs:
-            btn = ttk.Button(
-                btn_frame,
-                text=text,
-                style="Action.TButton",
-                command=command
-            )
-            btn.pack(side=tk.LEFT, padx=5)
-            setattr(self, attr_name, btn)
+        # Кнопки действий - явное создание для IDE
+        self.extract_button = ttk.Button(
+            btn_frame,
+            text="🔍 Извлечь данные",
+            style="Accent.TButton",
+            command=self.start_extract
+        )
+        self.extract_button.pack(side=tk.LEFT, padx=5)
+
+        self.copy_button = ttk.Button(
+            btn_frame,
+            text="📋 Копировать",
+            style="TButton",
+            command=self.copy_extracted
+        )
+        self.copy_button.pack(side=tk.LEFT, padx=5)
+
+        self.save_button = ttk.Button(
+            btn_frame,
+            text="💾 Сохранить",
+            style="TButton",
+            command=self.save_extracted
+        )
+        self.save_button.pack(side=tk.LEFT, padx=5)
+
+        self.open_file_button = ttk.Button(
+            btn_frame,
+            text="🗂 Открыть файл",
+            style="TButton",
+            command=self.open_extracted_file
+        )
+        self.open_file_button.pack(side=tk.LEFT, padx=5)
+
+        self.copy_hash_button = ttk.Button(
+            btn_frame,
+            text="🔑 Копировать хеш",
+            style="TButton",
+            command=self.copy_extracted_hash
+        )
+        self.copy_hash_button.pack(side=tk.LEFT, padx=5)
 
         # История файлов
         hist_frame = ttk.LabelFrame(
@@ -12821,19 +12891,33 @@ class SteganographyUltimatePro:
         self.root.after(1500, lambda: self.drop_label.configure(text=original_text, style="DropLabel.TLabel"))
 
     def bind_drag_drop(self) -> None:
-        self.drop_label.drop_target_register(DND_FILES)
-        self.drop_label.dnd_bind('<<DragEnter>>', self.on_drag_enter)
-        self.drop_label.dnd_bind('<<DragLeave>>', self.on_drag_leave)
-        self.drop_label.dnd_bind('<<Drop>>', self.on_drop_image)
+        """Привязывает обработчики drag-and-drop с защитой от AttributeError"""
+        try:
+            # tkinterdnd2 добавляет эти методы динамически
+            if hasattr(self.drop_label, 'drop_target_register'):
+                self.drop_label.drop_target_register(DND_FILES)
+                self.drop_label.dnd_bind('<<DragEnter>>', self.on_drag_enter)
+                self.drop_label.dnd_bind('<<DragLeave>>', self.on_drag_leave)
+                self.drop_label.dnd_bind('<<Drop>>', self.on_drop_image)
+        except AttributeError as e:
+            print(f"⚠️ Drag-and-drop не поддерживается: {e}")
+            # Fallback: оставляем только клик для выбора файла
+            self.drop_label.bind("<Button-1>", lambda e: self.select_image())
 
     def bind_drag_drop_extract(self) -> None:
-        if self.extract_drop_label:
-            self.extract_drop_label.drop_target_register(DND_FILES)
-            self.extract_drop_label.dnd_bind('<<DragEnter>>', lambda e: self.extract_drop_label.configure(
-                style="DropLabelActive.TLabel"))
-            self.extract_drop_label.dnd_bind('<<DragLeave>>',
-                                             lambda e: self.extract_drop_label.configure(style="DropLabel.TLabel"))
-            self.extract_drop_label.dnd_bind('<<Drop>>', self.on_drop_extract_image)
+        """Привязывает обработчики drag-and-drop для вкладки извлечения"""
+        if not hasattr(self, 'extract_drop_label') or self.extract_drop_label is None:
+            return
+        try:
+            if hasattr(self.extract_drop_label, 'drop_target_register'):
+                self.extract_drop_label.drop_target_register(DND_FILES)
+                self.extract_drop_label.dnd_bind('<<DragEnter>>', lambda e:
+                self.extract_drop_label.configure(style="DropLabelActive.TLabel"))
+                self.extract_drop_label.dnd_bind('<<DragLeave>>', lambda e:
+                self.extract_drop_label.configure(style="DropLabel.TLabel"))
+                self.extract_drop_label.dnd_bind('<<Drop>>', self.on_drop_extract_image)
+        except AttributeError:
+            self.extract_drop_label.bind("<Button-1>", lambda e: self.select_extract_image())
 
     def bind_file_drop(self) -> None:
         if self.file_entry_widget:
@@ -12843,9 +12927,15 @@ class SteganographyUltimatePro:
             except Exception as e:
                 print(f"DnD для поля файла не поддерживается: {e}")
 
-    def on_drop_image(self, event: tk.Event) -> None:
+    def on_drop_image(self, event) -> None:  # Убрали строгую типизацию tk.Event
         import os
-        path = event.data.strip('{}')
+        # Безопасное получение данных из события tkinterdnd2
+        event_data = getattr(event, 'data', '')
+        path = event_data.strip('{}')
+
+        if not path:
+            return
+
         if os.path.isfile(path) and Utils.is_supported_container(path):
             self.img_path.set(path)
             self.last_open_dir = os.path.dirname(path)
@@ -12859,7 +12949,6 @@ class SteganographyUltimatePro:
                 self.method_var.set("audio_lsb")
                 self.update_method_combo_state("disabled")
             elif path.lower().endswith((".jpg", ".jpeg")):
-                # Для JPEG предлагаем DCT метод
                 self.method_var.set("jpeg_dct")
                 self.update_method_combo_state("readonly")
             else:
@@ -15724,25 +15813,49 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         find_window.bind("<Return>", lambda e: find_next())
 
     def install_tooltips(self) -> None:
-        ToolTip(self.drop_label, "Перетащите файл или кликните, чтобы выбрать\
-Поддерживаемые форматы: PNG, BMP, TIFF, TGA, JPG, JPEG, WAV")
-        if self.extract_drop_label:
-            ToolTip(self.extract_drop_label, "Перетащите картинку с данными или кликните для выбора\
-Поддерживаемые форматы: PNG, BMP, TIFF, TGA, JPG, JPEG, WAV")
-        ToolTip(self.hide_button, "Начать скрытие данных (Ctrl+Enter)\
-Проверьте вместимость контейнера перед началом")
-        ToolTip(self.extract_button, "Извлечь данные (Ctrl+Enter)\
-Программа автоматически определит метод извлечения")
-        ToolTip(self.save_button, "Сохранить извлечённые данные (Ctrl+S)\
-Поддерживается сохранение в различные форматы")
-        ToolTip(self.copy_button, "Скопировать извлечённый текст в буфер обмена")
-        ToolTip(self.open_file_button, "Открыть извлечённый файл в приложении по умолчанию")
-        ToolTip(self.copy_hash_button, "Скопировать SHA-256 хеш извлечённых данных\
-Можно использовать для проверки целостности")
-        ToolTip(self.usage_bar, "Индикатор заполнения контейнера\
-Зеленый: ≤70% (оптимально)\
-Желтый: 70-100% (максимально)\
-Красный: >100% (невозможно)")
+        """Устанавливает подсказки с проверкой существования виджетов"""
+        if hasattr(self, 'drop_label') and self.drop_label:
+            ToolTip(self.drop_label,
+                    "Перетащите файл или кликните, чтобы выбрать\n"
+                    "Поддерживаемые форматы: PNG, BMP, TIFF, TGA, JPG, JPEG, WAV")
+
+        if hasattr(self, 'extract_drop_label') and self.extract_drop_label:
+            ToolTip(self.extract_drop_label,
+                    "Перетащите картинку с данными или кликните для выбора\n"
+                    "Поддерживаемые форматы: PNG, BMP, TIFF, TGA, JPG, JPEG, WAV")
+
+        if hasattr(self, 'hide_button') and self.hide_button:
+            ToolTip(self.hide_button,
+                    "Начать скрытие данных (Ctrl+Enter)\n"
+                    "Проверьте вместимость контейнера перед началом")
+
+        if hasattr(self, 'extract_button') and self.extract_button:
+            ToolTip(self.extract_button,
+                    "Извлечь данные (Ctrl+Enter)\n"
+                    "Программа автоматически определит метод извлечения")
+
+        if hasattr(self, 'save_button') and self.save_button:
+            ToolTip(self.save_button,
+                    "Сохранить извлечённые данные (Ctrl+S)\n"
+                    "Поддерживается сохранение в различные форматы")
+
+        if hasattr(self, 'copy_button') and self.copy_button:
+            ToolTip(self.copy_button, "Скопировать извлечённый текст в буфер обмена")
+
+        if hasattr(self, 'open_file_button') and self.open_file_button:
+            ToolTip(self.open_file_button, "Открыть извлечённый файл в приложении по умолчанию")
+
+        if hasattr(self, 'copy_hash_button') and self.copy_hash_button:
+            ToolTip(self.copy_hash_button,
+                    "Скопировать SHA-256 хеш извлечённых данных\n"
+                    "Можно использовать для проверки целостности")
+
+        if hasattr(self, 'usage_bar') and self.usage_bar:
+            ToolTip(self.usage_bar,
+                    "Индикатор заполнения контейнера\n"
+                    "🟢 Зеленый: ≤70% (оптимально)\n"
+                    "🟡 Желтый: 70-100% (максимально)\n"
+                    "🔴 Красный: >100% (невозможно)")
 
 
 if __name__ == "__main__":
