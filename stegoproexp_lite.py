@@ -10678,14 +10678,6 @@ class SteganographyUltimatePro:
         # Кнопки действий
         btn_frame = ttk.Frame(right_frame, style="Card.TFrame")
         btn_frame.pack(fill=tk.X, pady=(10, 0))
-        button_configs = [
-            ("🔍 Извлечь данные", self.start_extract, "extract_button"),
-            ("📋 Копировать", self.copy_extracted, "copy_button"),
-            ("💾 Сохранить", self.save_extracted, "save_button"),
-            ("🗂 Открыть файл", self.open_extracted_file, "open_file_button"),
-            ("🔑 Копировать хеш", self.copy_extracted_hash, "copy_hash_button")
-        ]
-        # Кнопки действий - явное создание для IDE
         self.extract_button = ttk.Button(
             btn_frame,
             text="🔍 Извлечь данные",
@@ -13306,7 +13298,7 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
     def update_thumbnail(self, path: str, target_label: tk.Widget) -> None:
         ext = os.path.splitext(path)[1].lower()
         if ext == ".wav":
-            target_label.configure(image='', text='🎵 WAV аудиофайл(предпросмотр невозможен)')
+            target_label.configure()
             target_label.image = None
             return
 
@@ -13318,10 +13310,10 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
                     background.paste(img, mask=img.split()[3])
                     img = background
                 tk_img = ImageTk.PhotoImage(img)
-                target_label.configure(image=tk_img, text='')
+                target_label.configure()
                 target_label.image = tk_img
         except Exception as e:
-            target_label.configure(image='', text=f'❌ Ошибка: {e}')
+            target_label.configure()
             target_label.image = None
 
     def _create_encryption_content(self, parent: ttk.Frame) -> None:
@@ -13362,7 +13354,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         data_type_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(data_type_frame, text="Тип данных:", style="TLabel").pack(side=tk.LEFT)
-
         self.encrypt_data_type = tk.StringVar(value="text")
         ttk.Radiobutton(
             data_type_frame,
@@ -13432,7 +13423,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         file_input_frame.pack(fill=tk.X)
 
         ttk.Label(file_input_frame, text="Файл для шифрования:", style="TLabel").pack(side=tk.LEFT)
-
         self.encrypt_file_path = tk.StringVar()
         file_entry = ttk.Entry(
             file_input_frame,
@@ -13454,7 +13444,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         algorithm_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(algorithm_frame, text="Алгоритм шифрования:", style="TLabel").pack(side=tk.LEFT)
-
         self.encrypt_algorithm = tk.StringVar(value="aes_256_gcm")
         algorithm_combo = ttk.Combobox(
             algorithm_frame,
@@ -13481,7 +13470,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         password_frame.pack(fill=tk.X, pady=(0, 5))
 
         ttk.Label(password_frame, text="Пароль:", style="TLabel").pack(side=tk.LEFT)
-
         self.encrypt_password = tk.StringVar()
         self.encrypt_password_entry = ttk.Entry(
             password_frame,
@@ -13509,6 +13497,14 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
             text="🔐 Зашифровать",
             style="Accent.TButton",
             command=self._start_encryption
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        # ДОБАВЛЕНА КНОПКА КОПИРОВАНИЯ
+        ttk.Button(
+            button_frame,
+            text="📋 Копировать",
+            style="TButton",
+            command=self._copy_encrypted_data
         ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
         ttk.Button(
@@ -13597,7 +13593,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         decrypt_password_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(decrypt_password_frame, text="Пароль:", style="TLabel").pack(side=tk.LEFT)
-
         self.decrypt_password = tk.StringVar()
         self.decrypt_password_entry = ttk.Entry(
             decrypt_password_frame,
@@ -13827,6 +13822,22 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         self._toggle_encrypt_input()
         self._update_encrypt_params_and_docs()
         self._update_algorithm_documentation("aes_256_gcm")
+
+    def _copy_encrypted_data(self):
+        """Копирует зашифрованные данные в буфер обмена"""
+        data = self.encrypt_result.get("1.0", tk.END).strip()
+        if not data:
+            messagebox.showwarning("⚠️ Нет данных", "Нет зашифрованных данных для копирования")
+            return
+
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(data)
+            self.show_toast("✅ Зашифрованные данные скопированы в буфер обмена")
+            self.log_manager.add_entry("copy_encrypted", "success", {"type": "encrypted_data"})
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка", f"Не удалось скопировать данные: {str(e)}")
+            self.log_manager.add_entry("copy_encrypted", "error", {"error": str(e)})
 
     def _update_encrypt_params_and_docs(self, event=None):
         """Обновляет параметры шифрования И документацию при смене алгоритма"""
