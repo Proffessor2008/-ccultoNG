@@ -827,7 +827,7 @@ This project is distributed under multiple licensing models:
 
 ### Commercial License
 - **Developer License**: $99/year (1 developer)
-- **Professional License**: $499/year (up to 5 developers)
+- **Professional License**: $1000/year (up to 5 developers)
 - **Enterprise License**: Custom pricing (unlimited users + priority support)
 - Read full terms ([LICENSE-Commercial](https://github.com/Proffessor2008/-ccultoNG/blob/main/Commercial%20License%20(Paid)))
 
