@@ -1,40 +1,42 @@
 import base64
 import hashlib
 import json
+import math
 import mimetypes
 import os
 import secrets
 import shutil
+import string
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import tkinter as tk
+import urllib.parse
 import wave
 import webbrowser
 import zlib
-from datetime import datetime, timedelta
 from io import BytesIO
 from tkinter import ttk, filedialog, messagebox, scrolledtext
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
 
 import cv2
 import matplotlib
 import matplotlib.pyplot as plt
 import numba
 import numpy as np
+from Crypto.Cipher import AES, ChaCha20, ChaCha20_Poly1305
+from Crypto.Hash import SHA256
+from Crypto.Protocol.KDF import PBKDF2
+from Crypto.Random import get_random_bytes
+from Crypto.Util.Padding import pad, unpad
 from PIL import Image
 from PIL import ImageTk
 from scipy import ndimage
 from scipy.fftpack import dct, idct
 from scipy.stats import binomtest, kurtosis, skew, normaltest
 from tkinterdnd2 import DND_FILES, TkinterDnD
-from Crypto.Cipher import AES, ChaCha20, ChaCha20_Poly1305
-from Crypto.Protocol.KDF import PBKDF2
-from Crypto.Hash import SHA256
-from Crypto.Util.Padding import pad, unpad
-from Crypto.Random import get_random_bytes
 
 matplotlib.use('TkAgg')
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -43,7 +45,7 @@ from matplotlib.figure import Figure
 # ───────────────────────────────────────────────
 # 🎨 ГЛОБАЛЬНЫЕ НАСТРОЙКИ (УЛУЧШЕННЫЕ)
 # ───────────────────────────────────────────────
-VERSION = "2.4.3"
+VERSION = "2.5.1"
 AUTHOR = "MustaNG"
 BUILD_DATE = time.strftime("%Y-%m-%d")
 
@@ -1494,1978 +1496,6 @@ class FileManager:
 
 
 # ───────────────────────────────────────────────
-# 🏆 КЛАСС ДОСТИЖЕНИЙ С СИСТЕМОЙ УРОВНЕЙ И НАГРАД
-# ───────────────────────────────────────────────
-
-class AchievementManager:
-    """Расширенная система достижений с поддержкой streak-дней, уровней и XP"""
-
-    def __init__(self, log_manager=None):
-        self.achievements_file = "achievements_pro.json"
-        self.achievements = self.load_achievements()
-        self.daily_goals = self.load_daily_goals()
-        self.user_level = 1
-        self.log_manager = log_manager
-        self.user_xp = 0
-        self.total_xp = 0
-        self.current_streak = 0
-        self.longest_streak = 0
-        self.last_activity_date = None
-        self.badges = []
-        self.initialize_system()
-        self.verify_and_update_structure()
-
-    def load_achievements(self):
-        """Загружает достижения из файла"""
-        try:
-            if os.path.exists(self.achievements_file):
-                with open(self.achievements_file, 'r', encoding='utf-8') as f:
-                    return json.load(f)
-        except Exception as e:
-            print(f"Ошибка загрузки достижений: {e}")
-        return {}
-
-    def save_achievements(self):
-        """Сохраняет достижения в файл"""
-        try:
-            data = {
-                "achievements": self.achievements,
-                "user_data": {
-                    "level": self.user_level,
-                    "xp": self.user_xp,
-                    "total_xp": self.total_xp,
-                    "current_streak": self.current_streak,
-                    "longest_streak": self.longest_streak,
-                    "last_activity_date": self.last_activity_date.isoformat() if self.last_activity_date else None,
-                    "badges": self.badges
-                },
-                "daily_goals": self.daily_goals
-            }
-            with open(self.achievements_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Ошибка сохранения достижений: {e}")
-
-    def load_daily_goals(self):
-        """Загружает ежедневные цели"""
-        default_goals = [
-            {
-                "id": "hide_1_file",
-                "name": "Спрятать 1 файл",
-                "description": "Спрячьте хотя бы один файл сегодня",
-                "target": 1,
-                "reward_xp": 50,
-                "completed": False,
-                "progress": 0,
-                "type": "hide"
-            },
-            {
-                "id": "extract_1_file",
-                "name": "Извлечь 1 файл",
-                "description": "Извлеките хотя бы один файл сегодня",
-                "target": 1,
-                "reward_xp": 50,
-                "completed": False,
-                "progress": 0,
-                "type": "extract"
-            },
-            {
-                "id": "try_new_method",
-                "name": "Новый метод",
-                "description": "Попробуйте новый метод стеганографии сегодня",
-                "target": 1,
-                "reward_xp": 75,
-                "completed": False,
-                "progress": 0,
-                "type": "method"
-            }
-        ]
-
-        try:
-            if os.path.exists(self.achievements_file):
-                with open(self.achievements_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    if "daily_goals" in data:
-                        # Проверяем, нужно ли сбросить цели (новый день)
-                        last_reset = data.get("last_goal_reset", "")
-                        today = time.strftime("%Y-%m-%d")
-                        if last_reset != today:
-                            for goal in data["daily_goals"]:
-                                goal["completed"] = False
-                                goal["progress"] = 0
-                            data["last_goal_reset"] = today
-                        return data["daily_goals"]
-        except:
-            pass
-
-        # Устанавливаем дату последнего сброса
-        try:
-            with open(self.achievements_file, 'r+', encoding='utf-8') as f:
-                data = json.load(f)
-                data["last_goal_reset"] = time.strftime("%Y-%m-%d")
-                f.seek(0)
-                json.dump(data, f, indent=2, ensure_ascii=False)
-                f.truncate()
-        except:
-            pass
-
-        return default_goals
-
-    def initialize_system(self):
-        """Инициализирует систему достижений с полной структурой"""
-        default_achievements = {
-            # Новичок
-            "first_use": {
-                "name": "Первый шаг",
-                "description": "Запустите программу впервые",
-                "icon": "🎉",
-                "rarity": "common",
-                "xp_reward": 100,
-                "unlocked": False,
-                "progress": 0,
-                "target": 1,
-                "category": "beginner",
-                "date_unlocked": None
-            },
-            "first_hide": {
-                "name": "Сокровище",
-                "description": "Спрячьте свои первые данные",
-                "icon": "🔍",
-                "rarity": "common",
-                "xp_reward": 150,
-                "unlocked": False,
-                "progress": 0,
-                "target": 1,
-                "category": "beginner",
-                "date_unlocked": None
-            },
-            "first_extract": {
-                "name": "Детектив",
-                "description": "Извлеките данные в первый раз",
-                "icon": "🕵️",
-                "rarity": "common",
-                "xp_reward": 150,
-                "unlocked": False,
-                "progress": 0,
-                "target": 1,
-                "category": "beginner",
-                "date_unlocked": None
-            },
-
-            # Опытный пользователь
-            "five_operations": {
-                "name": "Начинающий стеганограф",
-                "description": "Выполните 5 операций скрытия или извлечения",
-                "icon": "⭐",
-                "rarity": "uncommon",
-                "xp_reward": 200,
-                "unlocked": False,
-                "progress": 0,
-                "target": 5,
-                "category": "intermediate",
-                "date_unlocked": None
-            },
-            "ten_operations": {
-                "name": "Опытный специалист",
-                "description": "Выполните 10 операций",
-                "icon": "🌟",
-                "rarity": "rare",
-                "xp_reward": 300,
-                "unlocked": False,
-                "progress": 0,
-                "target": 10,
-                "category": "intermediate",
-                "date_unlocked": None
-            },
-            "twenty_operations": {
-                "name": "Мастер стеганографии",
-                "description": "Выполните 20 операций",
-                "icon": "🏆",
-                "rarity": "epic",
-                "xp_reward": 500,
-                "unlocked": False,
-                "progress": 0,
-                "target": 20,
-                "category": "advanced",
-                "date_unlocked": None
-            },
-            "fifty_operations": {
-                "name": "Легенда стеганографии",
-                "description": "Выполните 50 операций",
-                "icon": "👑",
-                "rarity": "legendary",
-                "xp_reward": 1000,
-                "unlocked": False,
-                "progress": 0,
-                "target": 50,
-                "category": "expert",
-                "date_unlocked": None
-            },
-
-            # Технические навыки
-            "large_file": {
-                "name": "Работа с большими файлами",
-                "description": "Спрячьте файл размером более 10 МБ",
-                "icon": "📦",
-                "rarity": "uncommon",
-                "xp_reward": 250,
-                "unlocked": False,
-                "progress": 0,
-                "target": 1,
-                "category": "technical",
-                "date_unlocked": None
-            },
-            "multiple_methods": {
-                "name": "Экспериментатор",
-                "description": "Используйте все 6 методов скрытия данных",
-                "icon": "🧪",
-                "rarity": "rare",
-                "xp_reward": 400,
-                "unlocked": False,
-                "progress": 0,
-                "target": 6,
-                "category": "technical",
-                "date_unlocked": None
-            },
-            "audio_expert": {
-                "name": "Аудио-стеганограф",
-                "description": "Спрячьте данные в аудиофайле",
-                "icon": "🎵",
-                "rarity": "uncommon",
-                "xp_reward": 200,
-                "unlocked": False,
-                "progress": 0,
-                "target": 1,
-                "category": "technical",
-                "date_unlocked": None
-            },
-            "jpeg_master": {
-                "name": "JPEG-мастер",
-                "description": "Успешно скройте и извлеките данные в JPEG формате",
-                "icon": "🖼️",
-                "rarity": "rare",
-                "xp_reward": 350,
-                "unlocked": False,
-                "progress": 0,
-                "target": 2,
-                "category": "technical",
-                "date_unlocked": None
-            },
-
-            # Безопасность
-            "password_protected": {
-                "name": "Взломостойкость",
-                "description": "Используйте пароли для защиты 5 скрытых файлов",
-                "icon": "🔒",
-                "rarity": "uncommon",
-                "xp_reward": 250,
-                "unlocked": False,
-                "progress": 0,
-                "target": 5,
-                "category": "security",
-                "date_unlocked": None
-            },
-            "encryption_expert": {
-                "name": "Шифровальщик",
-                "description": "Примените шифрование к данным перед скрытием 3 раза",
-                "icon": ".Cryptography",
-                "rarity": "rare",
-                "xp_reward": 400,
-                "unlocked": False,
-                "progress": 0,
-                "target": 3,
-                "category": "security",
-                "date_unlocked": None
-            },
-
-            # Стрейки и регулярность
-            "three_day_streak": {
-                "name": "Начинающий исследователь",
-                "description": "Используйте программу 3 дня подряд",
-                "icon": "🔥",
-                "rarity": "uncommon",
-                "xp_reward": 200,
-                "unlocked": False,
-                "progress": 0,
-                "target": 3,
-                "category": "streak",
-                "date_unlocked": None
-            },
-            "seven_day_streak": {
-                "name": "Преданный последователь",
-                "description": "Используйте программу 7 дней подряд",
-                "icon": "🔥🔥",
-                "rarity": "rare",
-                "xp_reward": 500,
-                "unlocked": False,
-                "progress": 0,
-                "target": 7,
-                "category": "streak",
-                "date_unlocked": None
-            },
-            "thirty_day_streak": {
-                "name": "Стеганограф-фанатик",
-                "description": "Используйте программу 30 дней подряд",
-                "icon": "🔥🔥🔥",
-                "rarity": "epic",
-                "xp_reward": 1500,
-                "unlocked": False,
-                "progress": 0,
-                "target": 30,
-                "category": "streak",
-                "date_unlocked": None
-            },
-
-            # Мастерство
-            "perfectionist": {
-                "name": "Перфекционист",
-                "description": "Выполните 10 операций подряд без ошибок",
-                "icon": "🎯",
-                "rarity": "epic",
-                "xp_reward": 800,
-                "unlocked": False,
-                "progress": 0,
-                "target": 10,
-                "category": "mastery",
-                "date_unlocked": None
-            },
-            "efficiency_master": {
-                "name": "Мастер эффективности",
-                "description": "Скройте данные со скоростью более 1 МБ/сек",
-                "icon": "⚡",
-                "rarity": "rare",
-                "xp_reward": 300,
-                "unlocked": False,
-                "progress": 0,
-                "target": 1,
-                "category": "mastery",
-                "date_unlocked": None
-            },
-            "batch_operations": {
-                "name": "Конвейер",
-                "description": "Выполните пакетную обработку 5 файлов одновременно",
-                "icon": "🔄",
-                "rarity": "uncommon",
-                "xp_reward": 350,
-                "unlocked": False,
-                "progress": 0,
-                "target": 1,
-                "category": "advanced",
-                "date_unlocked": None
-            }
-        }
-
-        # Загружаем существующие достижения и обновляем их структуру
-        for key, achievement in default_achievements.items():
-            if key not in self.achievements:
-                self.achievements[key] = achievement
-            else:
-                # Обновляем достижение новыми полями, сохраняя прогресс
-                # Создаем копию текущих данных
-                existing_data = self.achievements[key]
-                if not isinstance(existing_data, dict):
-                    # Если данные не в формате словаря, пересоздаем их
-                    existing_data = {}
-
-                # Обновляем поля
-                for field, value in achievement.items():
-                    if field not in existing_data:
-                        existing_data[field] = value
-
-                # Убеждаемся, что обязательные поля существуют
-                for field in ["unlocked", "progress", "target"]:
-                    if field not in existing_data:
-                        existing_data[field] = achievement[field]
-
-                self.achievements[key] = existing_data
-
-        # Загружаем пользовательские данные
-        try:
-            if os.path.exists(self.achievements_file):
-                with open(self.achievements_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    user_data = data.get("user_data", {})
-                    self.user_level = user_data.get("level", 1)
-                    self.user_xp = user_data.get("xp", 0)
-                    self.total_xp = user_data.get("total_xp", 0)
-                    self.current_streak = user_data.get("current_streak", 0)
-                    self.longest_streak = user_data.get("longest_streak", 0)
-                    last_activity = user_data.get("last_activity_date")
-                    self.last_activity_date = datetime.fromisoformat(last_activity) if last_activity else None
-                    self.badges = user_data.get("badges", [])
-        except Exception as e:
-            print(f"Ошибка загрузки пользовательских данных: {e}")
-
-        # Инициализируем стрейк-систему
-        self.update_streak()
-
-        # Обновляем уровни пользователя
-        self.update_level()
-
-        self.save_achievements()
-
-    # В класс AchievementManager добавьте следующие методы:
-
-    def get_unlocked_achievements(self):
-        """Возвращает список разблокированных достижений"""
-        unlocked = {}
-        for key, achievement in self.achievements.items():
-            if achievement["unlocked"]:
-                unlocked[key] = achievement
-        return unlocked
-
-    def get_locked_achievements(self):
-        """Возвращает список заблокированных достижений"""
-        locked = {}
-        for key, achievement in self.achievements.items():
-            if not achievement["unlocked"]:
-                locked[key] = achievement
-        return locked
-
-    def verify_and_update_structure(self):
-        """Проверяет и обновляет структуру сохраненных данных до последней версии"""
-        # Проверяем наличие обязательных полей в достижениях
-        required_fields = ["unlocked", "progress", "target", "name", "description",
-                           "icon", "rarity", "xp_reward", "category", "date_unlocked"]
-
-        for key, achievement_data in list(self.achievements.items()):
-            # Убедимся, что данные - это словарь
-            if not isinstance(achievement_data, dict):
-                self.achievements[key] = {}
-                achievement_data = self.achievements[key]
-
-            # Проверяем и добавляем отсутствующие поля
-            for field in required_fields:
-                if field not in achievement_data:
-                    if field == "unlocked":
-                        achievement_data[field] = False
-                    elif field == "progress":
-                        achievement_data[field] = 0
-                    elif field == "target":
-                        achievement_data[field] = 1
-                    elif field == "rarity":
-                        achievement_data[field] = "common"
-                    elif field == "xp_reward":
-                        achievement_data[field] = 100
-                    elif field == "category":
-                        achievement_data[field] = "general"
-                    elif field == "date_unlocked":
-                        achievement_data[field] = None
-                    else:
-                        achievement_data[field] = f"Значение по умолчанию для {field}"
-
-    def update_streak(self):
-        """Обновляет ежедневный стрейк на основе даты последней активности"""
-        today = datetime.now().date()
-
-        if self.last_activity_date is None:
-            # Первый запуск программы
-            self.current_streak = 1
-            self.longest_streak = max(self.longest_streak, self.current_streak)
-            self.last_activity_date = datetime.now()
-            return
-
-        last_date = self.last_activity_date.date()
-        days_diff = (today - last_date).days
-
-        if days_diff == 0:
-            # Сегодня уже был активен
-            return
-        elif days_diff == 1:
-            # Последовательный день
-            self.current_streak += 1
-            self.longest_streak = max(self.longest_streak, self.current_streak)
-        else:
-            # Стрейк прерван
-            if days_diff > 1:
-                self.current_streak = 1
-
-        self.last_activity_date = datetime.now()
-        self.update_streak_achievements()
-        self.save_achievements()
-
-    def update_streak_achievements(self):
-        """Обновляет достижения, связанные со стрейком"""
-        streak_achievements = [
-            ("three_day_streak", 3),
-            ("seven_day_streak", 7),
-            ("thirty_day_streak", 30)
-        ]
-
-        for achievement_id, target in streak_achievements:
-            if achievement_id in self.achievements:
-                achievement = self.achievements[achievement_id]
-                achievement["progress"] = self.current_streak
-                if not achievement["unlocked"] and self.current_streak >= target:
-                    achievement["unlocked"] = True
-                    achievement["date_unlocked"] = datetime.now().isoformat()
-                    self.add_xp(achievement["xp_reward"])
-                    self.badges.append({
-                        "type": "streak",
-                        "name": achievement["name"],
-                        "date": datetime.now().isoformat()
-                    })
-
-    def update_level(self):
-        """Обновляет уровень пользователя на основе XP"""
-
-        # Формула для расчета XP, необходимого для следующего уровня
-        def xp_for_level(level):
-            return 100 * (level ** 2)
-
-        while self.user_xp >= xp_for_level(self.user_level):
-            self.user_level += 1
-            level_up_reward = self.user_level * 50
-            self.add_xp(level_up_reward, silent=True)
-            self.badges.append({
-                "type": "level_up",
-                "level": self.user_level,
-                "date": datetime.now().isoformat(),
-                "reward": level_up_reward
-            })
-
-    def add_xp(self, amount, silent=False):
-        """Добавляет XP пользователю и обновляет уровень"""
-        self.user_xp += amount
-        self.total_xp += amount
-
-        # Проверяем выполнение ежедневных целей
-        self.check_daily_goals("xp", amount)
-
-        if not silent:
-            self.update_level()
-            self.save_achievements()
-
-    def increment_progress(self, achievement_key, amount=1, context=None):
-        """Увеличивает прогресс достижения"""
-        if achievement_key not in self.achievements:
-            return False
-
-        achievement = self.achievements[achievement_key]
-
-        if achievement["unlocked"]:
-            return False
-
-        achievement["progress"] = min(achievement["progress"] + amount, achievement["target"])
-
-        # Особая логика для некоторых достижений
-        if achievement_key == "jpeg_master" and context:
-            # Для JPEG мастера отслеживаем два типа операций - сокрытие и извлечение
-            if "operation_type" in context:
-                operation_type = context["operation_type"]
-                if operation_type not in achievement:
-                    achievement[operation_type] = 0
-                achievement[operation_type] += 1
-                achievement["progress"] = min(achievement.get("hide", 0) + achievement.get("extract", 0),
-                                              achievement["target"])
-
-        unlocked = False
-        if achievement["progress"] >= achievement["target"] and not achievement["unlocked"]:
-            achievement["unlocked"] = True
-            achievement["date_unlocked"] = datetime.now().isoformat()
-            self.add_xp(achievement["xp_reward"])
-            unlocked = True
-
-            # Добавляем бейдж за достижение
-            self.badges.append({
-                "type": "achievement",
-                "name": achievement["name"],
-                "rarity": achievement["rarity"],
-                "date": datetime.now().isoformat(),
-                "xp_reward": achievement["xp_reward"]
-            })
-
-        self.save_achievements()
-        return unlocked
-
-    def check_daily_goals(self, goal_type, value=1):
-        """Проверяет и обновляет прогресс ежедневных целей"""
-        updated = False
-        for goal in self.daily_goals:
-            if goal["type"] == goal_type and not goal["completed"]:
-                goal["progress"] = min(goal["progress"] + value, goal["target"])
-                if goal["progress"] >= goal["target"]:
-                    goal["completed"] = True
-                    self.add_xp(goal["reward_xp"])
-                    self.badges.append({
-                        "type": "daily_goal",
-                        "name": goal["name"],
-                        "date": datetime.now().isoformat(),
-                        "reward": goal["reward_xp"]
-                    })
-                    updated = True
-        if updated:
-            self.save_achievements()
-        return updated
-
-    def get_locked_achievements(self):
-        """Возвращает список заблокированных достижений"""
-        locked = {}
-        for key, data in self.achievements.items():
-            if isinstance(data, dict) and not data.get("unlocked", False):
-                locked[key] = data
-        return locked
-
-    def get_locked_achievements(self):
-        """Возвращает список заблокированных достижений"""
-        locked = {}
-        for key, data in self.achievements.items():
-            if not data["unlocked"]:
-                locked[key] = data
-        return locked
-
-    def get_achievement_progress(self, achievement_key):
-        """Возвращает прогресс достижения"""
-        if achievement_key in self.achievements:
-            achievement = self.achievements[achievement_key]
-            return achievement["progress"], achievement["target"]
-        return 0, 0
-
-    def get_progress_by_category(self, category):
-        """Возвращает прогресс по категориям достижений"""
-        total = 0
-        completed = 0
-        achievements_in_category = []
-
-        for key, achievement in self.achievements.items():
-            if achievement["category"] == category:
-                total += 1
-                if achievement["unlocked"]:
-                    completed += 1
-                achievements_in_category.append(achievement)
-
-        return {
-            "category": category,
-            "total": total,
-            "completed": completed,
-            "progress": (completed / total * 100) if total > 0 else 0,
-            "achievements": achievements_in_category
-        }
-
-    def get_rarity_description(self, rarity):
-        """Возвращает описание редкости"""
-        descriptions = {
-            "common": "Обычное",
-            "uncommon": "Необычное",
-            "rare": "Редкое",
-            "epic": "Эпическое",
-            "legendary": "Легендарное"
-        }
-        return descriptions.get(rarity, rarity.capitalize())
-
-    def get_category_name(self, category):
-        """Возвращает название категории"""
-        names = {
-            "beginner": "Новичок",
-            "intermediate": "Средний уровень",
-            "advanced": "Продвинутый",
-            "expert": "Эксперт",
-            "technical": "Технические навыки",
-            "security": "Безопасность",
-            "streak": "Стрейки",
-            "mastery": "Мастерство"
-        }
-        return names.get(category, category.capitalize())
-
-    def get_xp_for_next_level(self):
-        """Возвращает количество XP, необходимое для следующего уровня"""
-        return 100 * (self.user_level ** 2)
-
-    def get_activity_heatmap(self, days=30):
-        """Генерирует данные для тепловой карты активности за последние N дней"""
-        today = datetime.now().date()
-        activity_data = []
-
-        # Генерируем данные за последние 30 дней
-        for i in range(days):
-            date = today - timedelta(days=i)
-            date_str = date.isoformat()
-
-            # По умолчанию 0 операций
-            operations = 0
-
-            # Проверяем наличие данных в истории операций
-            for entry in reversed(self.log_manager.get_entries(limit=1000)):
-                entry_date = datetime.strptime(entry["formatted_time"], "%Y-%m-%d %H:%M:%S").date()
-                if entry_date == date:
-                    operations += 1
-
-            # Приоритет активности для цвета
-            activity_level = 0
-            if operations > 0:
-                activity_level = min(4, operations // 2 + 1)
-
-            activity_data.append({
-                "date": date_str,
-                "count": operations,
-                "level": activity_level,
-                "is_today": date == today
-            })
-
-        # Сортируем по дате (от старых к новым)
-        activity_data.reverse()
-        return activity_data
-
-    def get_recent_badges(self, limit=5):
-        """Возвращает последние N полученных бейджей"""
-        return sorted(self.badges, key=lambda x: x["date"], reverse=True)[:limit]
-
-    def get_monthly_stats(self):
-        """Возвращает статистику за последний месяц"""
-        today = datetime.now()
-        month_start = today.replace(day=1)
-
-        operations = self.log_manager.get_entries(limit=1000)
-        monthly_ops = [op for op in operations if
-                       datetime.strptime(op["formatted_time"], "%Y-%m-%d %H:%M:%S") >= month_start]
-
-        # Статистика по типам операций
-        hide_ops = [op for op in monthly_ops if op["operation_type"] == "hide"]
-        extract_ops = [op for op in monthly_ops if op["operation_type"] == "extract"]
-
-        # Статистика по успехам
-        successful_ops = [op for op in monthly_ops if op["status"] == "success"]
-        success_rate = len(successful_ops) / len(monthly_ops) * 100 if monthly_ops else 0
-
-        # Статистика по методам
-        method_stats = {}
-        for op in monthly_ops:
-            method = op["details"].get("method", "unknown")
-            method_stats[method] = method_stats.get(method, 0) + 1
-
-        # Определяем самый популярный метод
-        most_used_method = max(method_stats.items(), key=lambda x: x[1])[0] if method_stats else "нет данных"
-
-        return {
-            "total_operations": len(monthly_ops),
-            "hide_operations": len(hide_ops),
-            "extract_operations": len(extract_ops),
-            "success_rate": success_rate,
-            "most_used_method": most_used_method,
-            "methods_used": len(method_stats),
-            "days_active": len(
-                set(datetime.strptime(op["formatted_time"], "%Y-%m-%d %H:%M:%S").date() for op in monthly_ops))
-        }
-
-    def get_streak_history(self):
-        """Возвращает историю стрейков за последний месяц"""
-        today = datetime.now().date()
-        streak_data = []
-
-        # Создаем данные за последний месяц
-        for i in range(30):
-            date = today - timedelta(days=i)
-
-            # Проверяем, был ли активен в этот день
-            was_active = False
-            for entry in self.log_manager.get_entries(limit=1000):
-                entry_date = datetime.strptime(entry["formatted_time"], "%Y-%m-%d %H:%M:%S").date()
-                if entry_date == date:
-                    was_active = True
-                    break
-
-            streak_data.append({
-                "date": date.isoformat(),
-                "active": was_active,
-                "current_streak": self.current_streak if date == today else 0
-            })
-
-        # Сортируем по дате (от старых к новым)
-        streak_data.reverse()
-        return streak_data
-
-
-# ───────────────────────────────────────────────
-# 🎨 УЛУЧШЕННАЯ ВКЛАДКА ДОСТИЖЕНИЙ
-# ───────────────────────────────────────────────
-class AchievementsTab:
-    """Улучшенная вкладка для отображения системы достижений, стрейков и статистики"""
-
-    def __init__(self, parent, app):
-        self.parent = parent
-        self.app = app
-        self.achievement_manager = app.achievement_manager
-        self.analytics_manager = app.analytics_manager
-        self.log_manager = app.log_manager
-        self.last_update_time = 0
-
-        self.setup_ui()
-
-    def setup_ui(self):
-        """Создает интерфейс вкладки достижений"""
-        # Основной контейнер с прокруткой
-        self.canvas = tk.Canvas(self.parent, bg=self.app.colors["bg"], highlightthickness=0)
-        scrollbar = ttk.Scrollbar(self.parent, orient="vertical", command=self.canvas.yview)
-        self.scrollable_frame = ttk.Frame(self.canvas, style="Card.TFrame")
-
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
-
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=scrollbar.set)
-
-        self.canvas.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
-        scrollbar.pack(side="right", fill="y")
-
-        # Связываем колесо мыши для прокрутки
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-
-        # Создаем содержимое
-        self.create_content()
-
-        # Обновляем данные
-        self.update_all()
-
-    def _on_mousewheel(self, event):
-        """Обработка колеса мыши для прокрутки"""
-        self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
-
-    def create_content(self):
-        """Создает содержимое вкладки"""
-        # Заголовок
-        header_frame = ttk.Frame(self.scrollable_frame, style="Card.TFrame")
-        header_frame.pack(fill=tk.X, padx=20, pady=(20, 15))
-
-        ttk.Label(
-            header_frame,
-            text="🏆 Система достижений",
-            font=("Segoe UI Variable Display", 24, "bold"),
-            foreground=self.app.colors["accent"],
-            style="Title.TLabel"
-        ).pack(side=tk.LEFT)
-
-        # Индикатор уровня
-        level_frame = ttk.Frame(header_frame, style="Card.TFrame")
-        level_frame.pack(side=tk.RIGHT, padx=10)
-
-        self.level_label = ttk.Label(
-            level_frame,
-            text=f"Уровень: {self.achievement_manager.user_level}",
-            font=("Segoe UI", 14, "bold"),
-            foreground=self.app.colors["success"],
-            style="Info.TLabel"
-        )
-        self.level_label.pack(side=tk.LEFT, padx=(0, 10))
-
-        self.xp_label = ttk.Label(
-            level_frame,
-            text=self.get_xp_text(),
-            font=("Segoe UI", 10),
-            foreground=self.app.colors["text_secondary"],
-            style="Info.TLabel"
-        )
-        self.xp_label.pack(side=tk.LEFT)
-
-        # Прогресс-бар уровня
-        xp_frame = ttk.Frame(self.scrollable_frame, style="Card.TFrame")
-        xp_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
-
-        # Создаем кастомный прогресс-бар уровня
-        self.level_progress = ttk.Progressbar(
-            xp_frame,
-            orient="horizontal",
-            mode="determinate",
-            style="TProgressbar"
-        )
-        self.level_progress.pack(fill=tk.X, expand=True)
-
-        # Стрейк-панель
-        streak_frame = ttk.LabelFrame(
-            self.scrollable_frame,
-            text="🔥 Ежедневный стрейк",
-            padding=15,
-            style="Card.TLabelframe"
-        )
-        streak_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
-
-        # Информация о стрейке
-        streak_info_frame = ttk.Frame(streak_frame, style="Card.TFrame")
-        streak_info_frame.pack(fill=tk.X, pady=(0, 10))
-
-        ttk.Label(
-            streak_info_frame,
-            text=f"Текущий стрейк: {self.achievement_manager.current_streak} дней",
-            font=("Segoe UI", 14, "bold"),
-            foreground=self.get_streak_color(self.achievement_manager.current_streak),
-            style="TLabel"
-        ).pack(side=tk.LEFT)
-
-        ttk.Label(
-            streak_info_frame,
-            text=f"Рекорд: {self.achievement_manager.longest_streak} дней",
-            font=("Segoe UI", 12),
-            foreground=self.app.colors["text_secondary"],
-            style="Secondary.TLabel"
-        ).pack(side=tk.RIGHT)
-
-        # Прогресс-бар стрейка
-        streak_progress_frame = ttk.Frame(streak_frame, style="Card.TFrame")
-        streak_progress_frame.pack(fill=tk.X)
-
-        ttk.Label(
-            streak_progress_frame,
-            text="До следующего достижения:",
-            font=("Segoe UI", 10),
-            style="Secondary.TLabel"
-        ).pack(anchor="w", pady=(5, 0))
-
-        # Определяем цель для следующего стрейк-достижения
-        next_streak_target = self.get_next_streak_target()
-        streak_progress = min(self.achievement_manager.current_streak / next_streak_target,
-                              1.0) if next_streak_target > 0 else 0
-
-        self.streak_progress_bar = ttk.Progressbar(
-            streak_progress_frame,
-            orient="horizontal",
-            mode="determinate",
-            value=streak_progress * 100,
-            style=self.get_streak_progress_style(self.achievement_manager.current_streak)
-        )
-        self.streak_progress_bar.pack(fill=tk.X, pady=(5, 0))
-
-        ttk.Label(
-            streak_progress_frame,
-            text=f"{self.achievement_manager.current_streak}/{next_streak_target} дней",
-            font=("Segoe UI", 9),
-            style="Secondary.TLabel"
-        ).pack(anchor="e")
-
-        # Ежедневные цели
-        self.create_daily_goals_section()
-
-        # Тепловая карта активности
-        self.create_activity_heatmap()
-
-        # Категории достижений
-        self.create_achievements_categories()
-
-        # Последние бейджи
-        self.create_recent_badges_section()
-
-        # Статистика за месяц
-        self.create_monthly_stats()
-
-        # Кнопки действий
-        self.create_action_buttons()
-
-    def get_next_streak_target(self):
-        """Возвращает цель для следующего стрейк-достижения"""
-        current = self.achievement_manager.current_streak
-        targets = [3, 7, 30]  # Цели для стрейков
-
-        for target in targets:
-            if current < target:
-                return target
-
-        return current + 1  # Если все цели пройдены
-
-    def get_streak_color(self, streak_days):
-        """Возвращает цвет для отображения стрейка"""
-        if streak_days >= 30:
-            return "#FFD700"  # Золотой
-        elif streak_days >= 7:
-            return "#FFA500"  # Оранжевый
-        elif streak_days >= 3:
-            return "#9370DB"  # Фиолетовый
-        else:
-            return self.app.colors["accent"]
-
-    def get_streak_progress_style(self, streak_days):
-        """Возвращает стиль прогресс-бара для стрейка"""
-        if streak_days >= 30:
-            return "UsageRed.Horizontal.TProgressbar"  # Золотой (имитация)
-        elif streak_days >= 7:
-            return "UsageYellow.Horizontal.TProgressbar"
-        else:
-            return "UsageGreen.Horizontal.TProgressbar"
-
-    def get_xp_text(self):
-        """Возвращает текст с информацией о XP"""
-        xp_for_next = self.achievement_manager.get_xp_for_next_level()
-        return f"{self.achievement_manager.user_xp}/{xp_for_next} XP до уровня {self.achievement_manager.user_level + 1}"
-
-    def create_daily_goals_section(self):
-        """Создает раздел с ежедневными целями"""
-        goals_frame = ttk.LabelFrame(
-            self.scrollable_frame,
-            text="🎯 Ежедневные цели",
-            padding=15,
-            style="Card.TLabelframe"
-        )
-        goals_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
-
-        # Заголовок
-        ttk.Label(
-            goals_frame,
-            text="Выполните цели сегодня, чтобы получить дополнительный XP:",
-            font=("Segoe UI", 10),
-            style="Secondary.TLabel"
-        ).pack(anchor="w", pady=(0, 10))
-
-        # Цели
-        self.goal_widgets = {}
-
-        for goal in self.achievement_manager.daily_goals:
-            goal_frame = ttk.Frame(goals_frame, style="Card.TFrame")
-            goal_frame.pack(fill=tk.X, pady=5)
-
-            # Индикатор выполнения
-            status_frame = ttk.Frame(goal_frame, width=20, style="Card.TFrame")
-            status_frame.pack(side=tk.LEFT, padx=(0, 10))
-
-            status_label = ttk.Label(
-                status_frame,
-                text="✓" if goal["completed"] else "○",
-                font=("Segoe UI", 12, "bold"),
-                foreground=self.app.colors["success"] if goal["completed"] else self.app.colors["warning"],
-                style="TLabel"
-            )
-            status_label.pack()
-
-            # Информация о цели
-            info_frame = ttk.Frame(goal_frame, style="Card.TFrame")
-            info_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-            progress_frame = ttk.Frame(info_frame, style="Card.TFrame")
-            progress_frame.pack(fill=tk.X)
-
-            # Используем реальные названия и описания
-            ttk.Label(
-                progress_frame,
-                text=goal.get("name", "Ежедневная цель"),
-                font=("Segoe UI", 11, "bold"),
-                style="TLabel"
-            ).pack(anchor="w")
-
-            ttk.Label(
-                progress_frame,
-                text=goal.get("description", "Описание цели"),
-                font=("Segoe UI", 9),
-                style="Secondary.TLabel"
-            ).pack(anchor="w")
-
-            # Прогресс
-            progress = min(goal["progress"] / goal["target"], 1.0)
-            progress_bar = ttk.Progressbar(
-                info_frame,
-                orient="horizontal",
-                mode="determinate",
-                value=progress * 100,
-                style="TProgressbar"
-            )
-            progress_bar.pack(fill=tk.X, pady=(5, 0))
-
-            # Награда и прогресс
-            reward_frame = ttk.Frame(info_frame, style="Card.TFrame")
-            reward_frame.pack(fill=tk.X)
-
-            ttk.Label(
-                reward_frame,
-                text=f"+{goal['reward_xp']} XP",
-                font=("Segoe UI", 9, "bold"),
-                foreground=self.app.colors["success"],
-                style="TLabel"
-            ).pack(side=tk.LEFT)
-
-            ttk.Label(
-                reward_frame,
-                text=f"{goal['progress']}/{goal['target']}",
-                font=("Segoe UI", 9),
-                style="Secondary.TLabel"
-            ).pack(side=tk.RIGHT)
-
-            self.goal_widgets[goal["id"]] = {
-                "status_label": status_label,
-                "progress_bar": progress_bar
-            }
-
-    def create_activity_heatmap(self):
-        """Создает тепловую карту активности"""
-        heatmap_frame = ttk.LabelFrame(
-            self.scrollable_frame,
-            text="📊 Карта активности (30 дней)",
-            padding=15,
-            style="Card.TLabelframe"
-        )
-        heatmap_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
-
-        # Получаем данные для тепловой карты
-        activity_data = self.achievement_manager.get_activity_heatmap(30)
-
-        # Создаем сетку для тепловой карты
-        calendar_frame = ttk.Frame(heatmap_frame, style="Card.TFrame")
-        calendar_frame.pack(fill=tk.X, pady=5)
-
-        # Заголовки дней недели
-        days = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
-        for i, day in enumerate(days):
-            ttk.Label(
-                calendar_frame,
-                text=day,
-                font=("Segoe UI", 8, "bold"),
-                foreground=self.app.colors["text_secondary"],
-                style="Secondary.TLabel"
-            ).grid(row=0, column=i + 1, padx=2, pady=2)
-
-        # Группируем данные по неделям
-        weeks = {}
-        current_week = 0
-        first_day = datetime.fromisoformat(activity_data[0]["date"]).weekday()
-
-        for i, day_data in enumerate(activity_data):
-            date_obj = datetime.fromisoformat(day_data["date"])
-            weekday = date_obj.weekday()
-
-            if i == 0:
-                # Первая неделя может начинаться не с понедельника
-                current_week = 0
-            elif weekday == 0:  # Новый понедельник
-                current_week += 1
-
-            if current_week not in weeks:
-                weeks[current_week] = [None] * 7
-
-            weeks[current_week][weekday] = day_data
-
-        # Создаем ячейки для тепловой карты
-        colors = [
-            self.app.colors["card"],  # 0 операций
-            "#4C8DFF",  # 1-2 операции
-            "#3FDA87",  # 3-4 операции
-            "#F0B23E",  # 5-6 операций
-            "#FF6B6B"  # 7+ операций
-        ]
-
-        max_week = max(weeks.keys()) if weeks else 0
-
-        for week_num, days_data in weeks.items():
-            for day_index, day_data in enumerate(days_data):
-                if day_data is None:
-                    continue
-
-                # Создаем ячейку
-                cell = tk.Canvas(
-                    calendar_frame,
-                    width=20,
-                    height=20,
-                    bg=colors[day_data["level"]],
-                    highlightthickness=1,
-                    highlightbackground=self.app.colors["border"]
-                )
-                cell.grid(row=week_num + 1, column=day_index + 1, padx=1, pady=1)
-
-                # Добавляем подсказку
-                if day_data["count"] > 0:
-                    ToolTip(cell, f"{day_data['date']}: {day_data['count']} операций")
-
-                # Выделяем сегодняшний день
-                if day_data["is_today"]:
-                    cell.create_oval(2, 2, 18, 18, outline=self.app.colors["accent"], width=2)
-
-        # Легенда
-        legend_frame = ttk.Frame(heatmap_frame, style="Card.TFrame")
-        legend_frame.pack(fill=tk.X, pady=(10, 0))
-
-        ttk.Label(
-            legend_frame,
-            text="Легенда:",
-            font=("Segoe UI", 9, "bold"),
-            style="Secondary.TLabel"
-        ).pack(side=tk.LEFT, padx=(0, 10))
-
-        for i, color in enumerate(colors):
-            if i == 0:
-                label = "Нет активности"
-            elif i == 1:
-                label = "1-2 операции"
-            elif i == 2:
-                label = "3-4 операции"
-            elif i == 3:
-                label = "5-6 операций"
-            else:
-                label = "7+ операций"
-
-            color_box = tk.Canvas(
-                legend_frame,
-                width=12,
-                height=12,
-                bg=color,
-                highlightthickness=1,
-                highlightbackground=self.app.colors["border"]
-            )
-            color_box.pack(side=tk.LEFT, padx=(0, 5))
-
-            ttk.Label(
-                legend_frame,
-                text=label,
-                font=("Segoe UI", 8),
-                style="Secondary.TLabel"
-            ).pack(side=tk.LEFT, padx=(0, 15))
-
-    def create_achievements_categories(self):
-        """Создает раздел с категориями достижений"""
-        categories = [
-            "beginner",
-            "intermediate",
-            "advanced",
-            "expert",
-            "technical",
-            "security",
-            "streak",
-            "mastery"
-        ]
-
-        for category in categories:
-            category_data = self.achievement_manager.get_progress_by_category(category)
-            if category_data["total"] == 0:
-                continue
-
-            # Создаем фрейм для категории
-            category_frame = ttk.LabelFrame(
-                self.scrollable_frame,
-                text=f"🔶 {self.achievement_manager.get_category_name(category_data['category'])}",
-                padding=15,
-                style="Card.TLabelframe"
-            )
-            category_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
-
-            # Заголовок категории с прогрессом
-            header_frame = ttk.Frame(category_frame, style="Card.TFrame")
-            header_frame.pack(fill=tk.X, pady=(0, 10))
-
-            ttk.Label(
-                header_frame,
-                text=f"Прогресс: {category_data['completed']}/{category_data['total']} разблокировано",
-                font=("Segoe UI", 11, "bold"),
-                style="TLabel"
-            ).pack(side=tk.LEFT)
-
-            # Прогресс-бар категории
-            progress = category_data["progress"] / 100
-            category_progress = ttk.Progressbar(
-                header_frame,
-                orient="horizontal",
-                mode="determinate",
-                value=category_data["progress"],
-                style="TProgressbar"
-            )
-            category_progress.pack(side=tk.RIGHT, fill=tk.X, expand=True, padx=(10, 0))
-
-            # Достижения в категории
-            achievements_frame = ttk.Frame(category_frame, style="Card.TFrame")
-            achievements_frame.pack(fill=tk.X)
-
-            # Сортируем достижения: сначала разблокированные, потом заблокированные
-            sorted_achievements = sorted(
-                category_data["achievements"],
-                key=lambda x: (not x["unlocked"], x["target"])
-            )
-
-            # Отображаем максимум 6 достижений в категории
-            for achievement in sorted_achievements[:6]:
-                self.create_achievement_card(achievements_frame, achievement)
-
-            # Кнопка "Показать все"
-            if len(category_data["achievements"]) > 6:
-                show_all_btn = ttk.Button(
-                    category_frame,
-                    text=f"Показать все {len(category_data['achievements'])} достижений",
-                    style="CardButton.TButton",
-                    command=lambda c=category: self.show_all_achievements_in_category(c)
-                )
-                show_all_btn.pack(pady=(10, 0))
-
-    def create_achievement_card(self, parent, achievement):
-        """Создает карточку для отображения одного достижения"""
-        card_frame = ttk.Frame(parent, style="Card.TFrame")
-        card_frame.pack(fill=tk.X, pady=5)
-
-        # Иконка и название
-        title_frame = ttk.Frame(card_frame, style="Card.TFrame")
-        title_frame.pack(fill=tk.X, pady=(0, 5))
-
-        # Иконка с цветом в зависимости от редкости
-        rarity_colors = {
-            "common": self.app.colors["text_secondary"],
-            "uncommon": "#4C8DFF",
-            "rare": "#9370DB",
-            "epic": "#F0B23E",
-            "legendary": "#FF6B6B"
-        }
-
-        # Используем реальную иконку из достижения
-        icon_label = ttk.Label(
-            title_frame,
-            text=achievement.get("icon", "🏆"),
-            font=("Segoe UI", 16, "bold"),
-            foreground=rarity_colors.get(achievement.get("rarity", "common"), self.app.colors["accent"]),
-            style="TLabel"
-        )
-        icon_label.pack(side=tk.LEFT, padx=(0, 10))
-
-        # Название и редкость
-        name_frame = ttk.Frame(title_frame, style="Card.TFrame")
-        name_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-        # Используем реальное название из достижения
-        ttk.Label(
-            name_frame,
-            text=achievement.get("name", "Достижение"),
-            font=("Segoe UI", 12, "bold"),
-            foreground=self.app.colors["text"],
-            style="TLabel"
-        ).pack(anchor="w")
-
-        rarity_text = self.achievement_manager.get_rarity_description(achievement.get("rarity", "common"))
-        ttk.Label(
-            name_frame,
-            text=f"{rarity_text} • {achievement.get('xp_reward', 100)} XP",
-            font=("Segoe UI", 9),
-            foreground=rarity_colors.get(achievement.get("rarity", "common"), self.app.colors["text_secondary"]),
-            style="Secondary.TLabel"
-        ).pack(anchor="w")
-
-        # Описание
-        ttk.Label(
-            card_frame,
-            text=achievement.get("description", "Описание достижения"),
-            font=("Segoe UI", 10),
-            wraplength=600,
-            justify=tk.LEFT,
-            style="Secondary.TLabel"
-        ).pack(anchor="w", pady=(0, 5))
-
-        # Прогресс или дата разблокировки
-        if achievement.get("unlocked", False):
-            date_str = achievement.get("date_unlocked", "")
-            if date_str:
-                try:
-                    date_obj = datetime.fromisoformat(date_str)
-                    date_text = date_obj.strftime("%d.%m.%Y в %H:%M")
-                except:
-                    date_text = "Дата не указана"
-            else:
-                date_text = "Дата не указана"
-
-            status_frame = ttk.Frame(card_frame, style="Card.TFrame")
-            status_frame.pack(fill=tk.X)
-
-            ttk.Label(
-                status_frame,
-                text="✓ РАЗБЛОКИРОВАНО",
-                font=("Segoe UI", 10, "bold"),
-                foreground=self.app.colors["success"],
-                style="TLabel"
-            ).pack(side=tk.LEFT)
-
-            ttk.Label(
-                status_frame,
-                text=date_text,
-                font=("Segoe UI", 9),
-                foreground=self.app.colors["text_secondary"],
-                style="Secondary.TLabel"
-            ).pack(side=tk.RIGHT)
-        else:
-            # Прогресс-бар
-            progress_frame = ttk.Frame(card_frame, style="Card.TFrame")
-            progress_frame.pack(fill=tk.X)
-
-            progress = achievement.get("progress", 0) / achievement.get("target", 1)
-            progress_text = f"{achievement.get('progress', 0)}/{achievement.get('target', 1)}"
-
-            ttk.Label(
-                progress_frame,
-                text=progress_text,
-                font=("Segoe UI", 9),
-                style="Secondary.TLabel"
-            ).pack(side=tk.LEFT)
-
-            progress_bar = ttk.Progressbar(
-                progress_frame,
-                orient="horizontal",
-                mode="determinate",
-                value=progress * 100,
-                style="TProgressbar"
-            )
-            progress_bar.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
-
-            # Процент выполнения справа
-            ttk.Label(
-                progress_frame,
-                text=f"{progress * 100:.0f}%",
-                font=("Segoe UI", 9),
-                style="Secondary.TLabel"
-            ).pack(side=tk.RIGHT)
-
-    def create_recent_badges_section(self):
-        """Создает раздел с последними полученными бейджами"""
-        badges_frame = ttk.LabelFrame(
-            self.scrollable_frame,
-            text="🎖️ Последние награды",
-            padding=15,
-            style="Card.TLabelframe"
-        )
-        badges_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
-
-        recent_badges = self.achievement_manager.get_recent_badges(5)
-
-        if not recent_badges:
-            ttk.Label(
-                badges_frame,
-                text="У вас пока нет наград. Начните использовать программу!",
-                font=("Segoe UI", 10),
-                style="Secondary.TLabel"
-            ).pack(pady=10)
-            return
-
-        for badge in recent_badges:
-            badge_frame = ttk.Frame(badges_frame, style="Card.TFrame")
-            badge_frame.pack(fill=tk.X, pady=5)
-
-            # Иконка типа бейджа
-            badge_icon = "🏆"
-            icon_color = self.app.colors["accent"]
-
-            if badge["type"] == "achievement":
-                badge_icon = badge.get("icon", "🎯")
-                rarity_colors = {
-                    "common": self.app.colors["text_secondary"],
-                    "uncommon": "#4C8DFF",
-                    "rare": "#9370DB",
-                    "epic": "#F0B23E",
-                    "legendary": "#FF6B6B"
-                }
-                icon_color = rarity_colors.get(badge.get("rarity", "common"), self.app.colors["accent"])
-            elif badge["type"] == "level_up":
-                badge_icon = "✨"
-                icon_color = self.app.colors["success"]
-            elif badge["type"] == "daily_goal":
-                badge_icon = "🎯"
-                icon_color = self.app.colors["warning"]
-            elif badge["type"] == "streak":
-                badge_icon = "🔥"
-                icon_color = self.app.colors["error"]
-
-            # Иконка
-            icon_label = ttk.Label(
-                badge_frame,
-                text=badge_icon,
-                font=("Segoe UI", 14, "bold"),
-                foreground=icon_color,
-                style="TLabel"
-            )
-            icon_label.pack(side=tk.LEFT, padx=(0, 10))
-
-            # Информация о бейдже
-            info_frame = ttk.Frame(badge_frame, style="Card.TFrame")
-            info_frame.pack(side=tk.LEFT, fill=tk.X, expand=True)
-
-            if badge["type"] == "achievement":
-                ttk.Label(
-                    info_frame,
-                    text=f"Достижение: {badge['name']}",
-                    font=("Segoe UI", 11, "bold"),
-                    style="TLabel"
-                ).pack(anchor="w")
-
-                ttk.Label(
-                    info_frame,
-                    text=f"Награда: {badge['xp_reward']} XP • {badge['rarity'].capitalize()}",
-                    font=("Segoe UI", 9),
-                    foreground=self.app.colors["text_secondary"],
-                    style="Secondary.TLabel"
-                ).pack(anchor="w")
-            elif badge["type"] == "level_up":
-                ttk.Label(
-                    info_frame,
-                    text=f"Повышение уровня до {badge['level']}",
-                    font=("Segoe UI", 11, "bold"),
-                    style="TLabel"
-                ).pack(anchor="w")
-
-                ttk.Label(
-                    info_frame,
-                    text=f"Награда: {badge['reward']} XP",
-                    font=("Segoe UI", 9),
-                    foreground=self.app.colors["text_secondary"],
-                    style="Secondary.TLabel"
-                ).pack(anchor="w")
-            elif badge["type"] == "daily_goal":
-                ttk.Label(
-                    info_frame,
-                    text=f"Ежедневная цель: {badge['name']}",
-                    font=("Segoe UI", 11, "bold"),
-                    style="TLabel"
-                ).pack(anchor="w")
-
-                ttk.Label(
-                    info_frame,
-                    text=f"Награда: {badge['reward']} XP",
-                    font=("Segoe UI", 9),
-                    foreground=self.app.colors["text_secondary"],
-                    style="Secondary.TLabel"
-                ).pack(anchor="w")
-            elif badge["type"] == "streak":
-                ttk.Label(
-                    info_frame,
-                    text=f"Стрейк-достижение: {badge['name']}",
-                    font=("Segoe UI", 11, "bold"),
-                    style="TLabel"
-                ).pack(anchor="w")
-
-                ttk.Label(
-                    info_frame,
-                    text=f"Текущий стрейк: {self.achievement_manager.current_streak} дней",
-                    font=("Segoe UI", 9),
-                    foreground=self.app.colors["text_secondary"],
-                    style="Secondary.TLabel"
-                ).pack(anchor="w")
-
-            # Дата
-            date_obj = datetime.fromisoformat(badge["date"])
-            date_text = date_obj.strftime("%d.%m.%Y %H:%M")
-
-            ttk.Label(
-                badge_frame,
-                text=date_text,
-                font=("Segoe UI", 9),
-                foreground=self.app.colors["text_secondary"],
-                style="Secondary.TLabel"
-            ).pack(side=tk.RIGHT, padx=(10, 0))
-
-    def create_monthly_stats(self):
-        """Создает раздел со статистикой за месяц"""
-        stats = self.achievement_manager.get_monthly_stats()
-
-        stats_frame = ttk.LabelFrame(
-            self.scrollable_frame,
-            text="📈 Статистика за месяц",
-            padding=15,
-            style="Card.TLabelframe"
-        )
-        stats_frame.pack(fill=tk.X, padx=20, pady=(0, 15))
-
-        # Основные метрики
-        metrics_frame = ttk.Frame(stats_frame, style="Card.TFrame")
-        metrics_frame.pack(fill=tk.X, pady=(0, 10))
-
-        metrics = [
-            ("Всего операций", stats["total_operations"], "📊"),
-            ("Успешно", f"{stats['success_rate']:.1f}%", "✅"),
-            ("Скрытие", stats["hide_operations"], "🔍"),
-            ("Извлечение", stats["extract_operations"], "📥"),
-            ("Активных дней", stats["days_active"], "📅"),
-            ("Методов", stats["methods_used"], "🧪")
-        ]
-
-        for i, (label, value, icon) in enumerate(metrics):
-            metric_frame = ttk.Frame(metrics_frame, style="Card.TFrame")
-            metric_frame.grid(row=0, column=i, padx=5, pady=5)
-
-            ttk.Label(
-                metric_frame,
-                text=icon,
-                font=("Segoe UI", 16),
-                foreground=self.app.colors["accent"],
-                style="TLabel"
-            ).pack()
-
-            ttk.Label(
-                metric_frame,
-                text=str(value),
-                font=("Segoe UI", 12, "bold"),
-                style="TLabel"
-            ).pack()
-
-            ttk.Label(
-                metric_frame,
-                text=label,
-                font=("Segoe UI", 8),
-                style="Secondary.TLabel"
-            ).pack()
-
-        metrics_frame.columnconfigure(tuple(range(len(metrics))), weight=1)
-
-        # Дополнительная информация
-        info_frame = ttk.Frame(stats_frame, style="Card.TFrame")
-        info_frame.pack(fill=tk.X)
-
-        ttk.Label(
-            info_frame,
-            text=f"Самый популярный метод: {STEGANO_METHODS.get(stats['most_used_method'], stats['most_used_method'])}",
-            font=("Segoe UI", 10),
-            style="Secondary.TLabel"
-        ).pack(anchor="w")
-
-        # Прогноз XP
-        estimated_xp = stats["total_operations"] * 50  # Приблизительно 50 XP за операцию
-        days_left = 30 - datetime.now().day + 1
-        forecast_xp = estimated_xp + days_left * 150  # +150 XP за оставшиеся дни (среднее)
-
-        ttk.Label(
-            info_frame,
-            text=f"Прогноз XP через 30 дней: ~{forecast_xp}",
-            font=("Segoe UI", 10),
-            style="Secondary.TLabel"
-        ).pack(anchor="w", pady=(5, 0))
-
-    def create_action_buttons(self):
-        """Создает кнопки действий внизу вкладки"""
-        btn_frame = ttk.Frame(self.scrollable_frame, style="Card.TFrame")
-        btn_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
-
-        buttons = [
-            ("🔄 Обновить", self.update_all),
-            ("🎁 Все достижения", self.show_all_achievements),
-            ("📊 Экспорт статистики", self.export_statistics),
-            ("🏆 Лидерборд", self.show_leaderboard)
-        ]
-
-        for text, command in buttons:
-            ttk.Button(
-                btn_frame,
-                text=text,
-                style="CardButton.TButton",
-                command=command
-            ).pack(side=tk.LEFT, padx=5)
-
-    def show_all_achievements_in_category(self, category):
-        """Показывает все достижения в категории"""
-        category_data = self.achievement_manager.get_progress_by_category(category)
-
-        if not category_data["achievements"]:
-            return
-
-        # Создаем новое окно
-        window = tk.Toplevel(self.app.root)
-        window.title(f"Достижения: {self.achievement_manager.get_category_name(category)}")
-        window.geometry("800x600")
-        window.transient(self.app.root)
-        window.grab_set()
-
-        # Заголовок
-        ttk.Label(
-            window,
-            text=f"🏆 {self.achievement_manager.get_category_name(category_data['category'])}",
-            font=("Segoe UI Variable Display", 18, "bold"),
-            foreground=self.app.colors["accent"],
-            style="Title.TLabel"
-        ).pack(pady=(20, 10))
-
-        ttk.Label(
-            window,
-            text=f"Прогресс: {category_data['completed']}/{category_data['total']} разблокировано",
-            font=("Segoe UI", 11),
-            style="Secondary.TLabel"
-        ).pack(pady=(0, 20))
-
-        # Прокрутка
-        canvas = tk.Canvas(window, bg=self.app.colors["bg"])
-        scrollbar = ttk.Scrollbar(window, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas, style="Card.TFrame")
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side="left", fill="both", expand=True, padx=20, pady=10)
-        scrollbar.pack(side="right", fill="y")
-
-        # Достижения
-        for achievement in category_data["achievements"]:
-            self.create_achievement_card(scrollable_frame, achievement)
-            ttk.Separator(scrollable_frame, orient="horizontal").pack(fill=tk.X, pady=10)
-
-        # Кнопка закрытия
-        ttk.Button(
-            window,
-            text="❌ Закрыть",
-            style="TButton",
-            command=window.destroy
-        ).pack(pady=20)
-
-    def show_all_achievements(self):
-        """Показывает все достижения в отдельном окне"""
-        # Создаем новое окно
-        window = tk.Toplevel(self.app.root)
-        window.title("Все достижения")
-        window.geometry("900x700")
-        window.transient(self.app.root)
-        window.grab_set()
-
-        # Заголовок
-        ttk.Label(
-            window,
-            text="🏆 Все достижения ØccultoNG Pro",
-            font=("Segoe UI Variable Display", 20, "bold"),
-            foreground=self.app.colors["accent"],
-            style="Title.TLabel"
-        ).pack(pady=(20, 10))
-
-        # Уровень пользователя
-        ttk.Label(
-            window,
-            text=f"Уровень: {self.achievement_manager.user_level} • Всего XP: {self.achievement_manager.total_xp}",
-            font=("Segoe UI", 12),
-            style="Secondary.TLabel"
-        ).pack(pady=(0, 20))
-
-        # Прокрутка
-        canvas = tk.Canvas(window, bg=self.app.colors["bg"])
-        scrollbar = ttk.Scrollbar(window, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas, style="Card.TFrame")
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side="left", fill="both", expand=True, padx=20, pady=10)
-        scrollbar.pack(side="right", fill="y")
-
-        # Группируем достижения по категориям
-        categories = {}
-        for key, achievement in self.achievement_manager.achievements.items():
-            category = achievement["category"]
-            if category not in categories:
-                categories[category] = []
-            categories[category].append(achievement)
-
-        # Сортируем категории по приоритету
-        category_order = ["beginner", "intermediate", "advanced", "expert", "technical", "security", "streak",
-                          "mastery"]
-        sorted_categories = sorted(categories.items(),
-                                   key=lambda x: category_order.index(x[0]) if x[0] in category_order else 999)
-
-        for category, achievements in sorted_categories:
-            # Заголовок категории
-            category_name = self.achievement_manager.get_category_name(category)
-            ttk.Label(
-                scrollable_frame,
-                text=f"🔶 {category_name}",
-                font=("Segoe UI", 16, "bold"),
-                foreground=self.app.colors["accent"],
-                style="Header.TLabel"
-            ).pack(anchor="w", pady=(20, 10))
-
-            # Сортируем достижения в категории
-            sorted_achievements = sorted(
-                achievements,
-                key=lambda x: (not x["unlocked"], x["target"])
-            )
-
-            # Достижения
-            for achievement in sorted_achievements:
-                self.create_achievement_card(scrollable_frame, achievement)
-                ttk.Separator(scrollable_frame, orient="horizontal").pack(fill=tk.X, pady=10)
-
-        # Кнопка закрытия
-        ttk.Button(
-            window,
-            text="❌ Закрыть",
-            style="TButton",
-            command=window.destroy
-        ).pack(pady=20)
-
-    def show_leaderboard(self):
-        """Показывает таблицу лидеров"""
-        messagebox.showinfo("🏆 Лидерборд", "Функция таблицы лидеров будет доступна в будущих версиях программы!")
-
-    def export_statistics(self):
-        """Экспортирует статистику достижений"""
-        path = filedialog.asksaveasfilename(
-            title="Экспортировать статистику",
-            defaultextension=".json",
-            filetypes=[("JSON файлы", "*.json"), ("Все файлы", "*.*")],
-            initialdir=self.app.last_save_dir
-        )
-
-        if not path:
-            return
-
-        try:
-            # Собираем данные для экспорта
-            export_data = {
-                "user_profile": {
-                    "level": self.achievement_manager.user_level,
-                    "total_xp": self.achievement_manager.total_xp,
-                    "current_streak": self.achievement_manager.current_streak,
-                    "longest_streak": self.achievement_manager.longest_streak,
-                    "badges_count": len(self.achievement_manager.badges),
-                    "date_exported": datetime.now().isoformat()
-                },
-                "achievements_summary": {
-                    "total": len(self.achievement_manager.achievements),
-                    "unlocked": len(self.achievement_manager.get_unlocked_achievements()),
-                    "by_category": {},
-                    "by_rarity": {}
-                },
-                "recent_activity": self.achievement_manager.get_activity_heatmap(30),
-                "monthly_stats": self.achievement_manager.get_monthly_stats()
-            }
-
-            # Статистика по категориям
-            category_stats = {}
-            for category in ["beginner", "intermediate", "advanced", "expert", "technical", "security", "streak",
-                             "mastery"]:
-                category_data = self.achievement_manager.get_progress_by_category(category)
-                if category_data["total"] > 0:
-                    category_stats[category] = {
-                        "name": self.achievement_manager.get_category_name(category),
-                        "total": category_data["total"],
-                        "completed": category_data["completed"],
-                        "progress": category_data["progress"]
-                    }
-
-            export_data["achievements_summary"]["by_category"] = category_stats
-
-            # Статистика по редкости
-            rarity_stats = {"common": 0, "uncommon": 0, "rare": 0, "epic": 0, "legendary": 0}
-            for achievement in self.achievement_manager.achievements.values():
-                if achievement["unlocked"]:
-                    rarity = achievement["rarity"]
-                    rarity_stats[rarity] = rarity_stats.get(rarity, 0) + 1
-
-            export_data["achievements_summary"]["by_rarity"] = rarity_stats
-
-            # Сохраняем файл
-            with open(path, 'w', encoding='utf-8') as f:
-                json.dump(export_data, f, indent=2, ensure_ascii=False)
-
-            messagebox.showinfo("✅ Экспорт", f"Статистика успешно экспортирована в файл:\n{path}")
-            self.app.show_toast("✅ Статистика экспортирована")
-        except Exception as e:
-            messagebox.showerror("❌ Ошибка", f"Не удалось экспортировать статистику:\n{str(e)}")
-
-    def update_all(self):
-        """Обновляет все данные на вкладке без пересоздания интерфейса"""
-        current_time = time.time()
-        if current_time - self.last_update_time < 0.5:  # Ограничиваем частоту обновления
-            return
-
-        self.last_update_time = current_time
-
-        # Обновляем данные
-        self.achievement_manager.update_streak()
-
-        # Обновляем UI
-        if hasattr(self, 'level_label'):
-            self.level_label.config(text=f"Уровень: {self.achievement_manager.user_level}")
-
-        if hasattr(self, 'xp_label'):
-            self.xp_label.config(text=self.get_xp_text())
-
-        # Обновляем прогресс уровня
-        xp_for_next = self.achievement_manager.get_xp_for_next_level()
-        level_progress = min(self.achievement_manager.user_xp / xp_for_next, 1.0) if xp_for_next > 0 else 0
-
-        if hasattr(self, 'level_progress'):
-            self.level_progress.config(value=level_progress * 100)
-
-        # Обновляем стрейк
-        if hasattr(self, 'streak_info_frame'):
-            for widget in self.streak_info_frame.winfo_children():
-                widget.destroy()
-
-            ttk.Label(
-                self.streak_info_frame,
-                text=f"Текущий стрейк: {self.achievement_manager.current_streak} дней",
-                font=("Segoe UI", 14, "bold"),
-                foreground=self.get_streak_color(self.achievement_manager.current_streak),
-                style="TLabel"
-            ).pack(side=tk.LEFT)
-
-            ttk.Label(
-                self.streak_info_frame,
-                text=f"Рекорд: {self.achievement_manager.longest_streak} дней",
-                font=("Segoe UI", 12),
-                foreground=self.app.colors["text_secondary"],
-                style="Secondary.TLabel"
-            ).pack(side=tk.RIGHT)
-
-        # Обновляем прогресс-бар стрейка
-        next_streak_target = self.get_next_streak_target()
-        streak_progress = min(self.achievement_manager.current_streak / next_streak_target,
-                              1.0) if next_streak_target > 0 else 0
-
-        if hasattr(self, 'streak_progress_bar'):
-            self.streak_progress_bar.config(
-                value=streak_progress * 100,
-                style=self.get_streak_progress_style(self.achievement_manager.current_streak)
-            )
-
-        # Обновляем ежедневные цели
-        self.update_daily_goals()
-
-        # Обновляем тепловую карту
-        self.update_heatmap()
-
-        # Обновляем разделы достижений
-        self.update_achievements_categories()
-
-        # Обновляем последние бейджи
-        self.update_recent_badges()
-
-        # Обновляем месячную статистику
-        self.update_monthly_stats()
-
-    def update_daily_goals(self):
-        """Обновляет отображение ежедневных целей"""
-        for goal in self.achievement_manager.daily_goals:
-            if goal["id"] in self.goal_widgets:
-                widgets = self.goal_widgets[goal["id"]]
-                status_label = widgets["status_label"]
-                progress_bar = widgets["progress_bar"]
-
-                # Обновляем статус
-                status_label.config(
-                    text="✓" if goal["completed"] else "○",
-                    foreground=self.app.colors["success"] if goal["completed"] else self.app.colors["warning"]
-                )
-
-                # Обновляем прогресс
-                progress = min(goal["progress"] / goal["target"], 1.0)
-                progress_bar.config(value=progress * 100)
-
-    def update_heatmap(self):
-        """Обновляет тепловую карту активности"""
-        # В реальном приложении здесь нужно перерисовать тепловую карту
-        # Для упрощения просто обновляем данные
-        pass
-
-    def update_achievements_categories(self):
-        """Обновляет разделы с категориями достижений"""
-        # В реальном приложении здесь нужно перерисовать категории
-        # Для упрощения пересоздаем содержимое
-        for widget in self.scrollable_frame.winfo_children():
-            if isinstance(widget, ttk.LabelFrame) and "🔶" in widget["text"]:
-                widget.destroy()
-
-        self.create_achievements_categories()
-
-    def update_recent_badges(self):
-        """Обновляет отображение последних бейджей"""
-        # В реальном приложении здесь нужно перерисовать бейджи
-        # Для упрощения пересоздаем содержимое
-        pass
-
-    def update_monthly_stats(self):
-        """Обновляет месячную статистику"""
-        # В реальном приложении здесь нужно перерисовать статистику
-        # Для упрощения пересоздаем содержимое
-        pass
-
-
-# ───────────────────────────────────────────────
 # 🎨 ГРАДИЕНТНЫЕ ФОНЫ И ЭФФЕКТЫ
 # ───────────────────────────────────────────────
 class GradientFrame(tk.Canvas):
@@ -3707,20 +1737,21 @@ class HistoryLog:
         """Возвращает статистику по журналу"""
         if not self.log:
             return {}
-
         total = len(self.log)
         successful = len([e for e in self.log if e["status"] == "success"])
         failed = len([e for e in self.log if e["status"] == "error"])
-
         # Статистика по типам операций
         operation_stats = {}
         for entry in self.log:
             op_type = entry["operation_type"]
             if op_type not in operation_stats:
-                operation_stats[op_type] = {"total": 0, "success": 0, "error": 0}
+                operation_stats[op_type] = {"total": 0, "success": 0, "error": 0, "warning": 0, "info": 0}
             operation_stats[op_type]["total"] += 1
-            operation_stats[op_type][entry["status"]] += 1
-
+            # Безопасное увеличение счетчика статуса
+            status = entry["status"]
+            if status not in operation_stats[op_type]:
+                operation_stats[op_type][status] = 0
+            operation_stats[op_type][status] += 1
         return {
             "total_operations": total,
             "successful_operations": successful,
@@ -4295,6 +2326,45 @@ class BatchProcessingUI:
     def _on_mousewheel(self, event):
         """Обработка колеса мыши для прокрутки"""
         self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+    def update_capacity_info(self):
+        """Обновляет информацию о вместимости контейнеров для пакетной обработки"""
+        if not self.selected_files:
+            self.capacity_label.config(
+                text="ℹ️ Выберите файлы для анализа вместимости",
+                style="Secondary.TLabel"
+            )
+            return
+
+        method = self.method_var.get()
+        total_capacity_bits = 0
+        valid_count = 0
+
+        for file_path in self.selected_files[:5]:  # Ограничение 5 файлов
+            try:
+                w, h, bits = ImageProcessor.get_image_info(file_path)
+                capacity = ImageProcessor.get_capacity_by_method(bits, method, w, h)
+                total_capacity_bits += capacity
+                valid_count += 1
+            except Exception:
+                continue
+
+        if total_capacity_bits > 0 and valid_count > 0:
+            total_bytes = total_capacity_bits // 8
+            self.capacity_label.config(
+                text=(
+                    f"📊 Файлов: {valid_count}\n"
+                    f"Метод: {STEGANO_METHODS.get(method, method)}\n"
+                    f"Общая вместимость: {Utils.format_size(total_bytes)}"
+                ),
+                style="Success.TLabel"
+            )
+        else:
+            self.capacity_label.config(
+                text="⚠️ Не удалось рассчитать вместимость\n"
+                     "Проверьте форматы файлов",
+                style="Warning.TLabel"
+            )
 
     def create_content(self):
         """Создает содержимое интерфейса с оптимизированной компоновкой для эффективного использования пространства"""
@@ -6238,1685 +4308,6 @@ class BatchProcessingUI:
         return self.app.root
 
 
-# ───────────────────────────────────────────────
-# 🤖 УЛУЧШЕННЫЙ ИНТЕЛЛЕКТУАЛЬНЫЙ ПОМОЩНИК
-# ───────────────────────────────────────────────
-class SmartAssistant:
-    """Интеллектуальный помощник пользователя с расширенными правилами, адаптивным обучением и проактивной помощью"""
-
-    def __init__(self, app):
-        self.app = app
-        self.last_tip_index = -1
-        self.last_contextual_tip_index = {}
-        self.user_preferences = self.load_user_preferences()
-        self.tip_history = []
-        self.feedback_history = {}
-        self.session_start_time = time.time()
-        self.tip_show_count = 0
-        self.contextual_weights = self.initialize_contextual_weights()
-        self.tip_database = self.load_tip_database()
-        self.last_analysis_result = None
-        self.next_scheduled_tip_time = 0
-        self.proactive_tips_enabled = True
-        self.initialize_adaptive_learning()
-        self.register_event_listeners()
-
-    def load_user_preferences(self):
-        """Загружает предпочтения пользователя для персонализации подсказок"""
-        try:
-            if os.path.exists("assistant_preferences.json"):
-                with open("assistant_preferences.json", 'r', encoding='utf-8') as f:
-                    return json.load(f)
-        except Exception as e:
-            print(f"Ошибка загрузки предпочтений ассистента: {e}")
-
-        # Предпочтения по умолчанию
-        return {
-            "tip_frequency": "medium",  # low, medium, high
-            "preferred_tip_types": ["security", "efficiency", "capacity"],
-            "avoided_topics": [],
-            "last_tip_time": 0,
-            "tip_dismiss_count": 0,
-            "tip_engagement_rate": 0.8,
-            "expert_mode": False,
-            "show_advanced_tips": True,
-            "proactive_help": True,
-            "learning_enabled": True
-        }
-
-    def save_user_preferences(self):
-        """Сохраняет текущие предпочтения пользователя"""
-        try:
-            with open("assistant_preferences.json", 'w', encoding='utf-8') as f:
-                json.dump(self.user_preferences, f, indent=2, ensure_ascii=False)
-        except Exception as e:
-            print(f"Ошибка сохранения предпочтений ассистента: {e}")
-
-    def initialize_contextual_weights(self):
-        """Инициализирует веса контекстов с учетом их важности и срочности"""
-        return {
-            # Критические ситуации (высокий приоритет)
-            "insufficient_capacity": 100,
-            "data_corruption_risk": 95,
-            "security_risk": 90,
-            "file_format_incompatibility": 85,
-            "low_disk_space": 80,
-
-            # Важные рекомендации (средний приоритет)
-            "method_recommendation": 75,
-            "capacity_optimization": 70,
-            "quality_preservation": 65,
-            "workflow_efficiency": 60,
-            "large_file_handling": 55,
-            "audio_quality_preservation": 50,
-
-            # Общие советы (низкий приоритет)
-            "interface_navigation": 45,
-            "keyboard_shortcuts": 40,
-            "backup_recommendation": 35,
-            "history_usage": 30,
-            "statistical_insights": 25,
-            "achievement_progress": 20,
-            "new_feature_highlight": 15,
-
-            # Проактивные советы (очень низкий приоритет)
-            "proactive_learning": 10,
-            "time_saving_tip": 5,
-            "first_time_user": 1
-        }
-
-    def load_tip_database(self):
-        """Загружает и инициализирует расширенную базу подсказок"""
-        tip_database = {
-            # Критические ситуации
-            "insufficient_capacity": {
-                "title": "⚠️ Недостаточная вместимость контейнера",
-                "short_tips": [
-                    "💡 Контейнер имеет недостаточную вместимость для выбранного объема данных",
-                    "💡 Для больших данных требуется контейнер большего размера",
-                    "💡 Рассмотрите разделение данных на части или сжатие перед скрытием"
-                ],
-                "detailed_advice": [
-                    "Ваш файл данных слишком велик для выбранного контейнера. Максимальная вместимость контейнера составляет примерно {capacity} байт, а вам требуется {required} байт.",
-                    "Рекомендуемые решения:",
-                    "1. Используйте изображение большего размера или с большим количеством деталей",
-                    "2. Сожмите данные в ZIP или RAR архив перед скрытием",
-                    "3. Разделите данные на несколько частей и спрячьте в разных контейнерах",
-                    "4. Выберите метод с большей вместимостью (например, классический LSB вместо HILL)",
-                    "Для максимальной вместимости рассмотрите форматы PNG или BMP без сжатия."
-                ],
-                "visual_indicator": "error",
-                "action_suggestions": [
-                    {"text": "Выбрать другой контейнер", "callback": "select_larger_container"},
-                    {"text": "Сжать данные", "callback": "compress_data"},
-                    {"text": "Разделить данные", "callback": "split_data"}
-                ],
-                "learning_points": ["capacity_planning", "data_compression", "container_selection"]
-            },
-
-            # Риски безопасности
-            "security_risk": {
-                "title": "🔒 Повысьте безопасность ваших данных",
-                "short_tips": [
-                    "💡 Используйте надежный пароль для защиты скрытых данных",
-                    "💡 Рассмотрите комбинацию методов для дополнительной защиты",
-                    "💡 Избегайте использования очевидных или простых паролей"
-                ],
-                "detailed_advice": [
-                    "Ваши данные будут защищены только в том случае, если используется надежный пароль.",
-                    "Советы по созданию надежного пароля:",
-                    "- Используйте комбинацию букв верхнего и нижнего регистра, цифр и специальных символов",
-                    "- Длина пароля должна быть не менее 12 символов",
-                    "- Избегайте использования личной информации или общих слов",
-                    "- Рассмотрите использование метода HILL для максимальной скрытности",
-                    "Для конфиденциальных данных рекомендуется сначала зашифровать файл перед скрытием."
-                ],
-                "visual_indicator": "warning",
-                "action_suggestions": [
-                    {"text": "Сгенерировать надежный пароль", "callback": "generate_secure_password"},
-                    {"text": "Использовать HILL метод", "callback": "switch_to_hill_method"},
-                    {"text": "Зашифровать данные", "callback": "encrypt_before_hiding"}
-                ],
-                "learning_points": ["cryptography_basics", "password_security", "steganographic_security"]
-            },
-
-            # Рекомендации по методам
-            "method_recommendation": {
-                "title": "🎯 Рекомендуемый метод скрытия",
-                "short_tips": {
-                    "small_text": [
-                        "💡 Для небольших текстовых сообщений идеально подходит метод HILL",
-                        "💡 Метод HILL обеспечивает максимальную незаметность для коротких сообщений",
-                        "💡 Для секретных сообщений рекомендуется HILL или AELSB + Hamming"
-                    ],
-                    "large_file": [
-                        "💡 Для больших файлов используйте классический LSB для максимальной вместимости",
-                        "💡 Метод LSB обеспечивает наибольшую вместимость, но имеет меньшую скрытность",
-                        "💡 Рассмотрите разделение больших файлов на части для использования более скрытных методов"
-                    ],
-                    "audio": [
-                        "💡 Для аудио используйте метод WAV LSB для сохранения качества звука",
-                        "💡 Избегайте сжатия аудиофайла после скрытия данных",
-                        "💡 WAV формат обеспечивает наилучшие результаты для аудио-стеганографии"
-                    ],
-                    "jpeg_image": [
-                        "💡 Для JPEG изображений используйте метод DCT для лучшей устойчивости",
-                        "💡 JPEG сжатие может разрушить данные, скрытые другими методами",
-                        "💡 DCT метод обеспечивает лучшую совместимость с JPEG сжатием"
-                    ],
-                    "high_detail_image": [
-                        "💡 Для изображений с высокой детализацией отлично подходит метод Adaptive-Noise",
-                        "💡 Adaptive-Noise использует шумовые паттерны для лучшей маскировки изменений",
-                        "💡 Этот метод сохраняет высокое визуальное качество изображения"
-                    ],
-                    "low_detail_image": [
-                        "💡 Для изображений с низкой детализацией рекомендуется HILL или AELSB",
-                        "💡 Эти методы минимизируют заметные изменения в однотонных областях",
-                        "💡 Рассмотрите добавление шума к изображению перед скрытием данных"
-                    ]
-                },
-                "detailed_advice": {
-                    "small_text": "Для небольших текстовых сообщений (до 1 КБ) рекомендуется использовать методы с высокой скрытностью, такие как HILL-CA или AELSB с коррекцией ошибок. Эти методы делают изменения в изображении практически незаметными для визуального анализа и стеганализа.",
-
-                    "large_file": "Для больших файлов (более 1 МБ) приоритет отдается методу с максимальной вместимостью - классическому LSB. Если безопасность важнее вместимости, рассмотрите сжатие файла перед скрытием или разделение данных на части для использования более скрытных методов, применяемых к разным контейнерам.",
-
-                    "audio": "При работе с аудиоданными используйте формат WAV без сжатия и метод WAV LSB. Избегайте любой обработки аудиофайла (изменения громкости, эквализации, нормализации) после скрытия данных, так как это может разрушить скрытую информацию. Для максимального качества используйте 24-битные аудиофайлы с частотой дискретизации 48 кГц или выше.",
-
-                    "jpeg_image": "JPEG изображения требуют особого подхода из-за алгоритма сжатия с потерями. Метод DCT работает непосредственно с коэффициентами Дискретного Косинусного Преобразования в блоках 8x8, что обеспечивает лучшую устойчивость к повторному сжатию. Избегайте использования других методов для JPEG контейнеров, так как они будут разрушены при сохранении файла.",
-
-                    "high_detail_image": "Для изображений с высокой детализацией (фотографии природы, городские пейзажи) идеально подходит метод Adaptive-Noise, который использует естественные шумовые паттерны изображения для маскировки изменений. Метод автоматически адаптируется к локальным характеристикам изображения для обеспечения оптимального баланса между вместимостью и незаметностью.",
-
-                    "low_detail_image": "Для изображений с низкой детализацией (графики, скриншоты, рисунки) рекомендуются методы HILL-CA или AELSB+Hamming, которые минимизируют изменения в однотонных областях. Эти методы фокусируются на краях и переходах, где изменения менее заметны для человеческого глаза."
-                },
-                "visual_indicator": "info",
-                "action_suggestions": {
-                    "small_text": [
-                        {"text": "Использовать HILL метод", "callback": "set_method_hill"},
-                        {"text": "Использовать AELSB+Hamming", "callback": "set_method_aelsb"},
-                        {"text": "Добавить пароль", "callback": "enable_password_protection"}
-                    ],
-                    "large_file": [
-                        {"text": "Использовать классический LSB", "callback": "set_method_lsb"},
-                        {"text": "Сжать данные", "callback": "compress_data"},
-                        {"text": "Разделить файл", "callback": "split_file"}
-                    ],
-                    "audio": [
-                        {"text": "Использовать WAV LSB", "callback": "set_method_audio_lsb"},
-                        {"text": "Конвертировать в WAV", "callback": "convert_to_wav"},
-                        {"text": "Проверить качество", "callback": "analyze_audio_quality"}
-                    ],
-                    "jpeg_image": [
-                        {"text": "Использовать JPEG DCT", "callback": "set_method_jpeg_dct"},
-                        {"text": "Конвертировать в PNG", "callback": "convert_to_png"},
-                        {"text": "Проверить качество JPEG", "callback": "analyze_jpeg_quality"}
-                    ],
-                    "high_detail_image": [
-                        {"text": "Использовать Adaptive-Noise", "callback": "set_method_noise"},
-                        {"text": "Анализировать детализацию", "callback": "analyze_image_detail"},
-                        {"text": "Оптимизировать параметры", "callback": "optimize_noise_parameters"}
-                    ],
-                    "low_detail_image": [
-                        {"text": "Использовать HILL-CA", "callback": "set_method_hill"},
-                        {"text": "Добавить шум", "callback": "add_controlled_noise"},
-                        {"text": "Использовать AELSB+Hamming", "callback": "set_method_aelsb"}
-                    ]
-                },
-                "learning_points": ["method_selection", "capacity_vs_security", "container_characteristics"]
-            },
-
-            # Оптимизация вместимости
-            "capacity_optimization": {
-                "title": "📈 Оптимизация вместимости контейнера",
-                "short_tips": [
-                    "💡 Изображения с высокой детализацией и шумом имеют большую вместимость",
-                    "💡 Форматы без сжатия (PNG, BMP) обеспечивают большую вместимость, чем JPEG",
-                    "💡 Используйте контейнеры с разрешением не менее 1000x1000 для больших файлов"
-                ],
-                "detailed_advice": [
-                    "Вместимость контейнера зависит от его характеристик:",
-                    "- Разрешение: чем больше пикселей, тем больше данных можно спрятать",
-                    "- Детализация: изображения с множеством мелких деталей и шумов лучше маскируют изменения",
-                    "- Формат файла: lossless форматы (PNG, BMP, TIFF) обеспечивают максимальную вместимость",
-                    "- Цветовая глубина: 24-битные изображения вместительнее 8-битных",
-                    "",
-                    "Советы по оптимизации:",
-                    "1. Для текстовых сообщений сжимайте данные в ZIP перед скрытием",
-                    "2. Используйте изображения с естественным шумом (фотографии вместо скриншотов)",
-                    "3. Избегайте предварительной обработки изображения (фильтры, сглаживание)",
-                    "4. Для максимальной вместимости используйте классический LSB метод",
-                    "",
-                    "Текущий контейнер имеет вместимость: {capacity}."
-                ],
-                "visual_indicator": "success",
-                "action_suggestions": [
-                    {"text": "Проанализировать емкость", "callback": "analyze_container_capacity"},
-                    {"text": "Найти подходящий контейнер", "callback": "find_optimal_container"},
-                    {"text": "Сжать данные", "callback": "compress_data"}
-                ],
-                "learning_points": ["capacity_analysis", "container_optimization", "data_preparation"]
-            },
-
-            # Проактивное обучение
-            "proactive_learning": {
-                "title": "🎓 Проактивное обучение",
-                "short_tips": {
-                    "beginner": [
-                        "💡 Попробуйте скрыть небольшое текстовое сообщение в тестовом изображении",
-                        "💡 Используйте вкладку 'Помощь' для получения подробной информации о методах",
-                        "💡 Начните с метода LSB для понимания базовых принципов стеганографии"
-                    ],
-                    "intermediate": [
-                        "💡 Попробуйте метод HILL для повышенной скрытности ваших данных",
-                        "💡 Научитесь определять вместимость контейнера перед скрытием данных",
-                        "💡 Экспериментируйте с разными типами контейнеров для разных задач"
-                    ],
-                    "advanced": [
-                        "💡 Изучите методы анализа на устойчивость к стеганализу",
-                        "💡 Освойте комбинирование шифрования и стеганографии для максимальной безопасности",
-                        "💡 Попробуйте пакетную обработку для работы с несколькими файлами одновременно"
-                    ]
-                },
-                "detailed_advice": {
-                    "beginner": "Для начинающих пользователей рекомендуется начать с простых экспериментов: спрячьте небольшое текстовое сообщение в PNG изображении с помощью классического LSB метода. Это поможет понять базовые принципы без сложных настроек. Затем попробуйте извлечь данные и проверить их целостность.",
-
-                    "intermediate": "Пользователи среднего уровня могут экспериментировать с более сложными методами вроде HILL-CA, которые обеспечивают лучшую скрытность за счет снижения вместимости. Научитесь анализировать изображения на предмет их пригодности для стеганографии, проверяя детализацию и шумовые паттерны. Попробуйте различные форматы контейнеров и оцените результаты.",
-
-                    "advanced": "Продвинутые пользователи могут комбинировать шифрование (AES-256) со стеганографией для многоуровневой защиты данных. Изучите методы противодействия стеганализу и способы обнаружения скрытых данных. Освойте пакетную обработку для автоматизации рабочих процессов и создание скриптов для регулярных задач."
-                },
-                "visual_indicator": "info",
-                "action_suggestions": {
-                    "beginner": [
-                        {"text": "Показать руководство для начинающих", "callback": "show_beginner_guide"},
-                        {"text": "Запустить обучающий пример", "callback": "start_tutorial_example"},
-                        {"text": "Показать основные методы", "callback": "show_basic_methods"}
-                    ],
-                    "intermediate": [
-                        {"text": "Показать продвинутые методы", "callback": "show_advanced_methods"},
-                        {"text": "Проанализировать качество контейнера", "callback": "analyze_container_quality"},
-                        {"text": "Настроить параметры методов", "callback": "configure_method_parameters"}
-                    ],
-                    "advanced": [
-                        {"text": "Показать методы противостеганализа", "callback": "show_anti_steganalysis"},
-                        {"text": "Настроить пакетную обработку", "callback": "configure_batch_processing"},
-                        {"text": "Интегрировать с внешними инструментами", "callback": "setup_external_integration"}
-                    ]
-                },
-                "learning_points": ["skill_development", "method_mastery", "workflow_optimization"]
-            },
-
-            # Советы по рабочему процессу
-            "workflow_efficiency": {
-                "title": "⚡ Оптимизация рабочего процесса",
-                "short_tips": [
-                    "💡 Используйте горячие клавиши для ускорения работы: F1 - помощь, Ctrl+O - открыть, Ctrl+E - извлечь",
-                    "💡 Используйте историю для быстрого доступа к недавно использованным файлам",
-                    "💡 Настройте автоматическое резервное копирование для защиты важных данных"
-                ],
-                "detailed_advice": [
-                    "Оптимизация вашего рабочего процесса значительно повышает производительность:",
-                    "",
-                    "Горячие клавиши:",
-                    "- F1: Открыть справку",
-                    "- Ctrl+O: Открыть контейнер",
-                    "- Ctrl+E: Извлечь данные",
-                    "- Ctrl+S: Сохранить результат",
-                    "- Ctrl+Enter: Выполнить основное действие",
-                    "- Ctrl+Tab: Переключение между вкладками",
-                    "",
-                    "Автоматизация:",
-                    "- Используйте пакетную обработку для работы с несколькими файлами",
-                    "- Настраивайте автоматические резервные копии критически важных файлов",
-                    "- Используйте историю операций для восстановления предыдущих действий",
-                    "",
-                    "Рекомендации по организации работы:",
-                    "- Создавайте отдельные папки для контейнеров и результатов",
-                    "- Используйте понятные имена файлов с датами",
-                    "- Регулярно экспортируйте статистику для анализа вашей деятельности"
-                ],
-                "visual_indicator": "success",
-                "action_suggestions": [
-                    {"text": "Показать горячие клавиши", "callback": "show_keyboard_shortcuts"},
-                    {"text": "Открыть историю", "callback": "view_operation_history"},
-                    {"text": "Настроить автоматическое резервное копирование", "callback": "configure_auto_backup"}
-                ],
-                "learning_points": ["workflow_optimization", "keyboard_efficiency", "data_management"]
-            },
-
-            # Нововведения и особенности
-            "new_feature_highlight": {
-                "title": "✨ Новые возможности",
-                "short_tips": {
-                    "batch_processing": [
-                        "💡 Новая функция: пакетная обработка позволяет обрабатывать до 5 файлов одновременно",
-                        "💡 Используйте пакетное скрытие или извлечение для экономии времени",
-                        "💡 Экспортируйте результаты пакетной обработки в JSON для анализа"
-                    ],
-                    "detailed_stats": [
-                        "💡 Теперь доступна расширенная статистика использования программы",
-                        "💡 Отслеживайте эффективность разных методов скрытия данных",
-                        "💡 Анализируйте историю операций для улучшения рабочего процесса"
-                    ],
-                    "achievement_system": [
-                        "💡 В программе появилась система достижений для отслеживания прогресса",
-                        "💡 Разблокируйте достижения за использование различных функций программы",
-                        "💡 Следите за своим прогрессом в новой вкладке 'Достижения'"
-                    ]
-                },
-                "detailed_advice": {
-                    "batch_processing": "Пакетная обработка позволяет одновременно обрабатывать до 5 файлов, значительно ускоряя работу. Вы можете скрывать одинаковые данные в нескольких контейнерах, извлекать данные из нескольких стего-файлов или анализировать несколько файлов на наличие скрытой информации. Результаты обработки можно экспортировать в формате JSON для дальнейшего анализа.",
-
-                    "detailed_stats": "Расширенная статистика позволяет отслеживать эффективность вашей работы: какие методы используются чаще всего, какой процент операций завершается успешно, каковы размеры обрабатываемых файлов. Эти данные помогут вам оптимизировать рабочий процесс и выбирать оптимальные методы для разных задач.",
-
-                    "achievement_system": "Система достижений помогает отслеживать ваш прогресс в освоении программы. Разблокируйте достижения за использование различных методов скрытия данных, работу с разными типами контейнеров, выполнение определенного количества операций. Это не только мотивирует к изучению всех возможностей программы, но и помогает систематизировать знания."
-                },
-                "visual_indicator": "accent",
-                "action_suggestions": {
-                    "batch_processing": [
-                        {"text": "Открыть пакетную обработку", "callback": "open_batch_processing"},
-                        {"text": "Показать пример использования", "callback": "show_batch_example"},
-                        {"text": "Настроить параметры", "callback": "configure_batch_settings"}
-                    ],
-                    "detailed_stats": [
-                        {"text": "Открыть статистику", "callback": "open_statistics_tab"},
-                        {"text": "Экспортировать данные", "callback": "export_statistics"},
-                        {"text": "Проанализировать эффективность", "callback": "analyze_efficiency"}
-                    ],
-                    "achievement_system": [
-                        {"text": "Открыть достижения", "callback": "open_achievements_tab"},
-                        {"text": "Просмотреть прогресс", "callback": "view_achievement_progress"},
-                        {"text": "Узнать о новых достижениях", "callback": "view_new_achievements"}
-                    ]
-                },
-                "learning_points": ["new_features", "workflow_enhancement", "skill_tracking"]
-            }
-        }
-
-        # Добавляем контекстные правила для анализа ситуации
-        self.context_rules = {
-            "large_file": [
-                "💡 Контекстный совет: Для больших файлов рекомендуется использовать классический LSB метод",
-                "💡 Контекстный совет: Рассмотрите возможность сжатия файла перед скрытием",
-                "💡 Контекстный совет: Проверьте свободное место на диске перед обработкой больших файлов"
-            ],
-            "small_container": [
-                "💡 Контекстный совет: Контейнер слишком мал для выбранных данных",
-                "💡 Контекстный совет: Попробуйте использовать изображение большего размера",
-                "💡 Контекстный совет: Сожмите данные или используйте более эффективный метод"
-            ],
-            "audio_container": [
-                "💡 Контекстный совет: Для аудио контейнеров используйте метод WAV LSB",
-                "💡 Контекстный совет: Убедитесь, что аудиофайл не будет подвергаться сжатию",
-                "💡 Контекстный совет: Аудиофайлы имеют меньшую вместимость чем изображения"
-            ],
-            "jpeg_container": [
-                "💡 Контекстный совет: Для JPEG используйте DCT метод для лучшей устойчивости",
-                "💡 Контекстный совет: JPEG сжатие может повредить скрытые данные",
-                "💡 Контекстный совет: Вместимость JPEG меньше чем у lossless форматов"
-            ],
-            "first_time": [
-                "💡 Добро пожаловать! Начните с выбора контейнера и данных для скрытия",
-                "💡 Совет для новичка: Используйте вкладку 'Помощь' для получения подробной информации",
-                "💡 Совет: Начните с небольшого текста для тестирования функциональности"
-            ],
-            "low_contrast": [
-                "💡 Контекстный совет: Изображение имеет низкий контраст, что может повлиять на качество",
-                "💡 Контекстный совет: Рассмотрите использование метода Adaptive-Noise для таких изображений",
-                "💡 Контекстный совет: Низкий контраст может сделать изменения более заметными"
-            ],
-            "high_capacity_usage": [
-                "💡 Контекстный совет: Высокое заполнение контейнера может ухудшить качество",
-                "💡 Контекстный совет: Рекомендуется использовать не более 80% вместимости",
-                "💡 Контекстный совет: Рассмотрите использование контейнера большего размера"
-            ],
-            "multiple_files": [
-                "💡 Контекстный совет: Используйте пакетную обработку для нескольких файлов",
-                "💡 Контекстный совет: Убедитесь, что все файлы имеют одинаковый формат",
-                "💡 Контекстный совет: Создайте резервные копии перед пакетной обработкой"
-            ],
-            "password_weak": [
-                "💡 Контекстный совет: Используйте более сложный пароль для безопасности",
-                "💡 Контекстный совет: Рекомендуемая длина пароля - не менее 8 символов",
-                "💡 Контекстный совет: Используйте комбинацию букв, цифр и специальных символов"
-            ],
-            "network_share": [
-                "💡 Контекстный совет: Будьте осторожны при работе с сетевыми ресурсами",
-                "💡 Контекстный совет: Создавайте локальные копии сетевых файлов",
-                "💡 Контекстный совет: Проверьте права доступа к сетевым папкам"
-            ],
-            "low_disk_space": [
-                "💡 Контекстный совет: На диске мало свободного места",
-                "💡 Контекстный совет: Освободите место перед обработкой больших файлов",
-                "💡 Контекстный совет: Проверьте доступное место на целевом диске"
-            ],
-            "unsupported_format": [
-                "💡 Контекстный совет: Формат файла не поддерживается",
-                "💡 Контекстный совет: Проверьте список поддерживаемых форматов",
-                "💡 Контекстный совет: Конвертируйте файл в поддерживаемый формат"
-            ],
-            "performance_issue": [
-                "💡 Контекстный совет: Операция выполняется медленно",
-                "💡 Контекстный совет: Закройте другие приложения для повышения производительности",
-                "💡 Контекстный совет: Используйте более простой метод для ускорения"
-            ],
-            "backup_recommended": [
-                "💡 Контекстный совет: Рекомендуется создать резервную копию",
-                "💡 Контекстный совет: Автоматическое резервное копирование включено",
-                "💡 Контекстный совет: Проверьте настройки резервного копирования"
-            ]
-        }
-
-        return tip_database
-
-    def initialize_adaptive_learning(self):
-        """Инициализирует адаптивное обучение на основе поведения пользователя"""
-        self.user_skill_level = self.assess_user_skill_level()
-        self.preferred_workflows = self.analyze_preferred_workflows()
-        self.common_mistakes = self.identify_common_mistakes()
-        self.tip_effectiveness = self.analyze_tip_effectiveness()
-        self.last_adaptive_update = time.time()
-
-    def register_event_listeners(self):
-        """Регистрирует слушателей событий для проактивной помощи"""
-        # Слушатели для основных событий интерфейса
-        self.app.root.bind("<<ContainerSelected>>", self.on_container_selected)
-        self.app.root.bind("<<DataSelected>>", self.on_data_selected)
-        self.app.root.bind("<<MethodChanged>>", self.on_method_changed)
-        self.app.root.bind("<<OperationStarted>>", self.on_operation_started)
-        self.app.root.bind("<<OperationCompleted>>", self.on_operation_completed)
-        self.app.root.bind("<<ErrorOccurred>>", self.on_error_occurred)
-        self.app.root.bind("<<TabChanged>>", self.on_tab_changed)
-
-        # Периодические проверки
-        self.schedule_periodic_analysis()
-
-    def schedule_periodic_analysis(self):
-        """Запланировать периодический анализ для проактивных подсказок"""
-        if self.proactive_tips_enabled:
-            next_analysis = time.time() + self.get_analysis_interval()
-            self.next_scheduled_tip_time = next_analysis
-            self.app.root.after(int((next_analysis - time.time()) * 1000), self.perform_periodic_analysis)
-
-    def get_analysis_interval(self):
-        """Определяет интервал между анализами в зависимости от уровня пользователя"""
-        base_interval = 60  # базовый интервал в секундах
-
-        if self.user_skill_level == "beginner":
-            return base_interval * 0.5  # чаще для начинающих
-        elif self.user_skill_level == "intermediate":
-            return base_interval
-        else:
-            return base_interval * 2  # реже для продвинутых
-
-    def assess_user_skill_level(self):
-        """Оценивает уровень навыков пользователя на основе истории действий"""
-        try:
-            stats = self.app.analytics_manager.get_summary()
-            total_ops = stats.get("total_operations", 0)
-            success_rate = stats.get("success_rate", 0)
-            methods_used = len(stats.get("methods_used", {}))
-            session_count = self.app.analytics_manager.stats.get("sessions", 0)
-
-            # Оценка уровня по нескольким критериям
-            level_score = 0
-
-            # Опыт использования
-            if total_ops > 50:
-                level_score += 3
-            elif total_ops > 20:
-                level_score += 2
-            elif total_ops > 5:
-                level_score += 1
-
-            # Процент успешных операций
-            if success_rate > 90:
-                level_score += 2
-            elif success_rate > 70:
-                level_score += 1
-
-            # Разнообразие используемых методов
-            if methods_used >= 4:
-                level_score += 2
-            elif methods_used >= 2:
-                level_score += 1
-
-            # Количество сессий
-            if session_count > 10:
-                level_score += 2
-            elif session_count > 3:
-                level_score += 1
-
-            # Определение уровня
-            if level_score >= 7:
-                return "advanced"
-            elif level_score >= 4:
-                return "intermediate"
-            else:
-                return "beginner"
-
-        except Exception as e:
-            print(f"Ошибка оценки уровня пользователя: {e}")
-            return "intermediate"  # уровень по умолчанию
-
-    def analyze_preferred_workflows(self):
-        """Анализирует предпочитаемые рабочие процессы пользователя"""
-        try:
-            operation_stats = self.app.log_manager.get_statistics().get("operation_stats", {})
-            workflows = {
-                "hide_to_extract_ratio": 0,
-                "preferred_methods": [],
-                "common_container_types": [],
-                "average_data_size": 0,
-                "batch_usage_frequency": 0
-            }
-
-            hide_count = operation_stats.get("hide", {}).get("total", 0)
-            extract_count = operation_stats.get("extract", {}).get("total", 0)
-
-            if hide_count + extract_count > 0:
-                workflows["hide_to_extract_ratio"] = hide_count / (hide_count + extract_count)
-
-            # Анализ предпочитаемых методов
-            methods_used = self.app.analytics_manager.stats.get("methods_used", {})
-            if methods_used:
-                sorted_methods = sorted(methods_used.items(), key=lambda x: x[1], reverse=True)
-                workflows["preferred_methods"] = [method for method, count in sorted_methods[:3]]
-
-            # Анализ типов контейнеров
-            file_types = self.app.analytics_manager.stats.get("file_types_hidden", {})
-            if file_types:
-                sorted_types = sorted(file_types.items(), key=lambda x: x[1], reverse=True)
-                workflows["common_container_types"] = [ftype for ftype, count in sorted_types[:3]]
-
-            return workflows
-
-        except Exception as e:
-            print(f"Ошибка анализа рабочих процессов: {e}")
-            return {
-                "hide_to_extract_ratio": 0.5,
-                "preferred_methods": ["lsb"],
-                "common_container_types": ["png"],
-                "average_data_size": 0,
-                "batch_usage_frequency": 0
-            }
-
-    def identify_common_mistakes(self):
-        """Определяет распространенные ошибки пользователя"""
-        try:
-            log_stats = self.app.log_manager.get_statistics()
-            failed_ops = log_stats.get("failed_operations", 0)
-            total_ops = log_stats.get("total_operations", 0)
-
-            common_mistakes = []
-
-            if failed_ops / max(total_ops, 1) > 0.3:  # более 30% неудачных операций
-                # Анализ последних неудачных операций
-                recent_entries = self.app.log_manager.get_entries(20)
-                error_types = {}
-
-                for entry in recent_entries:
-                    if entry.get("status") == "error" and "details" in entry:
-                        error_type = entry["details"].get("error_type", "unknown")
-                        error_types[error_type] = error_types.get(error_type, 0) + 1
-
-                # Определение наиболее частых ошибок
-                if error_types:
-                    sorted_errors = sorted(error_types.items(), key=lambda x: x[1], reverse=True)
-                    for error_type, count in sorted_errors[:3]:
-                        if error_type == "capacity_error":
-                            common_mistakes.append("insufficient_capacity")
-                        elif error_type == "format_error":
-                            common_mistakes.append("unsupported_format")
-                        elif error_type == "method_error":
-                            common_mistakes.append("method_selection")
-                        elif error_type == "password_error":
-                            common_mistakes.append("password_weak")
-
-            return common_mistakes
-
-        except Exception as e:
-            print(f"Ошибка идентификации ошибок: {e}")
-            return []
-
-    def analyze_tip_effectiveness(self):
-        """Анализирует эффективность подсказок на основе реакции пользователя"""
-        try:
-            tip_stats = self.feedback_history
-            effectiveness = {}
-
-            for tip_id, feedback in tip_stats.items():
-                total_shown = feedback.get("shown", 0)
-                positive_feedback = feedback.get("positive", 0)
-                negative_feedback = feedback.get("negative", 0)
-                ignored = feedback.get("ignored", 0)
-
-                if total_shown > 0:
-                    effectiveness[tip_id] = {
-                        "positive_rate": positive_feedback / total_shown,
-                        "negative_rate": negative_feedback / total_shown,
-                        "ignore_rate": ignored / total_shown,
-                        "total_shown": total_shown
-                    }
-
-            return effectiveness
-
-        except Exception as e:
-            print(f"Ошибка анализа эффективности подсказок: {e}")
-            return {}
-
-    def get_next_tip(self):
-        """Возвращает следующий общую подсказку с учетом предпочтений пользователя"""
-        self.tip_show_count += 1
-
-        # Определяем частоту показа подсказок
-        tip_frequency = self.user_preferences.get("tip_frequency", "medium")
-        frequency_factor = {"low": 3, "medium": 2, "high": 1}[tip_frequency]
-
-        # Пропускаем подсказки в зависимости от частоты
-        if self.tip_show_count % frequency_factor != 0:
-            return None
-
-        # Фильтруем подсказки по предпочтениям пользователя
-        preferred_types = self.user_preferences.get("preferred_tip_types", [])
-        avoided_topics = self.user_preferences.get("avoided_topics", [])
-
-        relevant_tips = []
-        for context, tip_data in self.tip_database.items():
-            # Пропускаем избегаемые темы
-            if context in avoided_topics:
-                continue
-
-            # Фильтруем по предпочитаемым типам
-            if preferred_types and not any(pt in context for pt in preferred_types):
-                continue
-
-            # Добавляем релевантные подсказки
-            if "short_tips" in tip_data:
-                if isinstance(tip_data["short_tips"], dict):
-                    # Выбираем подтипы в зависимости от уровня пользователя
-                    if self.user_skill_level in tip_data["short_tips"]:
-                        tips = tip_data["short_tips"][self.user_skill_level]
-                        for tip in tips:
-                            relevant_tips.append((context, tip))
-                else:
-                    for tip in tip_data["short_tips"]:
-                        relevant_tips.append((context, tip))
-
-        if not relevant_tips:
-            return None
-
-        # Выбираем подсказку с учетом истории показов
-        self.last_tip_index = (self.last_tip_index + 1) % len(relevant_tips)
-        context, tip = relevant_tips[self.last_tip_index]
-
-        # Запись в историю
-        self.tip_history.append({
-            "timestamp": time.time(),
-            "context": context,
-            "tip": tip,
-            "type": "general"
-        })
-
-        return tip
-
-    def get_contextual_tip(self, context, specific_data=None):
-        """Возвращает контекстную подсказку для определенной ситуации"""
-        if context not in self.tip_database:
-            return self.get_next_tip()
-
-        tip_data = self.tip_database[context]
-
-        # Выбор подтипа подсказок в зависимости от уровня пользователя
-        if "short_tips" in tip_data and isinstance(tip_data["short_tips"], dict):
-            tip_variants = tip_data["short_tips"].get(self.user_skill_level, [])
-            if not tip_variants and "intermediate" in tip_data["short_tips"]:
-                tip_variants = tip_data["short_tips"]["intermediate"]
-            if not tip_variants:
-                tip_variants = next(iter(tip_data["short_tips"].values()))
-        else:
-            tip_variants = tip_data.get("short_tips", [])
-
-        if not tip_variants:
-            return None
-
-        # Получение индекса для конкретного контекста
-        if context not in self.last_contextual_tip_index:
-            self.last_contextual_tip_index[context] = -1
-
-        self.last_contextual_tip_index[context] = (self.last_contextual_tip_index[context] + 1) % len(tip_variants)
-        tip_index = self.last_contextual_tip_index[context]
-        tip = tip_variants[tip_index]
-
-        # Форматирование подсказки с конкретными данными
-        if specific_data and isinstance(specific_data, dict):
-            try:
-                tip = tip.format(**specific_data)
-            except KeyError:
-                pass
-
-        # Запись в историю
-        self.tip_history.append({
-            "timestamp": time.time(),
-            "context": context,
-            "tip": tip,
-            "type": "contextual",
-            "data": specific_data
-        })
-
-        return tip
-
-    def analyze_situation(self, container_path=None, data_size=0, operation_type=None, method=None):
-        """Глубокий анализ текущей ситуации для определения релевантных контекстов"""
-        contexts = []
-        analysis_data = {}
-
-        current_time = time.time()
-
-        # Анализ контейнера
-        if container_path and os.path.exists(container_path):
-            try:
-                # Получение информации о файле
-                file_info = Utils.get_file_info(container_path)
-                analysis_data["file_info"] = file_info
-
-                # Определение типа контейнера
-                file_type = file_info.get("type", "unknown")
-                file_ext = file_info.get("extension", "").lower()
-
-                # Анализ изображения
-                if file_type == "image":
-                    # Получение детализации изображения
-                    detail_level = self.analyze_image_detail(container_path)
-                    analysis_data["detail_level"] = detail_level
-
-                    # Анализ контраста
-                    contrast_level = self.analyze_image_contrast(container_path)
-                    analysis_data["contrast_level"] = contrast_level
-
-                    # Анализ вместимости
-                    w, h, available_bits = ImageProcessor.get_image_info(container_path)
-                    analysis_data["capacity_bits"] = available_bits
-                    analysis_data["dimensions"] = (w, h)
-
-                    # Определение предпочтительных методов
-                    if file_ext in ['.jpg', '.jpeg']:
-                        contexts.append(
-                            ("jpeg_container", self.contextual_weights.get("jpeg_image", 70), analysis_data.copy()))
-                    elif detail_level > 0.7:
-                        contexts.append(("high_detail_image", self.contextual_weights.get("high_detail_image", 65),
-                                         analysis_data.copy()))
-                    elif detail_level < 0.3:
-                        contexts.append(("low_detail_image", self.contextual_weights.get("low_detail_image", 60),
-                                         analysis_data.copy()))
-                    else:
-                        contexts.append(("medium_detail_image", 50, analysis_data.copy()))
-
-                    # Проверка вместимости
-                    if data_size > 0:
-                        required_bits = data_size * 8
-                        header_bits = HEADER_FULL_LEN * 8
-
-                        if file_ext in ['.jpg', '.jpeg']:
-                            # Для JPEG DCT вместимость рассчитывается иначе
-                            blocks = (w // 8) * (h // 8)
-                            capacity_bits = blocks - 96  # Вычитаем заголовок в битах (12 байт)
-                        else:
-                            capacity_bits = available_bits - header_bits
-
-                        analysis_data["required_bits"] = required_bits
-                        analysis_data["capacity_bits"] = capacity_bits
-
-                        if required_bits > capacity_bits * 0.9:
-                            contexts.append(("high_capacity_usage",
-                                             self.contextual_weights.get("capacity_optimization", 70),
-                                             analysis_data.copy()))
-
-                        if required_bits > capacity_bits:
-                            contexts.append(("insufficient_capacity",
-                                             self.contextual_weights.get("insufficient_capacity", 100),
-                                             analysis_data.copy()))
-
-                # Анализ аудио
-                elif file_type == "audio":
-                    contexts.append(
-                        ("audio_container", self.contextual_weights.get("audio_container", 50), analysis_data.copy()))
-
-                    # Проверка параметров аудио
-                    sample_rate = file_info.get("sample_rate", 0)
-                    channels = file_info.get("channels", 1)
-
-                    if sample_rate < 44100 or channels == 1:
-                        analysis_data["audio_quality"] = "low"
-                    elif sample_rate == 44100 and channels == 2:
-                        analysis_data["audio_quality"] = "medium"
-                    else:
-                        analysis_data["audio_quality"] = "high"
-
-            except Exception as e:
-                print(f"Ошибка анализа контейнера: {e}")
-
-        # Анализ данных
-        if data_size > 0:
-            if data_size > 10 * 1024 * 1024:  # 10 MB
-                contexts.append(
-                    ("large_file", self.contextual_weights.get("large_file_handling", 55), analysis_data.copy()))
-            elif data_size < 1024:  # 1 KB
-                contexts.append(
-                    ("small_text", self.contextual_weights.get("small_text_handling", 75), analysis_data.copy()))
-
-        # Анализ метода
-        if method:
-            method_info = {
-                "lsb": {"strength": "capacity", "weakness": "detectability"},
-                "noise": {"strength": "balance", "weakness": "complexity"},
-                "aelsb": {"strength": "error_resilience", "weakness": "capacity"},
-                "hill": {"strength": "undetectability", "weakness": "capacity"},
-                "audio_lsb": {"strength": "audio_compatibility", "weakness": "compression_vulnerability"},
-                "jpeg_dct": {"strength": "jpeg_compatibility", "weakness": "low_capacity"}
-            }
-
-            if method in method_info:
-                analysis_data["method_info"] = method_info[method]
-
-        # Анализ дискового пространства
-        try:
-            if container_path:
-                dir_path = os.path.dirname(container_path)
-                free_space_mb = Utils.get_free_space_mb(dir_path)
-                if free_space_mb < 100:  # Меньше 100 МБ свободно
-                    analysis_data["free_space_mb"] = free_space_mb
-                    contexts.append(
-                        ("low_disk_space", self.contextual_weights.get("low_disk_space", 80), analysis_data.copy()))
-        except Exception as e:
-            print(f"Ошибка анализа дискового пространства: {e}")
-
-        # Анализ операции
-        if operation_type:
-            analysis_data["operation_type"] = operation_type
-            if operation_type == "hide" and not method and container_path:
-                # Автоматическая рекомендация метода
-                recommended_method = self.get_recommended_method(container_path, data_size)
-                analysis_data["recommended_method"] = recommended_method
-                contexts.append(("method_recommendation", self.contextual_weights.get("method_recommendation", 75),
-                                 analysis_data.copy()))
-
-        # Анализ времени использования
-        session_duration = current_time - self.session_start_time
-        if session_duration < 300:  # Менее 5 минут с начала сессии
-            contexts.append(
-                ("first_time_user", self.contextual_weights.get("first_time_user", 1), analysis_data.copy()))
-
-        # Анализ на основе истории ошибок
-        if self.common_mistakes:
-            for mistake in self.common_mistakes:
-                if mistake == "insufficient_capacity" and "insufficient_capacity" not in [c[0] for c in contexts]:
-                    contexts.append(
-                        (mistake, self.contextual_weights.get("insufficient_capacity", 100), analysis_data.copy()))
-
-        # Сортировка по приоритету
-        contexts.sort(key=lambda x: x[1], reverse=True)
-        self.last_analysis_result = contexts
-
-        return contexts
-
-    def analyze_image_detail(self, image_path):
-        """Анализирует детализацию изображения для выбора оптимального метода"""
-        try:
-            with Image.open(image_path) as img:
-                if img.mode != 'L':
-                    img = img.convert('L')
-
-                # Преобразуем изображение в массив numpy
-                img_array = np.array(img)
-
-                # Рассчитываем градиенты для определения детализации
-                gy, gx = np.gradient(img_array.astype(float))
-                gradient_magnitude = np.sqrt(gx ** 2 + gy ** 2)
-
-                # Нормализуем и вычисляем среднюю детализацию
-                mean_gradient = np.mean(gradient_magnitude)
-                max_gradient = np.max(gradient_magnitude)
-
-                if max_gradient > 0:
-                    detail_level = mean_gradient / max_gradient
-                else:
-                    detail_level = 0
-
-                return max(0, min(1, detail_level))
-
-        except Exception as e:
-            print(f"Ошибка анализа детализации изображения: {e}")
-            return 0.5  # средний уровень по умолчанию
-
-    def analyze_image_contrast(self, image_path):
-        """Анализирует контраст изображения"""
-        try:
-            with Image.open(image_path) as img:
-                if img.mode != 'L':
-                    img = img.convert('L')
-
-                # Получаем гистограмму
-                hist = img.histogram()
-                total_pixels = sum(hist)
-
-                # Вычисляем среднее и стандартное отклонение
-                mean = sum(i * hist[i] for i in range(256)) / total_pixels
-                variance = sum(((i - mean) ** 2) * hist[i] for i in range(256)) / total_pixels
-                std_dev = np.sqrt(variance)
-
-                # Нормализуем контраст (0-1)
-                contrast = std_dev / 128.0
-                return max(0, min(1, contrast))
-
-        except Exception as e:
-            print(f"Ошибка анализа контраста изображения: {e}")
-            return 0.5  # средний контраст по умолчанию
-
-    def get_recommended_method(self, container_path, data_size=0):
-        """Рекомендует оптимальный метод на основе характеристик контейнера и данных"""
-        try:
-            # Анализ контейнера
-            file_info = Utils.get_file_info(container_path)
-            file_ext = file_info.get("extension", "").lower()
-            file_type = file_info.get("type", "image")
-
-            # Для аудио всегда рекомендуем WAV LSB
-            if file_type == "audio":
-                return "audio_lsb"
-
-            # Для JPEG рекомендуем DCT
-            if file_ext in ['.jpg', '.jpeg']:
-                return "jpeg_dct"
-
-            # Анализ изображения для других форматов
-            detail_level = self.analyze_image_detail(container_path)
-            contrast_level = self.analyze_image_contrast(container_path)
-
-            # Оценка размера данных
-            is_large_data = data_size > 5 * 1024 * 1024  # >5MB
-
-            # Выбор метода в зависимости от характеристик
-            if is_large_data:
-                # Для больших данных приоритет вместимости
-                return "lsb"
-            elif detail_level > 0.6 and contrast_level > 0.4:
-                # Для детализированных изображений с хорошим контрастом
-                return "noise"
-            elif detail_level < 0.4 or contrast_level < 0.3:
-                # Для изображений с низкой детализацией или контрастом
-                if self.user_skill_level == "advanced":
-                    return "hill"
-                else:
-                    return "aelsb"
-            else:
-                # Сбалансированный выбор
-                if self.user_skill_level == "beginner":
-                    return "noise"
-                elif self.user_skill_level == "intermediate":
-                    return "aelsb"
-                else:
-                    return "hill"
-
-        except Exception as e:
-            print(f"Ошибка рекомендации метода: {e}")
-            return "lsb"  # метод по умолчанию
-
-    def get_smart_recommendation(self, container_path, data_size, operation_type="hide", current_method=None):
-        """Возвращает интеллектуальную рекомендацию на основе комплексного анализа"""
-        contexts = self.analyze_situation(container_path, data_size, operation_type, current_method)
-
-        if not contexts:
-            # Если нет контекстов, возвращаем общую подсказку
-            return {
-                "title": "ℹ️ Общая информация",
-                "message": self.get_next_tip(),
-                "type": "info",
-                "actions": []
-            }
-
-        # Берем контекст с наивысшим приоритетом
-        primary_context, weight, analysis_data = contexts[0]
-
-        # Получаем детальную информацию о подсказке
-        if primary_context in self.tip_database:
-            tip_data = self.tip_database[primary_context]
-
-            # Формируем сообщение
-            message = ""
-            if "detailed_advice" in tip_data:
-                if isinstance(tip_data["detailed_advice"], dict) and self.user_skill_level in tip_data[
-                    "detailed_advice"]:
-                    advice = tip_data["detailed_advice"][self.user_skill_level]
-                elif isinstance(tip_data["detailed_advice"], list):
-                    advice = "\n".join(tip_data["detailed_advice"])
-                else:
-                    advice = str(tip_data["detailed_advice"])
-
-                # Форматирование с конкретными данными
-                try:
-                    message = advice.format(**analysis_data)
-                except KeyError:
-                    message = advice
-
-            # Формируем действия
-            actions = []
-            if "action_suggestions" in tip_data:
-                action_data = tip_data["action_suggestions"]
-                if isinstance(action_data, dict) and self.user_skill_level in action_data:
-                    actions = action_data[self.user_skill_level]
-                elif isinstance(action_data, list):
-                    actions = action_data
-
-            # Определяем тип уведомления на основе веса
-            notification_type = "info"
-            if weight > 90:
-                notification_type = "error"
-            elif weight > 70:
-                notification_type = "warning"
-            elif weight > 50:
-                notification_type = "success"
-
-            return {
-                "title": tip_data.get("title", "Рекомендация"),
-                "message": message or self.get_contextual_tip(primary_context, analysis_data),
-                "type": notification_type,
-                "actions": actions,
-                "context": primary_context,
-                "analysis": analysis_data
-            }
-
-        return {
-            "title": "ℹ️ Рекомендация",
-            "message": self.get_contextual_tip(primary_context, analysis_data),
-            "type": "info",
-            "actions": [],
-            "context": primary_context,
-            "analysis": analysis_data
-        }
-
-    def learn_from_user_action(self, action_type, success=True, context=None, feedback=None):
-        """Обучается на действиях пользователя для улучшения рекомендаций"""
-        current_time = time.time()
-
-        # Обновление уровня пользователя
-        if current_time - self.last_adaptive_update > 300:  # обновление каждые 5 минут
-            self.user_skill_level = self.assess_user_skill_level()
-            self.preferred_workflows = self.analyze_preferred_workflows()
-            self.common_mistakes = self.identify_common_mistakes()
-            self.tip_effectiveness = self.analyze_tip_effectiveness()
-            self.last_adaptive_update = current_time
-
-        # Запись обратной связи по конкретной подсказке
-        if context and feedback:
-            if context not in self.feedback_history:
-                self.feedback_history[context] = {
-                    "shown": 0,
-                    "positive": 0,
-                    "negative": 0,
-                    "ignored": 0
-                }
-
-            self.feedback_history[context]["shown"] += 1
-
-            if feedback == "positive":
-                self.feedback_history[context]["positive"] += 1
-            elif feedback == "negative":
-                self.feedback_history[context]["negative"] += 1
-            elif feedback == "ignored":
-                self.feedback_history[context]["ignored"] += 1
-
-        # Адаптация предпочтений
-        if action_type == "tip_dismissed":
-            self.user_preferences["tip_dismiss_count"] = self.user_preferences.get("tip_dismiss_count", 0) + 1
-
-            # Снижение частоты показа подсказок при частом отклонении
-            if self.user_preferences["tip_dismiss_count"] > 5:
-                current_freq = self.user_preferences.get("tip_frequency", "medium")
-                if current_freq == "high":
-                    self.user_preferences["tip_frequency"] = "medium"
-                elif current_freq == "medium":
-                    self.user_preferences["tip_frequency"] = "low"
-
-                self.user_preferences["tip_dismiss_count"] = 0
-
-        # Сохранение предпочтений
-        self.save_user_preferences()
-
-    def perform_periodic_analysis(self):
-        """Выполняет периодический анализ для проактивных рекомендаций"""
-        try:
-            # Анализ текущей активности
-            current_tab = self.app.notebook.index(self.app.notebook.select())
-            tab_names = ["hide", "extract", "batch", "settings", "statistics", "achievements", "help"]
-            current_tab_name = tab_names[current_tab] if current_tab < len(tab_names) else "unknown"
-
-            # Проверка бездействия
-            last_activity_time = getattr(self.app, "last_activity_time", time.time())
-            idle_time = time.time() - last_activity_time
-
-            recommendations = []
-
-            # Проактивные рекомендации при бездействии
-            if idle_time > 120:  # 2 минуты бездействия
-                if current_tab_name == "hide" and not self.app.img_path.get():
-                    recommendations.append(("proactive_learning", {"skill_level": self.user_skill_level}))
-                elif current_tab_name == "statistics":
-                    recommendations.append(("detailed_stats", {}))
-                elif current_tab_name == "help":
-                    recommendations.append(("workflow_efficiency", {}))
-
-            # Рекомендации на основе текущей вкладки
-            if current_tab_name == "batch" and self.user_skill_level == "beginner":
-                recommendations.append(("new_feature_highlight", {"feature": "batch_processing"}))
-            elif current_tab_name == "achievements" and self.user_skill_level == "intermediate":
-                recommendations.append(("new_feature_highlight", {"feature": "achievement_system"}))
-
-            # Показ рекомендаций
-            for context, data in recommendations:
-                if context in self.tip_database:
-                    tip = self.get_contextual_tip(context, data)
-                    if tip:
-                        self.show_proactive_recommendation(context, data)
-                        break
-
-            # Планирование следующего анализа
-            self.schedule_periodic_analysis()
-
-        except Exception as e:
-            print(f"Ошибка периодического анализа: {e}")
-            self.schedule_periodic_analysis()
-
-    def show_proactive_recommendation(self, context, analysis_data):
-        """Показывает проактивную рекомендацию пользователю"""
-        if not self.proactive_tips_enabled:
-            return
-
-        # Проверка частоты показа
-        current_time = time.time()
-        if current_time < self.next_scheduled_tip_time:
-            return
-
-        # Получение рекомендации
-        recommendation = self.get_smart_recommendation(
-            container_path=self.app.img_path.get() or self.app.extract_img_path.get(),
-            data_size=len(self.app.text_input.get("1.0", tk.END)) if hasattr(self.app, "text_input") else 0,
-            operation_type="hide" if current_time % 2 < 1 else "extract"
-        )
-
-        if recommendation and recommendation.get("message"):
-            # Отображение уведомления
-            notification = self.app.notification_manager.show_notification(
-                f"{recommendation['title']}\
-{recommendation['message']}",
-                recommendation['type'],
-                duration=8000  # дольше для проактивных рекомендаций
-            )
-
-            # Добавление кнопок действий
-            if notification and recommendation.get("actions"):
-                button_frame = ttk.Frame(notification)
-                button_frame.pack(side="bottom", fill="x", padx=10, pady=5)
-
-                for action in recommendation["actions"][:3]:  # максимум 3 кнопки
-                    btn = ttk.Button(
-                        button_frame,
-                        text=action["text"],
-                        command=lambda c=action["callback"]: self.handle_action_callback(c),
-                        style="Accent.TButton"
-                    )
-                    btn.pack(side="left", padx=5)
-
-            # Обновление времени следующей рекомендации
-            self.next_scheduled_tip_time = current_time + 300  # следующая через 5 минут
-
-    def handle_action_callback(self, callback_name):
-        """Обрабатывает вызовы действий из рекомендаций"""
-        callbacks = {
-            "select_larger_container": self.app.select_image,
-            "compress_data": self.compress_current_data,
-            "split_data": self.split_current_data,
-            "generate_secure_password": self.generate_secure_password,
-            "switch_to_hill_method": lambda: self.app.method_var.set("hill"),
-            "encrypt_before_hiding": self.encrypt_before_hiding,
-            "set_method_hill": lambda: self.app.method_var.set("hill"),
-            "set_method_aelsb": lambda: self.app.method_var.set("aelsb"),
-            "set_method_lsb": lambda: self.app.method_var.set("lsb"),
-            "set_method_audio_lsb": lambda: self.app.method_var.set("audio_lsb"),
-            "set_method_jpeg_dct": lambda: self.app.method_var.set("jpeg_dct"),
-            "set_method_noise": lambda: self.app.method_var.set("noise"),
-            "enable_password_protection": self.enable_password_protection,
-            "analyze_container_capacity": self.analyze_current_container_capacity,
-            "find_optimal_container": self.find_optimal_container,
-            "show_beginner_guide": lambda: self.app.notebook.select(self.app.help_tab),
-            "show_advanced_methods": lambda: self.app.notebook.select(self.app.help_tab),
-            "show_keyboard_shortcuts": lambda: self.app.show_help_shortcuts(),
-            "view_operation_history": lambda: self.app.notebook.select(self.app.statistics_tab),
-            "configure_auto_backup": lambda: self.app.notebook.select(self.app.settings_tab),
-            "open_batch_processing": lambda: self.app.notebook.select(self.app.batch_tab),
-            "open_statistics_tab": lambda: self.app.notebook.select(self.app.statistics_tab),
-            "open_achievements_tab": lambda: self.app.notebook.select(self.app.achievements_tab),
-            "convert_to_wav": self.convert_to_wav,
-            "convert_to_png": self.convert_to_png
-        }
-
-        if callback_name in callbacks:
-            try:
-                callbacks[callback_name]()
-            except Exception as e:
-                print(f"Ошибка выполнения действия {callback_name}: {e}")
-
-    # Специализированные методы для обработки действий
-    def compress_current_data(self):
-        """Сжимает текущие данные перед скрытием"""
-        try:
-            if self.app.data_type.get() == "text":
-                text = self.app.text_input.get("1.0", tk.END).strip()
-                if text:
-                    # Импортируем zlib для сжатия
-                    compressed = zlib.compress(text.encode('utf-8'))
-                    # Конвертируем в base64 для отображения
-                    compressed_b64 = base64.b64encode(compressed).decode('utf-8')
-
-                    # Показываем результат сжатия
-                    compression_ratio = len(text.encode('utf-8')) / len(compressed) if len(compressed) > 0 else 0
-
-                    messagebox.showinfo(
-                        "✅ Сжатие выполнено",
-                        f"Данные успешно сжаты!\
-Исходный размер: {len(text.encode('utf-8'))} байт\
-Сжатый размер: {len(compressed)} байт\
-Коэффициент сжатия: {compression_ratio:.1f}x"
-                    )
-
-                    # Предлагаем заменить текст на сжатую версию
-                    if messagebox.askyesno("💾 Заменить данные", "Заменить исходные данные на сжатую версию?"):
-                        self.app.text_input.delete("1.0", tk.END)
-                        self.app.text_input.insert("1.0", compressed_b64)
-                        self.app.update_size_info()
-            else:
-                # Для файлов предлагаем сжать в ZIP
-                file_path = self.app.file_path_var.get()
-                if file_path and os.path.exists(file_path):
-                    output_path = filedialog.asksaveasfilename(
-                        title="Сохранить сжатый файл",
-                        defaultextension=".zip",
-                        filetypes=[("ZIP архивы", "*.zip"), ("Все файлы", "*.*")]
-                    )
-
-                    if output_path:
-                        import zipfile
-                        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                            zipf.write(file_path, os.path.basename(file_path))
-
-                        # Обновляем путь к файлу
-                        self.app.file_path_var.set(output_path)
-                        self.app.update_file_info_label()
-                        self.app.update_size_info()
-
-                        messagebox.showinfo("✅ Сжатие выполнено", f"Файл успешно сжат в ZIP архив: {output_path}")
-
-        except Exception as e:
-            messagebox.showerror("❌ Ошибка сжатия", f"Не удалось сжать данные: {str(e)}")
-
-    def generate_secure_password(self):
-        """Генерирует надежный пароль для защиты данных"""
-        import random
-        import string
-
-        # Генерация надежного пароля
-        length = 16
-        characters = string.ascii_letters + string.digits + "!@#$%^&*()"
-        password = ''.join(random.choice(characters) for _ in range(length))
-
-        # Копирование в буфер обмена
-        self.app.root.clipboard_clear()
-        self.app.root.clipboard_append(password)
-
-        # Показ пароля
-        messagebox.showinfo(
-            "🔑 Надежный пароль сгенерирован",
-            f"Ваш новый надежный пароль: {password}\
-\
-Пароль скопирован в буфер обмена.\
-Настоятельно рекомендуется сохранить его в надежном месте."
-        )
-
-    def enable_password_protection(self):
-        """Включает защиту паролем для текущей операции"""
-        # Показываем диалог для ввода пароля
-        password = tk.simpledialog.askstring(
-            "🔒 Защита паролем",
-            "Введите пароль для защиты скрытых данных:",
-            show="*"
-        )
-
-        if password:
-            if len(password) < 8:
-                if not messagebox.askyesno(
-                        "⚠️ Короткий пароль",
-                        "Пароль менее 8 символов может быть недостаточно надежным.\
-    Продолжить с этим паролем?"
-                ):
-                    return
-
-            # Здесь можно сохранить пароль для текущей операции
-            # В текущей реализации пароли используются в методах скрытия/извлечения
-            messagebox.showinfo(
-                "✅ Защита включена",
-                "Защита паролем включена для этой операции.\
-Данные будут зашифрованы перед скрытием."
-            )
-
-    def analyze_current_container_capacity(self):
-        """Анализирует вместимость текущего контейнера"""
-        container_path = self.app.img_path.get()
-
-        if not container_path or not os.path.exists(container_path):
-            messagebox.showwarning("❌ Ошибка", "Сначала выберите контейнер для анализа")
-            return
-
-        try:
-            # Получение информации о контейнере
-            w, h, available_bits = ImageProcessor.get_image_info(container_path)
-            file_info = Utils.get_file_info(container_path)
-
-            # Анализ детализации
-            detail_level = self.analyze_image_detail(container_path)
-            contrast_level = self.analyze_image_contrast(container_path)
-
-            # Расчет вместимости для разных методов
-            capacities = {}
-            for method in ["lsb", "noise", "aelsb", "hill"]:
-                capacity_bits = ImageProcessor.get_capacity_by_method(available_bits, method, w, h)
-                capacities[method] = capacity_bits // 8  # конвертация в байты
-
-            # Формирование отчета
-            report = f"""
-📊 Подробный анализ контейнера
-
-📋 Общая информация:
-- Файл: {os.path.basename(container_path)}
-- Размер: {file_info.get('size_formatted', 'N/A')}
-- Тип: {file_info.get('type', 'N/A')}
-- Размеры: {file_info.get('dimensions', 'N/A')}
-
-🔍 Характеристики изображения:
-- Уровень детализации: {detail_level:.2f} (0.0-1.0)
-- Контраст: {contrast_level:.2f} (0.0-1.0)
-- Общая вместимость (сырые биты): {available_bits:,}
-
-🧪 Вместимость по методам:
-- Классический LSB: {Utils.format_size(capacities['lsb'])}
-- Adaptive-Noise: {Utils.format_size(capacities['noise'])}
-- AELSB + Hamming: {Utils.format_size(capacities['aelsb'])}
-- HILL-CA: {Utils.format_size(capacities['hill'])}
-
-💡 Рекомендации:
-"""
-
-            # Добавление рекомендаций на основе анализа
-            if detail_level > 0.7:
-                report += "- Изображение имеет высокую детализацию - отлично подходит для Adaptive-Noise\n"
-            elif detail_level < 0.3:
-                report += "- Изображение имеет низкую детализацию - рекомендуется HILL-CA или AELSB\n"
-
-            if contrast_level < 0.3:
-                report += "- Низкий контраст - избегайте методов с высокой вместимостью (LSB)\n"
-
-            # Показ отчета
-            analysis_window = tk.Toplevel(self.app.root)
-            analysis_window.title("📊 Анализ контейнера")
-            analysis_window.geometry("600x500")
-            analysis_window.transient(self.app.root)
-            analysis_window.grab_set()
-
-            text_area = scrolledtext.ScrolledText(
-                analysis_window,
-                wrap=tk.WORD,
-                font=("Consolas", 10),
-                bg=self.app.colors["card"],
-                fg=self.app.colors["text"]
-            )
-            text_area.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-            text_area.insert("1.0", report)
-            text_area.config(state=tk.DISABLED)
-
-            ttk.Button(
-                analysis_window,
-                text="✅ Закрыть",
-                command=analysis_window.destroy
-            ).pack(pady=10)
-
-        except Exception as e:
-            messagebox.showerror("❌ Ошибка анализа", f"Не удалось проанализировать контейнер: {str(e)}")
-
-    # Обработчики событий
-    def on_container_selected(self, event):
-        """Обрабатывает выбор контейнера"""
-        container_path = self.app.img_path.get() or self.app.extract_img_path.get()
-
-        if container_path and os.path.exists(container_path):
-            # Анализ контейнера
-            contexts = self.analyze_situation(container_path)
-
-            # Показ рекомендаций если есть критические предупреждения
-            for context, weight, data in contexts:
-                if weight > 80:  # критический вес
-                    recommendation = self.get_smart_recommendation(container_path, 0)
-                    if recommendation and recommendation.get("message"):
-                        self.app.notification_manager.show_notification(
-                            f"{recommendation['title']}\
-{recommendation['message']}",
-                            recommendation['type'],
-                            duration=6000
-                        )
-                    break
-
-    def on_data_selected(self, event):
-        """Обрабатывает выбор данных для скрытия"""
-        container_path = self.app.img_path.get()
-        data_size = 0
-
-        if self.app.data_type.get() == "text":
-            text = self.app.text_input.get("1.0", tk.END).strip()
-            data_size = len(text.encode('utf-8'))
-        else:
-            file_path = self.app.file_path_var.get()
-            if file_path and os.path.exists(file_path):
-                data_size = os.path.getsize(file_path)
-
-        if container_path and os.path.exists(container_path) and data_size > 0:
-            # Анализ ситуации
-            contexts = self.analyze_situation(container_path, data_size, "hide")
-
-            # Поиск предупреждений о вместимости
-            for context, weight, data in contexts:
-                if context == "insufficient_capacity" or context == "high_capacity_usage":
-                    recommendation = self.get_smart_recommendation(container_path, data_size, "hide")
-                    if recommendation and recommendation.get("message"):
-                        self.app.notification_manager.show_notification(
-                            f"{recommendation['title']}\
-{recommendation['message']}",
-                            recommendation['type'],
-                            duration=7000
-                        )
-                    break
-
-    def on_method_changed(self, event):
-        """Обрабатывает изменение метода скрытия"""
-        method = self.app.method_var.get()
-        container_path = self.app.img_path.get()
-
-        if method and container_path and os.path.exists(container_path):
-            # Анализ соответствия метода контейнеру
-            recommendation = self.get_smart_recommendation(
-                container_path,
-                0,
-                "hide",
-                method
-            )
-
-            if recommendation and recommendation.get("type") in ["warning", "error"]:
-                if messagebox.askyesno(
-                        recommendation['title'],
-                        f"{recommendation['message']}\
-\
-Продолжить с выбранным методом?"
-                ):
-                    # Пользователь подтвердил продолжение
-                    self.learn_from_user_action("method_confirmed", True, recommendation.get("context"), "positive")
-                else:
-                    # Предложить альтернативный метод
-                    recommended_method = recommendation.get("analysis", {}).get("recommended_method", "lsb")
-                    self.app.method_var.set(recommended_method)
-                    self.app.show_toast(
-                        f"✅ Метод изменен на: {STEGANO_METHODS.get(recommended_method, recommended_method)}")
-                    self.learn_from_user_action("method_changed", True, recommendation.get("context"), "positive")
-
-    def on_operation_started(self, event):
-        """Обрабатывает начало операции"""
-        operation_type = event.operation_type if hasattr(event, "operation_type") else "unknown"
-
-        # Проверка рисков перед операцией
-        if operation_type == "hide":
-            container_path = self.app.img_path.get()
-            data_size = len(
-                self.app.text_input.get("1.0", tk.END).encode('utf-8')) if self.app.data_type.get() == "text" else (
-                os.path.getsize(self.app.file_path_var.get()) if self.app.file_path_var.get() and os.path.exists(
-                    self.app.file_path_var.get()) else 0
-            )
-
-            contexts = self.analyze_situation(container_path, data_size, "hide")
-
-            # Проверка на критические риски
-            for context, weight, data in contexts:
-                if weight > 90:  # критический риск
-                    recommendation = self.get_smart_recommendation(container_path, data_size, "hide")
-                    if recommendation:
-                        if not messagebox.askyesno(
-                                "⚠️ Критическое предупреждение",
-                                f"{recommendation['title']}\
-{recommendation['message']}\
-\
-Вы уверены, что хотите продолжить операцию?"
-                        ):
-                            # Отмена операции
-                            self.app.cancel_operation()
-                            return
-
-    def on_operation_completed(self, event):
-        """Обрабатывает завершение операции"""
-        operation_type = event.operation_type if hasattr(event, "operation_type") else "unknown"
-        success = getattr(event, "success", True)
-
-        # Обучение на основе результата операции
-        self.learn_from_user_action(f"operation_{operation_type}", success)
-
-        # Проактивные рекомендации после успешной операции
-        if success and operation_type == "hide":
-            self.app.notification_manager.show_notification(
-                "✅ Операция успешно завершена!\
-💡 Совет: Не забудьте сделать резервную копию контейнера с важными данными",
-                "success",
-                duration=5000
-            )
-
-        elif success and operation_type == "extract":
-            # Анализ извлеченных данных
-            if hasattr(self.app, "current_extracted") and self.app.current_extracted:
-                data_type, content = self.app.current_extracted
-                if data_type == "text" and len(content) > 100:
-                    self.app.notification_manager.show_notification(
-                        "🔍 Анализ извлеченных данных\
-💡 Для длинных текстов рекомендуется проверить целостность данных и сохранить результат",
-                        "info",
-                        duration=6000
-                    )
-
-    def on_error_occurred(self, event):
-        """Обрабатывает ошибки"""
-        error_type = getattr(event, "error_type", "unknown")
-        error_message = getattr(event, "error_message", "Произошла ошибка")
-
-        # Контекстные рекомендации при ошибках
-        recommendation_contexts = {
-            "capacity_error": "insufficient_capacity",
-            "format_error": "unsupported_format",
-            "method_error": "method_selection",
-            "password_error": "security_risk",
-            "file_error": "file_corruption"
-        }
-
-        context = recommendation_contexts.get(error_type, "general_error")
-
-        if context in self.tip_database:
-            tip_data = self.tip_database[context]
-            recommendation = {
-                "title": tip_data.get("title", "Рекомендация при ошибке"),
-                "message": tip_data.get("detailed_advice", "Попробуйте изменить параметры операции"),
-                "type": "error",
-                "actions": tip_data.get("action_suggestions", [])
-            }
-
-            # Показ рекомендации
-            notification = self.app.notification_manager.show_notification(
-                f"{recommendation['title']}\
-{recommendation['message']}",
-                recommendation['type'],
-                duration=10000
-            )
-
-    def on_tab_changed(self, event):
-        """Обрабатывает изменение вкладки"""
-        current_tab = self.app.notebook.index(self.app.notebook.select())
-        tab_names = ["hide", "extract", "batch", "settings", "statistics", "achievements", "help"]
-
-        if current_tab < len(tab_names):
-            current_tab_name = tab_names[current_tab]
-
-            # Проактивные рекомендации для определенных вкладок
-            if current_tab_name == "batch" and self.user_skill_level == "beginner":
-                self.app.notification_manager.show_notification(
-                    "🚀 Новая функция: пакетная обработка\
-💡 Вы можете обрабатывать до 5 файлов одновременно для экономии времени.\
-Попробуйте добавить несколько контейнеров и начать пакетное скрытие данных.",
-                    "info",
-                    duration=8000
-                )
-            elif current_tab_name == "achievements" and self.user_skill_level == "intermediate":
-                self.app.notification_manager.show_notification(
-                    "🏆 Отслеживайте свой прогресс\
-💡 Система достижений помогает отслеживать освоение функций программы.\
-Разблокируйте достижения за использование различных методов скрытия данных.",
-                    "info",
-                    duration=8000
-                )
-            elif current_tab_name == "statistics":
-                stats = self.app.analytics_manager.get_summary()
-                success_rate = stats.get("success_rate", 0)
-
-                if success_rate < 70:
-                    self.app.notification_manager.show_notification(
-                        "📊 Анализ эффективности\
-⚠️ Ваш процент успешных операций ниже 70%.\
-Рекомендуется ознакомиться с разделом помощи по выбору методов и анализу контейнеров.",
-                        "warning",
-                        duration=7000
-                    )
-
-    def on_close(self):
-        """Обрабатывает закрытие приложения"""
-        # Сохранение предпочтений
-        self.save_user_preferences()
-
-        # Экспорт статистики по эффективности подсказок
-        if self.tip_effectiveness:
-            try:
-                with open("tip_effectiveness.json", 'w', encoding='utf-8') as f:
-                    json.dump(self.tip_effectiveness, f, indent=2, ensure_ascii=False)
-            except Exception as e:
-                print(f"Ошибка экспорта статистики подсказок: {e}")
-
-
 class EncryptionManager:
     """Полнофункциональный менеджер шифрования с поддержкой современных алгоритмов (реализация на PyCryptodome)"""
 
@@ -7948,93 +4339,94 @@ class EncryptionManager:
         """Возвращает подробную информацию об алгоритме для документации"""
         info = {
             "aes_256_cbc": {
-                "name": "AES-256 CBC",
-                "description": "Блочный шифр с 256-битным ключом в режиме сцепления блоков шифротекста",
-                "security": "Высокая (при правильной реализации)",
-                "use_cases": "Общее шифрование файлов и данных",
-                "limitations": "Требует паддинг, уязвим к атакам на повторение блоков без случайного IV",
-                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
-                "iv_size": "16 байт",
-                "authentication": "Нет (рекомендуется использовать с отдельной MAC)",
-                "performance": "Высокая скорость шифрования/дешифрования"
+                "name": "AES-256 CBC (Advanced Encryption Standard - Cipher Block Chaining)",
+                "description": "Классический режим блочного шифрования. Каждый блок открытого текста перед шифрованием объединяется по XOR с предыдущим блоком шифротекста. Первый блок объединяется с вектором инициализации (IV). Требует выравнивания данных до границы блока (padding).",
+                "security": "Высокая криптографическая стойкость самого шифра, но режим уязвим к атакам типа Padding Oracle при неправильной реализации обработки ошибок расшифровки.",
+                "use_cases": "Шифрование дисков (например, LUKS), устаревшие протоколы TLS, шифрование файлов в оффлайн-режиме при наличии отдельной MAC.",
+                "limitations": "Отсутствие встроенной аутентификации целостности данных. Требует генерации криптографически стойкого случайного IV для каждого сообщения. Последовательное шифрование (не поддерживает параллелизм).",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (минимум 600 000 итераций по рекомендации OWASP 2023 для защиты от перебора паролей).",
+                "iv_size": "16 байт (128 бит). Должен быть уникальным и непредсказуемым для каждого сообщения с одним ключом.",
+                "authentication": "Отсутствует. Критически необходимо использовать совместно с HMAC-SHA256 (Encrypt-then-MAC) для защиты от модификации.",
+                "performance": "Высокая скорость на процессорах с инструкциями AES-NI. Дешифрование нельзя распараллелить, шифрование - можно."
             },
             "aes_256_gcm": {
-                "name": "AES-256 GCM",
-                "description": "Режим Галуа/Счётчика с встроенной аутентификацией данных (AEAD)",
-                "security": "Очень высокая (рекомендуется для новых систем)",
-                "use_cases": "Защита конфиденциальности и целостности данных",
-                "limitations": "Ограничение на размер данных (~64 ГБ на ключ)",
-                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
-                "iv_size": "12 байт (рекомендуется)",
-                "authentication": "Встроенная (128-битный тег аутентификации)",
-                "performance": "Высокая скорость с аппаратной поддержкой на современных CPU"
+                "name": "AES-256 GCM (Galois/Counter Mode)",
+                "description": "Современный режим AEAD (Authenticated Encryption with Associated Data). Объединяет режим счётчика (CTR) для шифрования и код аутентификации Галуа (GMAC) для проверки целостности.",
+                "security": "Очень высокая. Является стандартом де-факто для современных протоколов (TLS 1.2/1.3, IPSec). Обеспечивает конфиденциальность и целостность.",
+                "use_cases": "Защита сетевого трафика, шифрование баз данных, безопасное хранение сессий, новые криптографические протоколы.",
+                "limitations": "Строгие ограничения на количество данных, шифруемых одним ключом (рекомендуется не более 64 ГБ для одного ключа и nonce). Повторение nonce с тем же ключом полностью компрометирует безопасность.",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций). Альтернативно Argon2id для повышенной стойкости к GPU-атакам.",
+                "iv_size": "12 байт (96 бит). Рекомендуется использовать случайный nonce для каждого сообщения. Допускается 16 байт, но 12 байт оптимальны для производительности.",
+                "authentication": "Встроенная. Тег аутентификации обычно 128 бит (16 байт). Позволяетdetectровать любую модификацию шифротекста или дополнительного данных (AAD).",
+                "performance": "Очень высокая. Поддерживает полное параллельное шифрование и дешифрование. Аппаратное ускорение доступно на большинстве современных CPU (AES-NI, PCLMULQDQ)."
             },
             "aes_256_ctr": {
-                "name": "AES-256 CTR",
-                "description": "Режим счётчика, преобразует блочный шифр в потоковый",
-                "security": "Высокая (при уникальном nonce)",
-                "use_cases": "Параллельная обработка, шифрование потоков",
-                "limitations": "Критически важно никогда не повторять nonce с одним ключом",
-                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
-                "iv_size": "16 байт (8 байт nonce + 8 байт счётчик)",
-                "authentication": "Нет (рекомендуется комбинировать с HMAC)",
-                "performance": "Очень высокая, поддерживает параллелизм"
+                "name": "AES-256 CTR (Counter Mode)",
+                "description": "Режим шифрования, преобразующий блочный шифр в потоковый. Шифруется последовательность счётчиков, результат XORится с открытым текстом. Не требует padding.",
+                "security": "Высокая при условии абсолютной уникальности пары (Key, Nonce). Эквивалентна одноразовому блокноту при правильном использовании.",
+                "use_cases": "Шифрование потоковых данных, дисковое шифрование, ситуации, требующие произвольного доступа к зашифрованным данным (random access).",
+                "limitations": "Не обеспечивает аутентификацию целостности. Критически важно гарантировать уникальность nonce. Переполнение счётчика недопустимо.",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций).",
+                "iv_size": "16 байт (128 бит). Обычно структурируется как 12 байт nonce + 4 байт счётчика или 8 байт nonce + 8 байт счётчика.",
+                "authentication": "Отсутствует. Необходимо комбинировать с HMAC (например, AES-CTR + HMAC-SHA256) или использовать поверх защищённого канала.",
+                "performance": "Максимальная среди режимов AES. Поддерживает полный параллелизм как при шифровании, так и при дешифровании. Не требует операции расшифрования блока для дешифрования потока."
             },
             "aes_256_ofb": {
-                "name": "AES-256 OFB",
-                "description": "Режим обратной связи вывода, создаёт потоковый шифр",
-                "security": "Средняя (устаревший режим)",
-                "use_cases": "Шифрование в средах с высоким уровнем ошибок",
-                "limitations": "Не обеспечивает аутентификацию, уязвим к атакам на битовые флипы",
-                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
-                "iv_size": "16 байт",
-                "authentication": "Нет",
-                "performance": "Хорошая скорость, но не рекомендуется для новых систем"
+                "name": "AES-256 OFB (Output Feedback Mode)",
+                "description": "Режим обратной связи по выходу. Выход шифра подаётся на вход следующего этапа шифрования, создавая ключевой поток. Похож на потоковый шифр.",
+                "security": "Средняя/Устаревшая. Не обеспечивает целостности. Уязвим к атакам битового переворота (bit-flipping): изменение бита в шифротексте меняет соответствующий бит в открытом тексте.",
+                "use_cases": "Устаревшие системы, среды с высоким уровнем шумов в канале связи (ошибки не распространяются на следующие блоки).",
+                "limitations": "Не рекомендуется для новых систем. Требует уникального IV. Потеря синхронизации потока требует перезапуска сессии.",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций).",
+                "iv_size": "16 байт (128 бит). Должен быть уникальным для каждого сообщения.",
+                "authentication": "Отсутствует. Данные могут быть модифицированы злоумышленником без знания ключа.",
+                "performance": "Хорошая. Генерация ключевого потока не зависит от открытого текста, но процесс последовательный (нельзя параллелить)."
             },
             "chacha20_poly1305": {
                 "name": "ChaCha20-Poly1305",
-                "description": "Современный потоковый шифр с аутентификацией (стандарт IETF RFC 8439)",
-                "security": "Очень высокая (рекомендуется для мобильных устройств)",
-                "use_cases": "TLS 1.3, защищённая передача данных, мобильные приложения",
-                "limitations": "Ограничение на 2^32 блоков на ключ/nonce",
-                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
-                "nonce_size": "12 байт",
-                "authentication": "Встроенная (128-битный тег Poly1305)",
-                "performance": "Высокая скорость на CPU без аппаратного ускорения AES"
+                "description": "Комбинация потокового шифра ChaCha20 и кода аутентификации сообщений Poly1305. Стандарт IETF RFC 8439. Альтернатива AES-GCM для систем без аппаратного ускорения AES.",
+                "security": "Очень высокая. Устойчив к атакам по времени (timing attacks) в программных реализациях. Рекомендуется для мобильных устройств и встроенных систем.",
+                "use_cases": "TLS 1.3, WireGuard VPN, SSH, мобильные приложения, защита данных в облаке.",
+                "limitations": "Ограничение на количество сообщений с одним ключом (2^32 сообщений). Требует уникального nonce.",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций) или Argon2id.",
+                "nonce_size": "12 байт (96 бит). Стандарт IETF. Повторение nonce с тем же ключом фатально для безопасности.",
+                "authentication": "Встроенная (AEAD). Тег аутентификации 128 бит (16 байт). Гарантирует целостность шифротекста и дополнительных данных.",
+                "performance": "Высокая скорость на процессорах общего назначения (ARM, x86 без AES-NI). Часто быстрее AES-GCM в программных реализациях."
             },
             "chacha20": {
-                "name": "ChaCha20",
-                "description": "Потоковый шифр без встроенной аутентификации",
-                "security": "Высокая (но без проверки целостности)",
-                "use_cases": "Когда аутентификация обеспечивается отдельно",
-                "limitations": "Требует отдельной аутентификации для защиты от модификации",
-                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций)",
-                "nonce_size": "16 байт",
-                "authentication": "Нет",
-                "performance": "Очень высокая скорость на всех платформах"
+                "name": "ChaCha20 (Standalone)",
+                "description": "Потоковый шифр, разработанный Дэниелом Бернштейном. Используется только для конфиденциальности без встроенной проверки целостности.",
+                "security": "Высокая криптографическая стойкость потока, но отсутствие аутентификации делает данные уязвимыми к модификации.",
+                "use_cases": "Внутренние компоненты протоколов, где аутентификация вынесена наружу, или легаси-системы.",
+                "limitations": "Требует внешней схемы аутентификации (например, HMAC). Не рекомендуется использовать отдельно в новых проектах.",
+                "key_derivation": "PBKDF2-HMAC-SHA256 (600 000 итераций).",
+                "nonce_size": "12 байт (96 бит) по стандарту RFC 8439. (В оригинальной спецификации могло использоваться 8 байт, но современный стандарт - 12 байт).",
+                "authentication": "Отсутствует. Необходимо применять конструктив Encrypt-then-MAC.",
+                "performance": "Очень высокая. Эффективен на широком спектре архитектур, включая мобильные процессоры."
             },
             "xor": {
-                "name": "XOR",
-                "description": "Простейшая операция побитового исключающего ИЛИ",
-                "security": "Отсутствует (тривиально взламывается)",
-                "use_cases": "Только для образовательных целей",
-                "limitations": "Полностью небезопасен, не скрывает статистические паттерны",
-                "key_derivation": "Нет (ключ используется напрямую)",
-                "authentication": "Нет",
-                "performance": "Максимальная скорость",
-                "warning": "НИКОГДА не используйте для защиты реальных данных!"
+                "name": "XOR (Исключающее ИЛИ)",
+                "description": "Битовая логическая операция. Применяется между байтами данных и байтами ключа. Если ключ короче данных, он повторяется.",
+                "security": "Отсутствует. Криптографически не стойкий. Легко взламывается частотным анализом или известным открытым текстом.",
+                "use_cases": "Обфускация кода, учебные примеры, временное скрытие данных от случайного взгляда (не от злоумышленника).",
+                "limitations": "Полностью небезопасен для защиты конфиденциальной информации. Статистические паттерны данных сохраняются.",
+                "key_derivation": "Отсутствует. Ключ используется как есть.",
+                "authentication": "Отсутствует.",
+                "performance": "Максимально возможная скорость (тактовая частота процессора).",
+                "warning": "КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО использовать для защиты персональных данных, паролей или финансовой информации."
             },
             "base64": {
                 "name": "Base64",
-                "description": "Кодирование двоичных данных в текстовый формат ASCII",
-                "security": "Отсутствует (обратимое преобразование без ключа)",
-                "use_cases": "Передача двоичных данных в текстовых протоколах (email, JSON)",
-                "limitations": "Не является шифрованием, данные легко декодируются",
-                "authentication": "Нет",
-                "performance": "Высокая скорость",
-                "warning": "Base64 НЕ ЗАЩИЩАЕТ данные! Это просто кодирование."
+                "description": "Схема кодирования двоичных данных в текстовое представление ASCII. Использует 64 символа (A-Z, a-z, 0-9, +, /).",
+                "security": "Отсутствует. Это не шифрование. Любой человек может декодировать данные без ключа.",
+                "use_cases": "Передача бинарных данных в текстовых протоколах (HTTP, SMTP, JSON, XML), встраивание изображений в CSS/HTML.",
+                "limitations": "Увеличивает размер данных примерно на 33%. Не скрывает содержание информации.",
+                "authentication": "Отсутствует.",
+                "performance": "Высокая скорость кодирования и декодирования.",
+                "warning": "Base64 НЕ ОБЕСПЕЧИВАЕТ конфиденциальность. Данные считаются открытыми."
             }
         }
+
         return info.get(algorithm, {
             "name": algorithm,
             "description": "Информация недоступна",
@@ -13614,6 +10006,1228 @@ class ImageProcessor:
 
 
 # ───────────────────────────────────────────────
+# 🛡️ ВКЛАДКА ИНСТРУМЕНТОВ ИБ
+# ───────────────────────────────────────────────
+class IBToolsTab:
+    """
+    Набор независимых инструментов для специалиста ИБ:
+    1. Калькулятор хешей (с копированием любого алгоритма и вставкой текста)
+    2. Генератор паролей (расширенная конфигурация символов)
+    3. Валидатор сигнатур (анти-спуфинг)
+    4. Кодировщик (с кнопкой вставки и Ctrl+V)
+    """
+
+    MAGIC_SIGNATURES = {
+        b'\x89PNG\r\n\x1a\n': '.png',
+        b'\xff\xd8\xff': '.jpg',
+        b'GIF87a': '.gif',
+        b'GIF89a': '.gif',
+        b'BM': '.bmp',
+        b'PK\x03\x04': '.zip',
+        b'PK\x05\x06': '.zip',
+        b'PK\x07\x08': '.zip',
+        b'Rar!': '.rar',
+        b'7z\xbc\xaf': '.7z',
+        b'%PDF': '.pdf',
+        b'\x7fELF': '.elf',
+        b'MZ': '.exe',
+        b'\x00\x00\x00\x18ftypmp4': '.mp4',
+        b'\x00\x00\x00\x1cftypmp4': '.mp4',
+        b'RIFF': '.wav',
+        b'\x00\x00\x00\x20ftypisom': '.mp4',
+        b'\x00\x00\x00\x14ftyp': '.mp4'
+    }
+
+    def __init__(self, parent, app):
+        self.parent = parent
+        self.log_manager = HistoryLog()
+        self.app = app
+        self.colors = app.colors
+        self.setup_ui()
+
+    def setup_ui(self):
+        """Создает интерфейс вкладки с 4 инструментами"""
+        self.tools_notebook = ttk.Notebook(self.parent, style="TNotebook")
+        self.tools_notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # 1. Хеш-калькулятор
+        self.hash_frame = ttk.Frame(self.tools_notebook, style="Card.TFrame")
+        self.tools_notebook.add(self.hash_frame, text="🔐 Хеш-суммы")
+        self.create_hash_tool()
+
+        # 2. Генератор паролей
+        self.pass_frame = ttk.Frame(self.tools_notebook, style="Card.TFrame")
+        self.tools_notebook.add(self.pass_frame, text="🔑 Генератор паролей")
+        self.create_password_tool()
+
+        # 3. Валидатор сигнатур
+        self.sig_frame = ttk.Frame(self.tools_notebook, style="Card.TFrame")
+        self.tools_notebook.add(self.sig_frame, text="🕵️ Валидатор сигнатур")
+        self.create_signature_tool()
+
+        # 4. Кодировщик
+        self.enc_frame = ttk.Frame(self.tools_notebook, style="Card.TFrame")
+        self.tools_notebook.add(self.enc_frame, text="🔣 Кодировщик")
+        self.create_encoding_tool()
+
+        # 5. Извлекатель метаданных (НОВЫЙ)
+        self.meta_tool_frame = ttk.Frame(self.tools_notebook, style="Card.TFrame")
+        self.tools_notebook.add(self.meta_tool_frame, text="🔍 Метаданные")
+        self.create_metadata_tool()
+
+    # ───────────────────────────────────────────────
+    # 1. ИНСТРУМЕНТ: ХЕШ-КАЛЬКУЛЯТОР
+    # ───────────────────────────────────────────────
+    def create_hash_tool(self):
+        """Инструмент расчета хеш-сумм с копированием и вставкой"""
+        # Выбор файла
+        file_frame = ttk.LabelFrame(self.hash_frame, text="📂 Файл", padding=10, style="Card.TLabelframe")
+        file_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.hash_file_path = tk.StringVar()
+        file_entry = ttk.Entry(file_frame, textvariable=self.hash_file_path, state='readonly', style="TEntry")
+        file_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+
+        ttk.Button(file_frame, text="📂 Обзор", command=self.select_hash_file).pack(side=tk.LEFT)
+        ttk.Button(file_frame, text="🗑️ Очистить", command=lambda: self.hash_file_path.set("")).pack(side=tk.LEFT,
+                                                                                                     padx=5)
+
+        # Текст для хеширования
+        text_frame = ttk.LabelFrame(self.hash_frame, text="📝 Или текст (Ctrl+V для вставки)", padding=10,
+                                    style="Card.TLabelframe")
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        text_toolbar = ttk.Frame(text_frame, style="Card.TFrame")
+        text_toolbar.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Button(text_toolbar, text="📋 Вставить", style="IconButton.TButton",
+                   command=self.paste_hash_text).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(text_toolbar, text="🗑️ Очистить", style="IconButton.TButton",
+                   command=lambda: self.hash_text_input.delete("1.0", tk.END)).pack(side=tk.LEFT)
+
+        self.hash_text_input = scrolledtext.ScrolledText(text_frame, height=5, font=("Consolas", 10),
+                                                         bg=self.colors["card"], fg=self.colors["text"])
+        self.hash_text_input.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.hash_text_input.bind("<Control-v>", lambda e: self.paste_hash_text())
+        self.hash_text_input.bind("<KeyRelease>", lambda e: self.auto_calculate_hashes())
+
+        # Результаты
+        res_frame = ttk.LabelFrame(self.hash_frame, text="🔐 Результаты", padding=10, style="Card.TLabelframe")
+        res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        columns = ("Алгоритм", "Хеш", "Действие")
+        self.hash_tree = ttk.Treeview(res_frame, columns=columns, show="headings", height=8, style="Treeview")
+        self.hash_tree.heading("Алгоритм", text="Алгоритм")
+        self.hash_tree.heading("Хеш", text="Хеш")
+        self.hash_tree.heading("Действие", text="Действие")
+
+        self.hash_tree.column("Алгоритм", width=100, anchor=tk.CENTER)
+        self.hash_tree.column("Хеш", width=400, anchor=tk.W)
+        self.hash_tree.column("Действие", width=100, anchor=tk.CENTER)
+
+        scroll_y = ttk.Scrollbar(res_frame, orient="vertical", command=self.hash_tree.yview)
+        self.hash_tree.configure(yscrollcommand=scroll_y.set)
+
+        self.hash_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+        btn_frame = ttk.Frame(self.hash_frame, style="Card.TFrame")
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Button(btn_frame, text="🚀 Рассчитать хеши", style="Accent.TButton", command=self.calculate_hashes).pack(
+            side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать все", command=self.copy_all_hashes).pack(side=tk.LEFT, padx=5)
+
+    def select_hash_file(self):
+        """Выбирает файл для хеширования"""
+        path = filedialog.askopenfilename(
+            title="Выберите файл",
+            filetypes=[("Все файлы", "*.*")],
+            initialdir=self.app.last_open_dir
+        )
+        if path:
+            self.hash_file_path.set(path)
+            self.app.last_open_dir = os.path.dirname(path)
+            self.calculate_hashes()
+
+    def paste_hash_text(self):
+        """Вставляет текст из буфера обмена"""
+        try:
+            text = self.root.clipboard_get()
+            self.hash_text_input.insert(tk.END, text)
+            self.auto_calculate_hashes()
+        except tk.TclError:
+            pass
+
+    def auto_calculate_hashes(self):
+        """Автоматически пересчитывает хеши при изменении текста"""
+        if hasattr(self, '_hash_auto_timer'):
+            self.root.after_cancel(self._hash_auto_timer)
+        self._hash_auto_timer = self.root.after(500, self.calculate_hashes)
+
+    def calculate_hashes(self):
+        """Рассчитывает хеши с кнопками копирования для каждого"""
+        for item in self.hash_tree.get_children():
+            self.hash_tree.delete(item)
+
+        text_data = self.hash_text_input.get("1.0", tk.END).strip().encode('utf-8')
+        file_path = self.hash_file_path.get()
+
+        data = None
+        source = "Текст"
+
+        if file_path and os.path.exists(file_path):
+            try:
+                with open(file_path, 'rb') as f:
+                    data = f.read()
+                source = f"Файл: {os.path.basename(file_path)}"
+            except Exception as e:
+                messagebox.showerror("Ошибка", f"Не удалось прочитать файл: {e}")
+                return
+        elif text_data:
+            data = text_data
+        else:
+            return
+
+        algorithms = ['md5', 'sha1', 'sha256', 'sha512']
+        hash_values = {}
+
+        for algo in algorithms:
+            try:
+                h = hashlib.new(algo)
+                h.update(data)
+                hex_digest = h.hexdigest()
+                hash_values[algo] = hex_digest
+                self.hash_tree.insert("", tk.END, values=(algo.upper(), hex_digest, "📋 Копировать"), tags=(algo,))
+            except Exception as e:
+                self.hash_tree.insert("", tk.END, values=(algo.upper(), f"Ошибка: {e}", ""), tags=("error",))
+
+        self.hash_tree.bind("<ButtonRelease-1>", lambda e: self.on_hash_click(e, hash_values))
+        self.app.show_toast(f"✅ Хешы рассчитаны ({source})")
+
+    def on_hash_click(self, event, hash_values):
+        """Обрабатывает клик по строке хеша для копирования"""
+        item = self.hash_tree.identify_row(event.y)
+        if item:
+            column = self.hash_tree.identify_column(event.x)
+            if column == '#3' or column == '#2':
+                algo = self.hash_tree.item(item, 'tags')[0]
+                if algo in hash_values:
+                    self.root.clipboard_clear()
+                    self.root.clipboard_append(hash_values[algo])
+                    self.app.show_toast(f"✅ {algo.upper()} скопирован")
+
+    def copy_all_hashes(self):
+        """Копирует все хеши в буфер обмена"""
+        text = ""
+        for item in self.hash_tree.get_children():
+            vals = self.hash_tree.item(item, 'values')
+            if len(vals) >= 2:
+                text += f"{vals[0]}: {vals[1]}\n"
+        if text:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.app.show_toast("✅ Все хеши скопированы")
+
+    # ───────────────────────────────────────────────
+    # 2. ИНСТРУМЕНТ: ГЕНЕРАТОР ПАРОЛЕЙ
+    # ───────────────────────────────────────────────
+    def create_password_tool(self):
+        """Генератор паролей с расширенной конфигурацией"""
+        settings_frame = ttk.LabelFrame(self.pass_frame, text="⚙️ Настройки", padding=10, style="Card.TLabelframe")
+        settings_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        # Длина
+        len_frame = ttk.Frame(settings_frame, style="Card.TFrame")
+        len_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(len_frame, text="Длина:", style="TLabel").pack(side=tk.LEFT)
+        self.pass_len = tk.IntVar(value=16)
+        len_scale = ttk.Scale(len_frame, from_=8, to=64, variable=self.pass_len, orient=tk.HORIZONTAL,
+                              command=lambda e: self.update_pass_preview())
+        len_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
+        self.pass_len_label = ttk.Label(len_frame, text="16", style="Secondary.TLabel", width=3)
+        self.pass_len_label.pack(side=tk.LEFT)
+
+        # Опции
+        opt_frame = ttk.Frame(settings_frame, style="Card.TFrame")
+        opt_frame.pack(fill=tk.X, pady=5)
+
+        self.use_upper = tk.BooleanVar(value=True)
+        self.use_lower = tk.BooleanVar(value=True)
+        self.use_digits = tk.BooleanVar(value=True)
+        self.use_special = tk.BooleanVar(value=True)
+        self.exclude_ambiguous = tk.BooleanVar(value=False)
+
+        ttk.Checkbutton(opt_frame, text="A-Z", variable=self.use_upper).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(opt_frame, text="a-z", variable=self.use_lower).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(opt_frame, text="0-9", variable=self.use_digits).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(opt_frame, text="!@#", variable=self.use_special).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(opt_frame, text="❌ Без похожих (l,1,I,O,0)", variable=self.exclude_ambiguous).pack(side=tk.LEFT,
+                                                                                                           padx=5)
+
+        # Пользовательские символы
+        custom_frame = ttk.Frame(settings_frame, style="Card.TFrame")
+        custom_frame.pack(fill=tk.X, pady=5)
+        ttk.Label(custom_frame, text="Доп. символы:", style="TLabel").pack(side=tk.LEFT)
+        self.custom_chars = tk.StringVar(value="")
+        custom_entry = ttk.Entry(custom_frame, textvariable=self.custom_chars, width=30, style="TEntry")
+        custom_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Label(custom_frame, text="(добавятся к набору)", style="Secondary.TLabel").pack(side=tk.LEFT)
+
+        # Результат
+        res_frame = ttk.LabelFrame(self.pass_frame, text="🔑 Результат", padding=10, style="Card.TLabelframe")
+        res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.pass_result_var = tk.StringVar()
+        res_entry = ttk.Entry(res_frame, textvariable=self.pass_result_var, font=("Consolas", 14), style="TEntry")
+        res_entry.pack(fill=tk.X, pady=5)
+
+        self.entropy_label = ttk.Label(res_frame, text="Энтропия: 0 бит", style="Secondary.TLabel")
+        self.entropy_label.pack(anchor=tk.W, pady=5)
+
+        btn_frame = ttk.Frame(self.pass_frame, style="Card.TFrame")
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Button(btn_frame, text="🎲 Сгенерировать", style="Accent.TButton", command=self.generate_password).pack(
+            side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать", command=self.copy_password).pack(side=tk.LEFT, padx=5)
+
+    def update_pass_preview(self):
+        self.pass_len_label.config(text=str(self.pass_len.get()))
+
+    def generate_password(self):
+        chars = ""
+        if self.use_upper.get(): chars += string.ascii_uppercase
+        if self.use_lower.get(): chars += string.ascii_lowercase
+        if self.use_digits.get(): chars += string.digits
+        if self.use_special.get(): chars += string.punctuation
+
+        custom = self.custom_chars.get()
+        if custom:
+            chars += custom
+
+        if self.exclude_ambiguous.get():
+            ambiguous = "l1IO0"
+            chars = ''.join([c for c in chars if c not in ambiguous])
+
+        if not chars:
+            messagebox.showwarning("Ошибка", "Выберите хотя бы один набор символов")
+            return
+
+        length = self.pass_len.get()
+        password = ''.join(secrets.choice(chars) for _ in range(length))
+
+        self.pass_result_var.set(password)
+
+        entropy = length * math.log2(len(chars))
+        self.entropy_label.config(text=f"Энтропия: {entropy:.2f} бит (Алфавит: {len(chars)} симв.)")
+        color = self.colors["success"] if entropy > 60 else self.colors["warning"] if entropy > 40 else self.colors[
+            "error"]
+        self.entropy_label.config(foreground=color)
+
+    def copy_password(self):
+        pwd = self.pass_result_var.get()
+        if pwd:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(pwd)
+            self.app.show_toast("✅ Пароль скопирован")
+
+    # ───────────────────────────────────────────────
+    # 3. ИНСТРУМЕНТ: ВАЛИДАТОР СИГНАТУР
+    # ───────────────────────────────────────────────
+    def create_signature_tool(self):
+        """Проверка сигнатур файлов"""
+        info_frame = ttk.LabelFrame(self.sig_frame, text="ℹ️ Информация", padding=10, style="Card.TLabelframe")
+        info_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Label(info_frame,
+                  text="Сравнивает реальную сигнатуру файла с его расширением.\nПолезно для выявления маскировки исполняемых файлов.",
+                  style="Secondary.TLabel", justify=tk.LEFT).pack(anchor=tk.W)
+
+        select_frame = ttk.Frame(self.sig_frame, style="Card.TFrame")
+        select_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.sig_file_path = tk.StringVar()
+        sig_entry = ttk.Entry(select_frame, textvariable=self.sig_file_path, state='readonly', style="TEntry")
+        sig_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        ttk.Button(select_frame, text="📂 Выбрать файл", command=self.select_sig_file).pack(side=tk.LEFT)
+
+        res_frame = ttk.LabelFrame(self.sig_frame, text="🔍 Результат анализа", padding=10, style="Card.TLabelframe")
+        res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.sig_result_text = scrolledtext.ScrolledText(res_frame, height=10, font=("Consolas", 10),
+                                                         bg=self.colors["card"], fg=self.colors["text"],
+                                                         state='disabled')
+        self.sig_result_text.pack(fill=tk.BOTH, expand=True)
+
+        btn_frame = ttk.Frame(self.sig_frame, style="Card.TFrame")
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Button(btn_frame, text="🚀 Проверить", style="Accent.TButton", command=self.check_signature).pack(
+            side=tk.LEFT, padx=5)
+
+    def select_sig_file(self):
+        path = filedialog.askopenfilename(
+            title="Выберите файл",
+            filetypes=[("Все файлы", "*.*")],
+            initialdir=self.app.last_open_dir
+        )
+        if path:
+            self.sig_file_path.set(path)
+            self.app.last_open_dir = os.path.dirname(path)
+
+    def check_signature(self):
+        path = self.sig_file_path.get()
+        if not path or not os.path.exists(path):
+            messagebox.showwarning("Ошибка", "Файл не выбран или не существует")
+            return
+
+        self.sig_result_text.config(state='normal')
+        self.sig_result_text.delete("1.0", tk.END)
+
+        try:
+            with open(path, 'rb') as f:
+                header = f.read(16)
+
+            ext = os.path.splitext(path)[1].lower()
+            detected_ext = "Неизвестно"
+            detected_type = "Неизвестно"
+            is_match = False
+
+            for signature, extension in IBToolsTab.MAGIC_SIGNATURES.items():
+                if header.startswith(signature):
+                    detected_ext = extension
+                    detected_type = extension.upper()
+                    if ext == extension:
+                        is_match = True
+                    break
+
+            if header.startswith(b'RIFF') and header[8:12] == b'WAVE':
+                detected_ext = '.wav'
+                detected_type = 'WAV Audio'
+                if ext == '.wav': is_match = True
+
+            res_text = f"Файл: {os.path.basename(path)}\n"
+            res_text += f"Расширение имени: {ext if ext else 'Нет'}\n"
+            res_text += f"Сигнатура (Hex): {header[:8].hex(' ').upper()}\n"
+            res_text += f"Определенный тип: {detected_type} ({detected_ext})\n"
+            res_text += "-" * 30 + "\n"
+
+            if is_match:
+                res_text += "✅ СТАТУС: СОВПАДЕНИЕ\nРасширение файла соответствует сигнатуре."
+                color = self.colors["success"]
+            else:
+                res_text += "❌ СТАТУС: НЕСОВПАДЕНИЕ\nВозможная подмена расширения! Будьте осторожны."
+                color = self.colors["error"]
+
+            self.sig_result_text.insert("1.0", res_text)
+            self.sig_result_text.config(state='disabled')
+
+            self.sig_result_text.tag_add("status", "5.0", "6.0")
+            self.sig_result_text.tag_configure("status", foreground=color, font=("Consolas", 10, "bold"))
+
+        except Exception as e:
+            self.sig_result_text.insert("1.0", f"Ошибка чтения: {e}")
+            self.sig_result_text.config(state='disabled')
+
+    # ───────────────────────────────────────────────
+    # 4. ИНСТРУМЕНТ: КОДИРОВЩИК
+    # ───────────────────────────────────────────────
+    def create_encoding_tool(self):
+        """Конвертер кодировок с кнопкой вставки"""
+        input_frame = ttk.LabelFrame(self.enc_frame, text="📥 Входные данные (Ctrl+V для вставки)", padding=10,
+                                     style="Card.TLabelframe")
+        input_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        input_toolbar = ttk.Frame(input_frame, style="Card.TFrame")
+        input_toolbar.pack(fill=tk.X, pady=(0, 5))
+
+        ttk.Button(input_toolbar, text="📋 Вставить", style="IconButton.TButton",
+                   command=self.paste_encoding_input).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(input_toolbar, text="🗑️ Очистить", style="IconButton.TButton",
+                   command=lambda: self.enc_input.delete("1.0", tk.END)).pack(side=tk.LEFT)
+
+        self.enc_input = scrolledtext.ScrolledText(input_frame, height=6, font=("Consolas", 10),
+                                                   bg=self.colors["card"], fg=self.colors["text"])
+        self.enc_input.pack(fill=tk.BOTH, expand=True)
+        self.enc_input.bind("<Control-v>", lambda e: self.paste_encoding_input())
+
+        ops_frame = ttk.Frame(self.enc_frame, style="Card.TFrame")
+        ops_frame.pack(fill=tk.X, padx=10, pady=5)
+
+        self.enc_mode = tk.StringVar(value="base64_encode")
+        ttk.Radiobutton(ops_frame, text="Base64 →", variable=self.enc_mode, value="base64_encode").pack(side=tk.LEFT)
+        ttk.Radiobutton(ops_frame, text="→ Base64", variable=self.enc_mode, value="base64_decode").pack(side=tk.LEFT)
+        ttk.Radiobutton(ops_frame, text="Hex →", variable=self.enc_mode, value="hex_encode").pack(side=tk.LEFT)
+        ttk.Radiobutton(ops_frame, text="→ Hex", variable=self.enc_mode, value="hex_decode").pack(side=tk.LEFT)
+        ttk.Radiobutton(ops_frame, text="URL →", variable=self.enc_mode, value="url_encode").pack(side=tk.LEFT)
+        ttk.Radiobutton(ops_frame, text="→ URL", variable=self.enc_mode, value="url_decode").pack(side=tk.LEFT)
+
+        output_frame = ttk.LabelFrame(self.enc_frame, text="📤 Результат", padding=10, style="Card.TLabelframe")
+        output_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+
+        self.enc_output = scrolledtext.ScrolledText(output_frame, height=6, font=("Consolas", 10),
+                                                    bg=self.colors["card"], fg=self.colors["text"], state='disabled')
+        self.enc_output.pack(fill=tk.BOTH, expand=True)
+
+        btn_frame = ttk.Frame(self.enc_frame, style="Card.TFrame")
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+        ttk.Button(btn_frame, text="🔄 Конвертировать", style="Accent.TButton", command=self.convert_encoding).pack(
+            side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать", command=self.copy_encoding_result).pack(side=tk.LEFT, padx=5)
+
+    def paste_encoding_input(self):
+        """Вставляет текст из буфера обмена"""
+        try:
+            text = self.root.clipboard_get()
+            self.enc_input.insert(tk.END, text)
+        except tk.TclError:
+            pass
+
+    def convert_encoding(self):
+        input_data = self.enc_input.get("1.0", tk.END).strip()
+        if not input_data:
+            messagebox.showwarning("Внимание", "Введите данные")
+            return
+
+        self.enc_output.config(state='normal')
+        self.enc_output.delete("1.0", tk.END)
+        mode = self.enc_mode.get()
+
+        try:
+            result = ""
+            if mode == "base64_encode":
+                result = base64.b64encode(input_data.encode('utf-8')).decode('utf-8')
+            elif mode == "base64_decode":
+                result = base64.b64decode(input_data).decode('utf-8')
+            elif mode == "hex_encode":
+                result = input_data.encode('utf-8').hex()
+            elif mode == "hex_decode":
+                result = bytes.fromhex(input_data).decode('utf-8')
+            elif mode == "url_encode":
+                result = urllib.parse.quote(input_data)
+            elif mode == "url_decode":
+                result = urllib.parse.unquote(input_data)
+
+            self.enc_output.insert("1.0", result)
+            self.app.show_toast("✅ Конвертация успешна")
+        except Exception as e:
+            self.enc_output.insert("1.0", f"Ошибка: {e}\nПроверьте формат входных данных.")
+
+        self.enc_output.config(state='disabled')
+
+    def copy_encoding_result(self):
+        data = self.enc_output.get("1.0", tk.END).strip()
+        if data:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(data)
+            self.app.show_toast("✅ Результат скопирован")
+
+    # ───────────────────────────────────────────────
+    # 5. ИНСТРУМЕНТ: ИЗВЛЕКАТЕЛЬ МЕТАДАННЫХ (ПРОФЕССИОНАЛЬНЫЙ)
+    # ───────────────────────────────────────────────
+
+    # Кэш метаданных для оптимизации повторных запросов
+    _metadata_cache: Dict[str, Tuple[dict, float]] = {}
+    _CACHE_TTL = 300  # 5 минут жизни кэша
+
+    def create_metadata_tool(self):
+        """Профессиональный инструмент извлечения метаданных"""
+        # Основной фрейм с прокруткой
+        meta_canvas = tk.Canvas(self.meta_tool_frame, bg=self.colors["bg"],
+                                highlightthickness=0)  # ИСПРАВЛЕНО: self.meta_tool_frame вместо self.enc_frame
+        meta_scrollbar = ttk.Scrollbar(self.meta_tool_frame, orient="vertical", command=meta_canvas.yview)  # ИСПРАВЛЕНО
+        meta_scrollable = ttk.Frame(meta_canvas, style="Card.TFrame")
+
+        meta_scrollable.bind("<Configure>", lambda e: meta_canvas.configure(scrollregion=meta_canvas.bbox("all")))
+        meta_canvas.create_window((0, 0), window=meta_scrollable, anchor="nw")
+        meta_canvas.configure(yscrollcommand=meta_scrollbar.set)
+
+        meta_canvas.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+        meta_scrollbar.pack(side="right", fill="y")
+
+        # Заголовок
+        header_frame = ttk.Frame(meta_scrollable, style="Card.TFrame")
+        header_frame.pack(fill=tk.X, pady=(0, 15))
+        ttk.Label(
+            header_frame,
+            text="🔍 Извлечение метаданных",
+            font=("Segoe UI", 16, "bold"),
+            style="Title.TLabel"
+        ).pack(anchor="w")
+        ttk.Label(
+            header_frame,
+            text="Анализ EXIF, IPTC, XMP, ID3 и других метаданных для цифровой криминалистики",
+            style="Secondary.TLabel"
+        ).pack(anchor="w", pady=(5, 0))
+
+        # Панель выбора файла
+        select_frame = ttk.LabelFrame(meta_scrollable, text="📁 Выбор файла", padding=12, style="Card.TLabelframe")
+        select_frame.pack(fill=tk.X, pady=(0, 15))
+
+        self.meta_file_path = tk.StringVar()
+        path_entry = ttk.Entry(select_frame, textvariable=self.meta_file_path, state='readonly', style="TEntry")
+        path_entry.pack(fill=tk.X, pady=(0, 10))
+
+        btn_row = ttk.Frame(select_frame, style="Card.TFrame")
+        btn_row.pack(fill=tk.X)
+        ttk.Button(btn_row, text="📂 Обзор...", command=self.select_meta_file, style="Accent.TButton").pack(side=tk.LEFT,
+                                                                                                           padx=(0, 5))
+        ttk.Button(btn_row, text="🗑️ Очистить", command=self.clear_meta_selection, style="TButton").pack(side=tk.LEFT,
+                                                                                                         padx=(0, 5))
+        ttk.Button(btn_row, text="🔄 Перезагрузить", command=self.refresh_metadata, style="TButton").pack(side=tk.LEFT)
+
+        # Панель управления
+        control_frame = ttk.LabelFrame(meta_scrollable, text="⚙️ Управление", padding=12, style="Card.TLabelframe")
+        control_frame.pack(fill=tk.X, pady=(0, 15))
+
+        ctrl_row = ttk.Frame(control_frame, style="Card.TFrame")
+        ctrl_row.pack(fill=tk.X)
+        self.extract_btn = ttk.Button(ctrl_row, text="🔍 Извлечь метаданные", command=self.extract_metadata,
+                                      style="Accent.TButton", state="disabled")
+        self.extract_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.copy_btn = ttk.Button(ctrl_row, text="📋 Копировать", command=self.copy_metadata, style="TButton",
+                                   state="disabled")
+        self.copy_btn.pack(side=tk.LEFT, padx=(0, 5))
+        self.export_btn = ttk.Button(ctrl_row, text="📤 Экспорт", command=self.export_metadata, style="TButton",
+                                     state="disabled")
+        self.export_btn.pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(ctrl_row, text="🗑️ Очистить результат", command=self.clear_metadata_result, style="TButton").pack(
+            side=tk.LEFT)
+
+        # Панель поиска/фильтра
+        filter_frame = ttk.LabelFrame(meta_scrollable, text="🔎 Поиск и фильтрация", padding=12,
+                                      style="Card.TLabelframe")
+        filter_frame.pack(fill=tk.X, pady=(0, 15))
+
+        self.meta_filter_var = tk.StringVar()
+        filter_entry = ttk.Entry(filter_frame, textvariable=self.meta_filter_var, style="TEntry")
+        filter_entry.pack(fill=tk.X, pady=(0, 10))
+        filter_entry.bind("<KeyRelease>", lambda e: self.filter_metadata_view())
+
+        filter_row = ttk.Frame(filter_frame, style="Card.TFrame")
+        filter_row.pack(fill=tk.X)
+        ttk.Label(filter_row, text="Фильтр полей:", style="Secondary.TLabel").pack(side=tk.LEFT)
+        self.show_empty_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(filter_row, text="Показывать пустые поля", variable=self.show_empty_var,
+                        command=self.filter_metadata_view, style="TCheckbutton").pack(side=tk.LEFT, padx=(20, 0))
+
+        # Результаты - Treeview с группировкой
+        result_frame = ttk.LabelFrame(meta_scrollable, text="📊 Результаты", padding=12, style="Card.TLabelframe")
+        result_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
+
+        # Treeview с поддержкой группировки
+        columns = ("Ключ", "Значение", "Тип", "Размер")
+        self.meta_tree = ttk.Treeview(result_frame, columns=columns, show="tree headings", height=15, style="Treeview")
+        self.meta_tree.heading("Ключ", text="Ключ")
+        self.meta_tree.heading("Значение", text="Значение")
+        self.meta_tree.heading("Тип", text="Тип")
+        self.meta_tree.heading("Размер", text="Размер")
+        self.meta_tree.column("Ключ", width=200, anchor=tk.W)
+        self.meta_tree.column("Значение", width=300, anchor=tk.W)
+        self.meta_tree.column("Тип", width=100, anchor=tk.CENTER)
+        self.meta_tree.column("Размер", width=80, anchor=tk.CENTER)
+
+        # Скроллбары для Treeview
+        tree_scroll_y = ttk.Scrollbar(result_frame, orient="vertical", command=self.meta_tree.yview)
+        tree_scroll_x = ttk.Scrollbar(result_frame, orient="horizontal", command=self.meta_tree.xview)
+        self.meta_tree.configure(yscrollcommand=tree_scroll_y.set, xscrollcommand=tree_scroll_x.set)
+
+        self.meta_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Статусная строка
+        self.meta_status = ttk.Label(meta_scrollable, text="✅ Готов к работе", style="Secondary.TLabel")
+        self.meta_status.pack(fill=tk.X, pady=(0, 10))
+
+        # Привязка контекстного меню
+        self.meta_tree.bind("<Button-3>", self.show_meta_context_menu)
+
+        # Кэш для текущих данных
+        self.current_metadata: dict = {}
+        self.current_file_hash: str = ""
+
+    def select_meta_file(self):
+        """Выбор файла для анализа метаданных"""
+        filetypes = [
+            ("Все поддерживаемые", "*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.wav *.pdf"),
+            ("Изображения", "*.png *.jpg *.jpeg *.bmp *.tiff *.tif"),
+            ("Аудио WAV", "*.wav"),
+            ("PDF документы", "*.pdf"),
+            ("Все файлы", "*.*")
+        ]
+        path = filedialog.askopenfilename(
+            title="Выберите файл для анализа метаданных",
+            filetypes=filetypes,
+            initialdir=self.app.last_open_dir
+        )
+        if path:
+            self.meta_file_path.set(path)
+            self.app.last_open_dir = os.path.dirname(path)
+            self.extract_btn.config(state="normal")
+            self.clear_metadata_result()
+            # Предварительный анализ
+            self._preload_file_info(path)
+
+    def _preload_file_info(self, path: str):
+        """Быстрый предварительный анализ файла"""
+        try:
+            ext = os.path.splitext(path)[1].lower()
+            size = os.path.getsize(path)
+            info = f"📄 {os.path.basename(path)} • {Utils.format_size(size)}"
+            if ext in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff']:
+                with Image.open(path) as img:
+                    info += f" • {img.width}x{img.height} • {img.mode}"
+            elif ext == '.wav':
+                with wave.open(path, 'rb') as wav:
+                    dur = wav.getnframes() / wav.getframerate()
+                    info += f" • {wav.getnchannels()}ch • {dur:.1f}с"
+            self.meta_status.config(text=info)
+        except Exception:
+            pass
+
+    def clear_meta_selection(self):
+        """Очистка выбора файла"""
+        self.meta_file_path.set("")
+        self.extract_btn.config(state="disabled")
+        self.clear_metadata_result()
+        self.meta_status.config(text="✅ Готов к работе")
+
+    def _get_file_hash(self, path: str) -> str:
+        """Быстрый хеш для кэширования (первые 8KB + размер + mtime)"""
+        try:
+            stat = os.stat(path)
+            with open(path, 'rb') as f:
+                header = f.read(8192)
+            data = f"{path}:{stat.st_size}:{stat.st_mtime}:{header.hex()}"
+            return hashlib.sha256(data.encode()).hexdigest()[:16]
+        except:
+            return ""
+
+    def _check_cache(self, file_hash: str) -> Optional[dict]:
+        """Проверка кэша метаданных"""
+        if file_hash in IBToolsTab._metadata_cache:
+            data, timestamp = IBToolsTab._metadata_cache[file_hash]
+            if time.time() - timestamp < IBToolsTab._CACHE_TTL:
+                return data
+            else:
+                del IBToolsTab._metadata_cache[file_hash]
+        return None
+
+    def _save_cache(self, file_hash: str, data: dict):
+        """Сохранение в кэш"""
+        IBToolsTab._metadata_cache[file_hash] = (data, time.time())
+        # Очистка старого кэша
+        now = time.time()
+        to_delete = [k for k, (_, ts) in IBToolsTab._metadata_cache.items() if now - ts > IBToolsTab._CACHE_TTL]
+        for k in to_delete:
+            del IBToolsTab._metadata_cache[k]
+
+    def extract_metadata(self):
+        """Основной метод извлечения метаданных (асинхронный)"""
+        path = self.meta_file_path.get()
+        if not path or not os.path.exists(path):
+            messagebox.showwarning("⚠️ Ошибка", "Файл не выбран или не существует")
+            return
+
+        # Проверка кэша
+        file_hash = self._get_file_hash(path)
+        cached = self._check_cache(file_hash)
+        if cached:
+            self._display_metadata(cached, path, from_cache=True)
+            return
+
+        # Блокировка UI и запуск в фоне
+        self.extract_btn.config(state="disabled")
+        self.meta_status.config(text="⏳ Извлечение метаданных...")
+        self.meta_tree.delete(*self.meta_tree.get_children())
+
+        def task():
+            try:
+                result = self._extract_metadata_core(path)
+                self._save_cache(file_hash, result)
+                self.root.after(0, lambda: self._display_metadata(result, path, from_cache=False))
+            except Exception as e:
+                self.root.after(0, lambda: self._show_metadata_error(str(e)))
+            finally:
+                self.root.after(0, lambda: self.extract_btn.config(state="normal"))
+
+        threading.Thread(target=task, daemon=True).start()
+
+    def _extract_metadata_core(self, path: str) -> dict:
+        """Ядро извлечения метаданных - оптимизированное"""
+        result = {
+            "file": {},
+            "image": {},
+            "exif": {},
+            "iptc": {},
+            "xmp": {},
+            "audio": {},
+            "pdf": {},
+            "gps": {},
+            "warnings": []
+        }
+
+        ext = os.path.splitext(path)[1].lower()
+
+        # Базовая информация о файле
+        try:
+            stat = os.stat(path)
+            result["file"] = {
+                "name": os.path.basename(path),
+                "path": path,
+                "size": stat.st_size,
+                "size_formatted": Utils.format_size(stat.st_size),
+                "created": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_ctime)),
+                "modified": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
+                "extension": ext
+            }
+        except Exception as e:
+            result["warnings"].append(f"Ошибка чтения файла: {e}")
+
+        # Изображения
+        if ext in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif']:
+            try:
+                with Image.open(path) as img:
+                    result["image"] = {
+                        "format": img.format,
+                        "mode": img.mode,
+                        "width": img.width,
+                        "height": img.height,
+                        "info": dict(img.info) if img.info else None
+                    }
+
+                    # EXIF для JPEG/TIFF
+                    if ext in ['.jpg', '.jpeg', '.tiff', '.tif']:
+                        exif = img.getexif()
+                        if exif:
+                            for tag_id, value in exif.items():
+                                tag_name = Image.ExifTags.TAGS.get(tag_id, f"Unknown_{tag_id}")
+                                # Обработка сложных типов
+                                if isinstance(value, bytes):
+                                    try:
+                                        value = value.decode('utf-8', errors='ignore').strip()
+                                    except:
+                                        value = f"<bytes:{len(value)}>"
+                                elif isinstance(value, tuple):
+                                    value = " × ".join(str(v) for v in value)
+                                result["exif"][tag_name] = value
+                                # GPS данные
+                                if tag_id == 0x8825 and isinstance(value, dict):
+                                    self._parse_gps_data(value, result["gps"])
+
+                    # PNG-specific info
+                    if ext == '.png' and img.info:
+                        for key, val in img.info.items():
+                            if key not in ['exif']:
+                                result["xmp"][key] = val
+
+            except Exception as e:
+                result["warnings"].append(f"Ошибка анализа изображения: {e}")
+
+        elif ext == '.wav':
+            try:
+                with wave.open(path, 'rb') as wav:
+                    # Словарь для расшифровки типов сжатия WAV
+                    compression_types = {
+                        'NONE': 'Без сжатия (PCM)',
+                        'ULAW': 'μ-law (ITU-T G.711)',
+                        'ALAW': 'A-law (ITU-T G.711)',
+                        'IMA4': 'IMA ADPCM',
+                        'MSADPCM': 'Microsoft ADPCM',
+                        'GSM610': 'GSM 6.10'
+                    }
+
+                    comptype = wav.getcomptype()
+                    compname = compression_types.get(comptype, comptype or 'Неизвестно')
+
+                    result["audio"] = {
+                        "channels": wav.getnchannels(),
+                        "sample_width": wav.getsampwidth(),
+                        "framerate": wav.getframerate(),
+                        "nframes": wav.getnframes(),
+                        "duration_sec": wav.getnframes() / wav.getframerate(),
+                        "duration_formatted": time.strftime("%M:%S",
+                                                            time.gmtime(wav.getnframes() / wav.getframerate())),
+                        "compression_type": comptype,
+                        "compression": compname,
+                        "sample_width_bits": wav.getsampwidth() * 8
+                    }
+            except Exception as e:
+                result["warnings"].append(f"Ошибка анализа аудио: {e}")
+
+        # PDF (базовый анализ без внешних зависимостей)
+        elif ext == '.pdf':
+            try:
+                with open(path, 'rb') as f:
+                    header = f.read(1024).decode('latin-1', errors='ignore')
+                    # Поиск %%EOF и базовых метаданных
+                    if '/Title' in header:
+                        import re
+                        title_match = re.search(r'/Title\s*\(([^)]+)\)', header)
+                        if title_match:
+                            result["pdf"]["Title"] = title_match.group(1)
+                    if '/Author' in header:
+                        author_match = re.search(r'/Author\s*\(([^)]+)\)', header)
+                        if author_match:
+                            result["pdf"]["Author"] = author_match.group(1)
+                    if '/Creator' in header:
+                        creator_match = re.search(r'/Creator\s*\(([^)]+)\)', header)
+                        if creator_match:
+                            result["pdf"]["Creator"] = creator_match.group(1)
+                    if '/Producer' in header:
+                        producer_match = re.search(r'/Producer\s*\(([^)]+)\)', header)
+                        if producer_match:
+                            result["pdf"]["Producer"] = producer_match.group(1)
+                    if '/CreationDate' in header:
+                        date_match = re.search(r'/CreationDate\s*\(([^)]+)\)', header)
+                        if date_match:
+                            result["pdf"]["CreationDate"] = date_match.group(1)
+            except Exception as e:
+                result["warnings"].append(f"Ошибка анализа PDF: {e}")
+
+        return result
+
+    def _parse_gps_data(self, gps_info: dict, target: dict):
+        """Парсинг GPS данных из EXIF"""
+        try:
+            # Упрощенный парсинг - для полного нужен pyexiv2 или piexif
+            if 1 in gps_info and 2 in gps_info:  # LatRef и Latitude
+                lat_ref = gps_info[1]
+                lat_val = gps_info[2]
+                if isinstance(lat_val, tuple) and len(lat_val) == 3:
+                    deg, minute, sec = lat_val
+                    if isinstance(deg, tuple): deg = deg[0] / deg[1] if deg[1] else 0
+                    if isinstance(minute, tuple): minute = minute[0] / minute[1] if minute[1] else 0
+                    if isinstance(sec, tuple): sec = sec[0] / sec[1] if sec[1] else 0
+                    latitude = deg + minute / 60 + sec / 3600
+                    if lat_ref == 'S': latitude = -latitude
+                    target["latitude"] = round(latitude, 6)
+
+            if 3 in gps_info and 4 in gps_info:  # LonRef и Longitude
+                lon_ref = gps_info[3]
+                lon_val = gps_info[4]
+                if isinstance(lon_val, tuple) and len(lon_val) == 3:
+                    deg, minute, sec = lon_val
+                    if isinstance(deg, tuple): deg = deg[0] / deg[1] if deg[1] else 0
+                    if isinstance(minute, tuple): minute = minute[0] / minute[1] if minute[1] else 0
+                    if isinstance(sec, tuple): sec = sec[0] / sec[1] if sec[1] else 0
+                    longitude = deg + minute / 60 + sec / 3600
+                    if lon_ref == 'W': longitude = -longitude
+                    target["longitude"] = round(longitude, 6)
+
+            if 5 in gps_info:  # AltitudeRef
+                target["altitude_ref"] = "Above sea level" if gps_info[5] == 0 else "Below sea level"
+            if 6 in gps_info:  # Altitude
+                alt = gps_info[6]
+                if isinstance(alt, tuple):
+                    alt = alt[0] / alt[1] if alt[1] else 0
+                target["altitude_m"] = round(alt, 2)
+
+        except Exception:
+            pass  # Игнорируем ошибки парсинга GPS
+
+    def _display_metadata(self, data: dict, file_path: str, from_cache: bool = False):
+        """Отображение метаданных в Treeview с группировкой"""
+        self.current_metadata = data
+        self.current_file_hash = self._get_file_hash(file_path)
+
+        # Очистка и подготовка
+        self.meta_tree.delete(*self.meta_tree.get_children())
+
+        # Группы метаданных
+        groups = [
+            ("📁 Файл", data.get("file", {})),
+            ("🖼️ Изображение", data.get("image", {})),
+            ("📷 EXIF", data.get("exif", {})),
+            ("🏷️ IPTC", data.get("iptc", {})),
+            ("📄 XMP", data.get("xmp", {})),
+            ("🎵 Аудио", data.get("audio", {})),
+            ("📕 PDF", data.get("pdf", {})),
+            ("🌍 GPS", data.get("gps", {})),
+        ]
+
+        # Вставка данных с группировкой
+        for group_name, group_data in groups:
+            if group_data:
+                parent = self.meta_tree.insert("", "end", text=group_name, values=("", "", ""), open=True,
+                                               tags=("group",))
+                for key, value in sorted(group_data.items()):
+                    val_str = self._format_metadata_value(value)
+                    val_type = type(value).__name__
+                    val_size = f"{len(str(value))}" if isinstance(value, (str, bytes)) else "-"
+                    self.meta_tree.insert(parent, "end", values=(key, val_str, val_type, val_size), tags=("item",))
+
+        # Предупреждения
+        if data.get("warnings"):
+            warn_parent = self.meta_tree.insert("", "end", text="⚠️ Предупреждения", values=("", "", ""), open=True,
+                                                tags=("warning_group",))
+            for warn in data["warnings"]:
+                self.meta_tree.insert(warn_parent, "end", values=(warn, "", "error", ""), tags=("warning",))
+
+        # Статус
+        cache_note = " (из кэша)" if from_cache else ""
+        total_items = sum(1 for _ in self.meta_tree.get_children())
+        self.meta_status.config(text=f"✅ Извлечено {total_items} полей{cache_note} • {os.path.basename(file_path)}")
+
+        # Активация кнопок
+        self.copy_btn.config(state="normal")
+        self.export_btn.config(state="normal")
+
+        # Применение стилей
+        self.meta_tree.tag_configure("group", foreground=self.colors["accent"], font=("Segoe UI", 10, "bold"))
+        self.meta_tree.tag_configure("warning_group", foreground=self.colors["warning"], font=("Segoe UI", 10, "bold"))
+        self.meta_tree.tag_configure("item", foreground=self.colors["text"])
+        self.meta_tree.tag_configure("warning", foreground=self.colors["error"], font=("Segoe UI", 9, "italic"))
+
+        # Авто-фильтрация если есть текст
+        if self.meta_filter_var.get():
+            self.filter_metadata_view()
+
+    def _format_metadata_value(self, value) -> str:
+        """Форматирование значения метаданных для отображения"""
+        if value is None:
+            return "-"
+        if isinstance(value, bool):
+            return "✓" if value else "✗"
+        if isinstance(value, (int, float)):
+            return f"{value:,}" if isinstance(value, int) else f"{value:.3f}"
+        if isinstance(value, bytes):
+            try:
+                decoded = value.decode('utf-8', errors='ignore').strip()
+                return decoded if len(decoded) <= 100 else decoded[:97] + "..."
+            except:
+                return f"<binary:{len(value)}B>"
+        if isinstance(value, (tuple, list)):
+            if len(value) <= 3:
+                return " × ".join(str(v) for v in value)
+            return f"[{len(value)} items]"
+        if isinstance(value, dict):
+            return f"{{{len(value)} fields}}"
+        text = str(value)
+        return text if len(text) <= 150 else text[:147] + "..."
+
+    def filter_metadata_view(self):
+        """Фильтрация отображаемых метаданных"""
+        filter_text = self.meta_filter_var.get().lower()
+        show_empty = self.show_empty_var.get()
+
+        # Рекурсивная функция для фильтрации
+        def filter_node(node_id):
+            children = self.meta_tree.get_children(node_id)
+            has_visible = False
+
+            for child in children:
+                values = self.meta_tree.item(child, "values")
+                key = values[0].lower() if values else ""
+                value = values[1].lower() if len(values) > 1 else ""
+
+                # Проверка фильтра
+                matches = not filter_text or filter_text in key or filter_text in value
+                # Проверка пустых значений
+                has_content = show_empty or (values[1] and values[1] not in ["-", "", "None"])
+
+                if matches and has_content:
+                    self.meta_tree.detach(child)
+                    self.meta_tree.move(child, node_id, "end")
+                    has_visible = True
+                    # Рекурсивно для вложенных
+                    if self.meta_tree.get_children(child):
+                        filter_node(child)
+                else:
+                    self.meta_tree.detach(child)
+
+            # Скрыть/показать родительскую группу
+            if node_id and not has_visible and self.meta_tree.item(node_id, "tags") and "group" in self.meta_tree.item(
+                    node_id, "tags"):
+                self.meta_tree.detach(node_id)
+
+        # Запуск фильтрации с корня
+        for root_item in self.meta_tree.get_children():
+            filter_node(root_item)
+
+    def copy_metadata(self):
+        """Копирование метаданных в буфер обмена"""
+        if not self.current_metadata:
+            return
+
+        # Формирование текста
+        lines = [f"Metadata Export • {time.strftime('%Y-%m-%d %H:%M:%S')}"]
+        lines.append(f"File: {self.current_metadata.get('file', {}).get('name', 'Unknown')}")
+        lines.append("=" * 60)
+
+        def add_section(title: str, data: dict, indent: int = 0):
+            if not data:
+                return
+            prefix = "  " * indent
+            lines.append(f"{prefix}{title}:")
+            for key, value in sorted(data.items()):
+                val = self._format_metadata_value(value)
+                lines.append(f"{prefix}  {key}: {val}")
+            lines.append("")
+
+        sections = [
+            ("📁 File", self.current_metadata.get("file", {})),
+            ("🖼️ Image", self.current_metadata.get("image", {})),
+            ("📷 EXIF", self.current_metadata.get("exif", {})),
+            ("🏷️ IPTC", self.current_metadata.get("iptc", {})),
+            ("📄 XMP", self.current_metadata.get("xmp", {})),
+            ("🎵 Audio", self.current_metadata.get("audio", {})),
+            ("📕 PDF", self.current_metadata.get("pdf", {})),
+            ("🌍 GPS", self.current_metadata.get("gps", {})),
+        ]
+
+        for title, data in sections:
+            add_section(title, data)
+
+        if self.current_metadata.get("warnings"):
+            lines.append("⚠️ Warnings:")
+            for w in self.current_metadata["warnings"]:
+                lines.append(f"  • {w}")
+
+        text = "\n".join(lines)
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+        self.app.show_toast("✅ Метаданные скопированы")
+
+    def export_metadata(self):
+        """Экспорт метаданных в файл"""
+        if not self.current_metadata:
+            messagebox.showwarning("⚠️ Нет данных", "Сначала извлеките метаданные")
+            return
+
+        # Диалог сохранения
+        filetypes = [
+            ("JSON", "*.json"),
+            ("CSV", "*.csv"),
+            ("Текст", "*.txt"),
+            ("Все файлы", "*.*")
+        ]
+        path = filedialog.asksaveasfilename(
+            title="Экспорт метаданных",
+            defaultextension=".json",
+            filetypes=filetypes,
+            initialdir=self.app.last_save_dir,
+            initialfile=f"metadata_{os.path.splitext(os.path.basename(self.meta_file_path.get()))[0]}"
+        )
+        if not path:
+            return
+
+        try:
+            ext = os.path.splitext(path)[1].lower()
+            if ext == '.json':
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(self.current_metadata, f, indent=2, ensure_ascii=False, default=str)
+            elif ext == '.csv':
+                import csv
+                with open(path, 'w', newline='', encoding='utf-8-sig') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Группа", "Ключ", "Значение", "Тип"])
+                    for group_name in ["file", "image", "exif", "iptc", "xmp", "audio", "pdf", "gps"]:
+                        group_data = self.current_metadata.get(group_name, {})
+                        for key, value in group_data.items():
+                            writer.writerow([group_name, key, self._format_metadata_value(value), type(value).__name__])
+            else:  # txt
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(f"Metadata Export • {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+                    f.write(f"File: {self.current_metadata.get('file', {}).get('name', 'Unknown')}\n")
+                    f.write("=" * 60 + "\n\n")
+                    for group_name in ["file", "image", "exif", "iptc", "xmp", "audio", "pdf", "gps"]:
+                        group_data = self.current_metadata.get(group_name, {})
+                        if group_data:
+                            f.write(f"### {group_name.upper()} ###\n")
+                            for key, value in group_data.items():
+                                f.write(f"{key}: {self._format_metadata_value(value)}\n")
+                            f.write("\n")
+
+            self.app.last_save_dir = os.path.dirname(path)
+            self.app.show_toast(f"✅ Экспортировано в {os.path.basename(path)}")
+            self.log_manager.add_entry("metadata_export", "success", {"file": path, "format": ext})
+
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка экспорта", f"Не удалось сохранить файл:\n{e}")
+
+    def clear_metadata_result(self):
+        """Очистка результатов"""
+        self.meta_tree.delete(*self.meta_tree.get_children())
+        self.current_metadata = {}
+        self.copy_btn.config(state="disabled")
+        self.export_btn.config(state="disabled")
+        self.meta_status.config(text="✅ Готов к работе")
+
+    def refresh_metadata(self):
+        """Перезагрузка метаданных с очисткой кэша"""
+        file_hash = self._get_file_hash(self.meta_file_path.get())
+        if file_hash in IBToolsTab._metadata_cache:
+            del IBToolsTab._metadata_cache[file_hash]
+        self.extract_metadata()
+
+    def show_meta_context_menu(self, event):
+        """Контекстное меню для Treeview метаданных"""
+        item = self.meta_tree.identify_row(event.y)
+        if not item:
+            return
+
+        menu = tk.Menu(self.root, tearoff=0)
+        values = self.meta_tree.item(item, "values")
+        key = values[0] if values else ""
+        value = values[1] if len(values) > 1 else ""
+
+        if key and value:
+            menu.add_command(label=f"📋 Копировать значение", command=lambda: self._copy_tree_value(value))
+            menu.add_command(label=f"🔑 Копировать ключ", command=lambda: self._copy_tree_value(key))
+            menu.add_separator()
+            menu.add_command(label="🔍 Найти похожие", command=lambda: self.meta_filter_var.set(key))
+
+        menu.add_separator()
+        menu.add_command(label="📊 Копировать всю группу", command=lambda: self._copy_tree_group(item))
+        menu.add_command(label="🗂 Развернуть/Свернуть",
+                         command=lambda: self.meta_tree.item(item, open=not self.meta_tree.item(item, "open")))
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _copy_tree_value(self, text: str):
+        """Копирование значения из Treeview"""
+        if text and text not in ["", "-"]:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.app.show_toast("✅ Скопировано")
+
+    def _copy_tree_group(self, item_id: str):
+        """Копирование всей группы метаданных"""
+        lines = []
+        group_name = self.meta_tree.item(item_id, "text")
+        lines.append(f"### {group_name} ###")
+
+        def collect_children(parent_id, indent=0):
+            for child in self.meta_tree.get_children(parent_id):
+                values = self.meta_tree.item(child, "values")
+                if values and values[0]:
+                    prefix = "  " * indent
+                    lines.append(f"{prefix}{values[0]}: {values[1]}")
+                collect_children(child, indent + 1)
+
+        collect_children(item_id)
+
+        if len(lines) > 1:
+            text = "\n".join(lines)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(text)
+            self.app.show_toast(f"✅ Группа '{group_name}' скопирована")
+
+    def _show_metadata_error(self, message: str):
+        """Отображение ошибки с детальным логом"""
+        self.meta_status.config(text=f"❌ Ошибка: {message[:50]}...")
+        messagebox.showerror("❌ Ошибка анализа",
+                             f"Не удалось извлечь метаданные:\n\n{message}\n\nВозможные причины:\n• Файл повреждён\n• Неподдерживаемый формат\n• Ограничения доступа")
+        self.log_manager.add_entry("metadata_error", "error", {"file": self.meta_file_path.get(), "error": message})
+
+    @property
+    def root(self):
+        return self.app.root
+
+
+# ───────────────────────────────────────────────
 # 🎯 ОСНОВНОЙ КЛАСС ПРИЛОЖЕНИЯ
 # ───────────────────────────────────────────────
 class SteganographyUltimatePro:
@@ -13631,9 +11245,7 @@ class SteganographyUltimatePro:
         self.notification_manager = NotificationManager(self.root, self.theme_manager)
         self.plugin_manager = PluginManager()
         self.file_manager = FileManager(self.root)
-        self.smart_assistant = SmartAssistant(self)
         self.log_manager = HistoryLog()
-        self.achievement_manager = AchievementManager(self.log_manager)
         # Загрузка настроек
         self.settings = self.load_settings()
         self.history = self.load_history()
@@ -13775,9 +11387,7 @@ class SteganographyUltimatePro:
             "last_save_dir": os.path.expanduser("~"),
             "show_tips": True,
             "auto_backup": True,
-            "confirm_before_exit": True,
-            "show_achievements": True
-        }
+            "confirm_before_exit": True}
 
     def save_settings(self) -> None:
         settings = {
@@ -13791,7 +11401,6 @@ class SteganographyUltimatePro:
             "show_tips": self.settings.get("show_tips", True),
             "auto_backup": self.settings.get("auto_backup", True),
             "confirm_before_exit": self.settings.get("confirm_before_exit", True),
-            "show_achievements": self.settings.get("show_achievements", True)
         }
         try:
             with open(CONFIG["SETTINGS_FILE"], 'w', encoding='utf-8') as f:
@@ -13839,9 +11448,8 @@ class SteganographyUltimatePro:
 
     def show_welcome_notification(self):
         """Показывает приветственное уведомление"""
-        tip = self.smart_assistant.get_contextual_tip("first_time")
         self.notification_manager.show_notification(
-            f"Добро пожаловать в ØccultoNG Pro v{VERSION}!{tip}",
+            f"Добро пожаловать в ØccultoNG Pro v{VERSION}!",
             "info",
             5000
         )
@@ -13872,28 +11480,17 @@ class SteganographyUltimatePro:
         # Создаем статусную панель
         self.create_status_bar(main_frame)
 
-        # Создаем вкладки
+        # Создаем ВСЕ вкладки
         self.create_hide_tab()
         self.create_extract_tab()
         self.create_analysis_tab()
-        self.create_settings_tab()
         self.create_encryption_tab()
-        self.create_statistics_tab()  # Создаем вкладку "Статистика"
-        self.create_achievements_tab()  # Создаем вкладку "Достижения"
-        self.create_help_tab()  # Создаем вкладку "Помощь"
-
-        # Добавляем вкладки в notebook с правильными текстами и иконками
-        self.notebook.add(self.hide_tab, text="📦 Скрыть данные")
-        self.notebook.add(self.extract_tab, text="🔍 Извлечь данные")
-        self.notebook.add(self.analysis_tab, text="🔬 Анализ файла")
-        self.notebook.add(self.encryption_tab, text="🔐 Шифрование")
+        self.create_ib_tools_tab()
         self.create_batch_tab()
-        self.notebook.add(self.statistics_tab, text="📊 Статистика")
-        self.notebook.add(self.achievements_tab, text="🏆 Достижения")
-        self.notebook.add(self.help_tab, text="❓ Помощь")
-        self.notebook.add(self.settings_tab, text="⚙️ Настройки")
+        self.create_statistics_tab()
+        self.create_help_tab()
+        self.create_settings_tab()
 
-        # Создаем тост
         self.create_toast()
 
     def create_header(self, parent: ttk.Frame) -> None:
@@ -14298,22 +11895,45 @@ class SteganographyUltimatePro:
         # Кнопки действий
         btn_frame = ttk.Frame(right_frame, style="Card.TFrame")
         btn_frame.pack(fill=tk.X, pady=(10, 0))
-        button_configs = [
-            ("🔍 Извлечь данные", self.start_extract, "extract_button"),
-            ("📋 Копировать", self.copy_extracted, "copy_button"),
-            ("💾 Сохранить", self.save_extracted, "save_button"),
-            ("🗂 Открыть файл", self.open_extracted_file, "open_file_button"),
-            ("🔑 Копировать хеш", self.copy_extracted_hash, "copy_hash_button")
-        ]
-        for text, command, attr_name in button_configs:
-            btn = ttk.Button(
-                btn_frame,
-                text=text,
-                style="Action.TButton",
-                command=command
-            )
-            btn.pack(side=tk.LEFT, padx=5)
-            setattr(self, attr_name, btn)
+        self.extract_button = ttk.Button(
+            btn_frame,
+            text="🔍 Извлечь данные",
+            style="Accent.TButton",
+            command=self.start_extract
+        )
+        self.extract_button.pack(side=tk.LEFT, padx=5)
+
+        self.copy_button = ttk.Button(
+            btn_frame,
+            text="📋 Копировать",
+            style="TButton",
+            command=self.copy_extracted
+        )
+        self.copy_button.pack(side=tk.LEFT, padx=5)
+
+        self.save_button = ttk.Button(
+            btn_frame,
+            text="💾 Сохранить",
+            style="TButton",
+            command=self.save_extracted
+        )
+        self.save_button.pack(side=tk.LEFT, padx=5)
+
+        self.open_file_button = ttk.Button(
+            btn_frame,
+            text="🗂 Открыть файл",
+            style="TButton",
+            command=self.open_extracted_file
+        )
+        self.open_file_button.pack(side=tk.LEFT, padx=5)
+
+        self.copy_hash_button = ttk.Button(
+            btn_frame,
+            text="🔑 Копировать хеш",
+            style="TButton",
+            command=self.copy_extracted_hash
+        )
+        self.copy_hash_button.pack(side=tk.LEFT, padx=5)
 
         # История файлов
         hist_frame = ttk.LabelFrame(
@@ -14419,8 +12039,12 @@ class SteganographyUltimatePro:
         # Инициализация UI пакетной обработки
         self.batch_ui = BatchProcessingUI(self.batch_tab, self)
 
-        # Обновляем SmartAssistant
-        self.smart_assistant = SmartAssistant(self)
+    def create_ib_tools_tab(self) -> None:
+        """Создает вкладку новых инструментов ИБ"""
+        self.ib_tools_tab = ttk.Frame(self.notebook, style="Card.TFrame")
+        self.notebook.add(self.ib_tools_tab, text="🛡️ Инструменты ИБ")
+        # Инициализация нового класса инструментов
+        self.ib_tools_ui = IBToolsTab(self.ib_tools_tab, self)
 
     def create_settings_tab(self) -> None:
         self.settings_tab = ttk.Frame(self.notebook, style="Card.TFrame")
@@ -14567,16 +12191,6 @@ class SteganographyUltimatePro:
             style="TCheckbutton"
         )
         exit_check.pack(anchor="w", pady=(0, 5))
-
-        # Показывать достижения
-        self.show_achievements_var = tk.BooleanVar(value=self.settings.get("show_achievements", True))
-        achievements_check = ttk.Checkbutton(
-            extra_group,
-            text="Показывать уведомления о достижениях",
-            variable=self.show_achievements_var,
-            style="TCheckbutton"
-        )
-        achievements_check.pack(anchor="w", pady=(0, 5))
 
         # Кнопки управления настройками
         btn_frame = ttk.Frame(scrollable_frame, style="Card.TFrame")
@@ -14830,196 +12444,6 @@ class SteganographyUltimatePro:
             command=self.clear_statistics
         ).pack(side=tk.LEFT, padx=10)
 
-    def create_achievements_tab(self) -> None:
-        """Создает обновленную вкладку достижений"""
-        self.achievements_tab = ttk.Frame(self.notebook, style="Card.TFrame")
-        self.notebook.add(self.achievements_tab, text="🏆 Достижения")
-
-        # Инициализируем улучшенную вкладку достижений
-        self.achievements_ui = AchievementsTab(self.achievements_tab, self)
-
-        # Создаем canvas с прокруткой
-        achievements_canvas = tk.Canvas(self.achievements_tab, bg=self.colors["bg"])
-        scrollbar = ttk.Scrollbar(self.achievements_tab, orient="vertical", command=achievements_canvas.yview)
-        scrollable_frame = ttk.Frame(achievements_canvas, style="Card.TFrame")
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: achievements_canvas.configure(scrollregion=achievements_canvas.bbox("all"))
-        )
-
-        achievements_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        achievements_canvas.configure(yscrollcommand=scrollbar.set)
-
-        achievements_canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        # Заголовок
-        ttk.Label(
-            scrollable_frame,
-            text="🏆 Ваши достижения в ØccultoNG Pro",
-            font=("Segoe UI Variable Display", 18, "bold"),
-            foreground=self.colors["accent"],
-            style="TLabel"
-        ).pack(pady=(20, 30))
-
-        # Разблокированные достижения
-        unlocked_group = ttk.LabelFrame(
-            scrollable_frame,
-            text="✅ Разблокированные достижения",
-            padding=15,
-            style="Card.TLabelframe"
-        )
-        unlocked_group.pack(fill=tk.X, pady=(0, 15))
-
-        unlocked_achievements = self.achievement_manager.get_unlocked_achievements()
-
-        if unlocked_achievements:
-            for key, achievement in unlocked_achievements.items():
-                self.create_achievement_card(unlocked_group, achievement, unlocked=True)
-        else:
-            ttk.Label(
-                unlocked_group,
-                text="У вас пока нет разблокированных достижений. Начните использовать программу!",
-                style="Secondary.TLabel",
-                wraplength=800
-            ).pack(pady=20)
-
-        # Заблокированные достижения
-        locked_group = ttk.LabelFrame(
-            scrollable_frame,
-            text="🔒 Достижения для разблокировки",
-            padding=15,
-            style="Card.TLabelframe"
-        )
-        locked_group.pack(fill=tk.X, pady=(0, 15))
-
-        locked_achievements = self.achievement_manager.get_locked_achievements()
-
-        if locked_achievements:
-            for key, achievement in locked_achievements.items():
-                self.create_achievement_card(locked_group, achievement, unlocked=False)
-        else:
-            ttk.Label(
-                locked_group,
-                text="Поздравляем! Вы разблокировали все достижения!",
-                style="Success.TLabel",
-                wraplength=800
-            ).pack(pady=20)
-
-        # Статистика достижений
-        stats_frame = ttk.Frame(scrollable_frame, style="Card.TFrame")
-        stats_frame.pack(fill=tk.X, pady=(0, 15))
-
-        total_achievements = len(self.achievement_manager.achievements)
-        unlocked_count = len(unlocked_achievements)
-        locked_count = len(locked_achievements)
-        completion_percentage = (unlocked_count / total_achievements * 100) if total_achievements > 0 else 0
-
-        ttk.Label(
-            stats_frame,
-            text=f"Прогресс: {unlocked_count}/{total_achievements} ({completion_percentage:.1f}%)",
-            font=("Segoe UI", 12, "bold"),
-            style="TLabel"
-        ).pack(pady=10)
-
-        # Прогресс-бар
-        progress_bar = ttk.Progressbar(
-            stats_frame,
-            orient="horizontal",
-            length=400,
-            mode="determinate",
-            style="TProgressbar"
-        )
-        progress_bar.pack(pady=(0, 10))
-        progress_bar["value"] = completion_percentage
-
-        # Кнопки
-        btn_frame = ttk.Frame(scrollable_frame, style="Card.TFrame")
-        btn_frame.pack(pady=20)
-
-        ttk.Button(
-            btn_frame,
-            text="🔄 Обновить",
-            style="TButton",
-            command=self.refresh_achievements
-        ).pack(side=tk.LEFT, padx=10)
-
-        ttk.Button(
-            btn_frame,
-            text="🎁 Показать все",
-            style="TButton",
-            command=self.show_all_achievements
-        ).pack(side=tk.LEFT, padx=10)
-
-    def create_achievement_card(self, parent, achievement, unlocked=True):
-        """Создает карточку достижения"""
-        card_frame = ttk.Frame(parent, style="Card.TFrame")
-        card_frame.pack(fill=tk.X, pady=5, padx=5)
-
-        # Основная информация
-        info_frame = ttk.Frame(card_frame, style="Card.TFrame")
-        info_frame.pack(fill=tk.X, pady=5)
-
-        # Иконка и название
-        title_frame = ttk.Frame(info_frame, style="Card.TFrame")
-        title_frame.pack(side=tk.LEFT)
-
-        icon_label = tk.Label(
-            title_frame,
-            text=achievement["icon"],
-            font=("Segoe UI", 16),
-            bg=self.colors["card"],
-            fg=self.colors["accent"] if unlocked else self.colors["text_secondary"]
-        )
-        icon_label.pack(side=tk.LEFT, padx=(0, 10))
-
-        name_label = ttk.Label(
-            title_frame,
-            text=achievement["name"],
-            font=("Segoe UI", 12, "bold"),
-            foreground=self.colors["text"] if unlocked else self.colors["text_secondary"],
-            style="TLabel"
-        )
-        name_label.pack(side=tk.LEFT)
-
-        # Прогресс
-        if not unlocked:
-            progress_frame = ttk.Frame(info_frame, style="Card.TFrame")
-            progress_frame.pack(side=tk.RIGHT)
-
-            current, target = achievement["progress"], achievement["target"]
-            percentage = (current / target * 100) if target > 0 else 0
-
-            ttk.Label(
-                progress_frame,
-                text=f"{current}/{target}",
-                font=("Segoe UI", 10),
-                style="Secondary.TLabel"
-            ).pack(side=tk.LEFT, padx=(0, 5))
-
-            progress_bar = ttk.Progressbar(
-                progress_frame,
-                orient="horizontal",
-                length=100,
-                mode="determinate",
-                style="TProgressbar"
-            )
-            progress_bar.pack(side=tk.LEFT)
-            progress_bar["value"] = percentage
-
-        # Описание
-        desc_label = ttk.Label(
-            card_frame,
-            text=achievement["description"],
-            font=("Segoe UI", 10),
-            foreground=self.colors["text"] if unlocked else self.colors["text_secondary"],
-            style="Secondary.TLabel",
-            wraplength=700,
-            justify=tk.LEFT
-        )
-        desc_label.pack(anchor="w", padx=(30, 0), pady=(0, 5))
-
     def create_help_tab(self) -> None:
         self.help_tab = ttk.Frame(self.notebook, style="Card.TFrame")
         self.notebook.add(self.help_tab, text="❓ Помощь")
@@ -15049,10 +12473,11 @@ class SteganographyUltimatePro:
             ("3. Быстрый старт", self.show_help_quickstart),
             ("4. Пакетная обработка", self.show_help_batch),
             ("5. 🔐 Шифрование данных", self.show_help_encryption),
-            ("6. Советы и рекомендации", self.show_help_tips),
-            ("7. Горячие клавиши", self.show_help_shortcuts),
-            ("8. Часто задаваемые вопросы", self.show_help_faq),
-            ("9. Техническая поддержка", self.show_help_support)
+            ("6. 🛡️ Инструменты ИБ", self.show_help_ib_tools),
+            ("7. Советы и рекомендации", self.show_help_tips),
+            ("8. Горячие клавиши", self.show_help_shortcuts),
+            ("9. Часто задаваемые вопросы", self.show_help_faq),
+            ("10. Техническая поддержка", self.show_help_support)
         ]
 
         for i, (title, command) in enumerate(contents):
@@ -15159,9 +12584,8 @@ class SteganographyUltimatePro:
     • Поддержка различных методов скрытия данных
     • Работа с изображениями (PNG, BMP, TIFF, TGA, JPG) и аудио (WAV)
     • Автоматическое определение метода при извлечении
-    • Пакетная обработка до 5 файлов одновременно ✅ НОВОЕ!
-    • Расширенная статистика и достижения
-    • Интеллектуальные подсказки и ассистент
+    • Пакетная обработка до 5 файлов одновременно
+    • Расширенная статистика
     • Поддержка плагинов и расширений
 
     📋 ОСНОВНЫЕ ВКЛАДКИ:
@@ -15170,16 +12594,13 @@ class SteganographyUltimatePro:
     3. 📦 Пакетная обработка - одновременная обработка до 5 файлов
     4. ⚙️ Настройки - настройка программы и темы
     5. 📊 Статистика - просмотр статистики использования
-    6. 🏆 Достижения - ваши достижения в программе
-    7. ❓ Помощь - это окно с руководством
+    6. ❓ Помощь - это окно с руководством
 
     💡 СОВЕТ: Начните с выбора вкладки "Скрыть данные" или "Извлечь данные"
     в верхней части окна. Для работы с несколькими файлами используйте
     вкладку "Пакетная обработка".
 
-    🎮 ДОСТИЖЕНИЯ: Следите за своими достижениями в соответствующей вкладке!
     📈 СТАТИСТИКА: Отслеживайте свою активность и прогресс!
-    🤖 АССИСТЕНТ: Используйте интеллектуальные подсказки для лучших результатов!
     """
         self.display_help_text(help_text)
 
@@ -15264,12 +12685,6 @@ class SteganographyUltimatePro:
     5. Нажмите соответствующую кнопку запуска
     6. Дождитесь завершения обработки
     7. Просмотрите или экспортируйте результаты
-
-    🎮 ДОСТИЖЕНИЯ, связанные с пакетной обработкой:
-    • "Конвейер" - выполните первую пакетную операцию
-    • "Мультитаскинг" - обработайте 5 файлов одновременно
-    • "Эксперт по анализу" - проанализируйте 10 файлов
-    • "Массовое скрытие" - скройте данные в 3 разных типах контейнеров
     """
         self.display_help_text(help_text)
 
@@ -15393,22 +12808,11 @@ class SteganographyUltimatePro:
 
     ⚡ ПРОДВИНУТЫЕ ВОЗМОЖНОСТИ:
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Интеллектуальный ассистент:
-    • Программа анализирует ваши действия и дает советы
-    • Автоматически рекомендует оптимальные методы
-    • Предупреждает о потенциальных проблемах
-    • Учится на ваших предпочтениях
-
     Расширенная статистика:
     • Отслеживание всех операций
     • Анализ использования методов
     • История успешных и неудачных операций
     • Визуализация данных
-
-    Система достижений:
-    • Разблокируйте достижения за использование функций
-    • Следите за прогрессом
-    • Получайте мотивацию для освоения всех возможностей
 
     💡 СОВЕТЫ:
     • Используйте сочетания клавиш для ускорения работы!
@@ -15469,23 +12873,11 @@ class SteganographyUltimatePro:
     • Используйте историю операций для быстрого доступа
     • Регулярно обновляйте программу для получения новых функций
 
-    🤖 СОВЕТЫ ПО ИСПОЛЬЗОВАНИЮ АССИСТЕНТА:
-    • Внимательно читайте контекстные подсказки
-    • Следуйте рекомендациям по выбору метода
-    • Используйте анализ ситуации для предотвращения ошибок
-    • Обращайте внимание на предупреждения о проблемах
-
     📊 СОВЕТЫ ПО СТАТИСТИКЕ:
     • Регулярно проверяйте статистику использования
     • Анализируйте наиболее часто используемые методы
     • Используйте историю операций для отладки проблем
     • Экспортируйте статистику для отчетов
-
-    🏆 СОВЕТЫ ПО ДОСТИЖЕНИЯМ:
-    • Следите за прогрессом в достижениях
-    • Ставьте цели по разблокировке достижений
-    • Используйте достижения как руководство по изучению функций
-    • Делитесь достижениями с коллегами
 
     🚀 ПРОДВИНУТЫЕ СОВЕТЫ:
     • Комбинируйте разные методы для разных типов данных
@@ -15539,7 +12931,6 @@ class SteganographyUltimatePro:
     • Ctrl+, - Открыть настройки
     • Ctrl+Q - Выйти из программы
     • Ctrl+Shift+S - Открыть статистику
-    • Ctrl+Shift+D - Открыть достижения
 
     РАБОТА С ФАЙЛАМИ:
     • Ctrl+N - Создать новый проект
@@ -15650,19 +13041,6 @@ class SteganographyUltimatePro:
     Q: Где сохраняются результаты пакетной обработки?
     A: Результаты сохраняются в указанную вами папку. Каждому файлу
        присваивается уникальное имя на основе исходного имени.
-
-    🤖 ВОПРОСЫ ПО АССИСТЕНТУ:
-
-    Q: Как работает интеллектуальный ассистент?
-    A: Ассистент анализирует:
-       1. Тип и размер контейнера
-       2. Размер скрываемых данных
-       3. Выбранный метод
-       4. Системные ресурсы
-       И дает рекомендации на основе этих данных.
-
-    Q: Можно ли отключить подсказки ассистента?
-    A: Да, в настройках программы есть опция "Показывать подсказки и советы".
 
     ⚙️ ТЕХНИЧЕСКИЕ ВОПРОСЫ:
 
@@ -16171,6 +13549,523 @@ class SteganographyUltimatePro:
     """
         self.display_help_text(help_text)
 
+    def show_help_ib_tools(self):
+        """Показывает подробную документацию по инструментам ИБ"""
+        help_text = f"""
+    🛡️ ИНСТРУМЕНТЫ ИНФОРМАЦИОННОЙ БЕЗОПАСНОСТИ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ОБЗОР ВКЛАДКИ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Вкладка "🛡️ Инструменты ИБ" содержит набор профессиональных утилит для
+    специалистов по информационной безопасности, цифровой криминалистики и
+    анализа данных. Все инструменты работают офлайн, без передачи данных
+    в интернет.
+
+    📋 ДОСТУПНЫЕ ИНСТРУМЕНТЫ:
+    1. 🔐 Хеш-суммы - калькулятор криптографических хешей
+    2. 🔑 Генератор паролей - создание криптостойких паролей
+    3. 🕵️ Валидатор сигнатур - проверка подлинности файлов
+    4. 🔣 Кодировщик - конвертер кодировок данных
+    5. 🔍 Метаданные - извлечение и анализ метаданных файлов
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    1. 🔐 ХЕШ-СУММЫ (HASH CALCULATOR)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Расчет криптографических хешей для файлов и текста
+    • Проверка целостности данных (контрольные суммы)
+    • Верификация скачанных файлов по опубликованным хешам
+    • Подготовка данных для цифровых подписей
+
+    ПОДДЕРЖИВАЕМЫЕ АЛГОРИТМЫ:
+    🟢 MD5 (128 бит) - для быстрой проверки целостности
+      • Скорость: очень высокая
+      • Стойкость: низкая (не для криптографии!)
+      • Применение: проверка скачанных файлов, контрольные суммы
+
+    🟢 SHA-1 (160 бит) - устаревший, но широко используемый
+      • Скорость: высокая
+      • Стойкость: средняя (коллизии возможны)
+      • Применение: совместимость со старыми системами
+
+    🟢 SHA-256 (256 бит) - РЕКОМЕНДУЕМЫЙ СТАНДАРТ
+      • Скорость: высокая
+      • Стойкость: очень высокая (NIST одобрен)
+      • Применение: цифровые подписи, проверка ПО, блокчейн
+
+    🟢 SHA-512 (512 бит) - максимальная защита
+      • Скорость: средняя
+      • Стойкость: экстремально высокая
+      • Применение: критически важные данные, долгосрочное хранение
+
+    КАК ИСПОЛЬЗОВАТЬ:
+    1️⃣ Хеширование файла:
+      • Нажмите "📂 Обзор" и выберите файл
+      • Хеш-суммы рассчитаются автоматически
+      • Нажмите "📋 Копировать" рядом с нужным алгоритмом
+      • Или "📋 Копировать все" для экспорта всех хешей
+
+    2️⃣ Хеширование текста:
+      • Введите или вставьте текст в поле (Ctrl+V)
+      • Хеш-суммы обновляются автоматически при изменении
+      • Используйте кнопки "📋 Вставить" / "🗑️ Очистить" на панели
+
+    3️⃣ Копирование результатов:
+      • Клик по строке хеша → копирование в буфер
+      • Кнопка "📋 Копировать все" → все алгоритмы в формате:
+        MD5: abc123...
+        SHA256: def456...
+
+    ПРАКТИЧЕСКИЕ ПРИМЕРЫ:
+    ✅ Проверка скачанного ПО:
+      1. Скачайте файл и его SHA-256 хеш с официального сайта
+      2. Откройте файл в калькуляторе хешей
+      3. Сравните полученный хеш с опубликованным
+      4. Если совпадает - файл не повреждён и не подменён
+
+    ✅ Документирование доказательств:
+      1. Создайте хеш файла-доказательства (SHA-256)
+      2. Запишите хеш в протокол с датой и подписью
+      3. Любое изменение файла изменит хеш - это будет заметно
+
+    ✅ Подготовка к шифрованию:
+      1. Рассчитайте хеш исходных данных
+      2. Зашифруйте данные
+      3. После расшифровки сверьте хеш - целостность подтверждена
+
+    ⚠️ ВАЖНО:
+    • MD5 и SHA-1 НЕ подходят для криптографической защиты!
+    • Всегда используйте SHA-256 или SHA-512 для безопасности
+    • Хеш файла зависит от КАЖДОГО бита - даже пробел изменит результат
+    • Сохраняйте хеши в надёжном месте отдельно от файлов
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    2. 🔑 ГЕНЕРАТОР ПАРОЛЕЙ (PASSWORD GENERATOR)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Создание криптостойких случайных паролей
+    • Генерация ключей для шифрования и аутентификации
+    • Подготовка одноразовых паролей для тестирования
+
+    ПАРАМЕТРЫ ГЕНЕРАЦИИ:
+    📏 Длина пароля: 8–64 символа (ползунок)
+      • Рекомендуется: минимум 16 символов для важных аккаунтов
+      • Для ключей шифрования: 32+ символа
+
+    🔤 Набор символов (чекбоксы):
+      ☑ A-Z - заглавные латинские буквы (26 символов)
+      ☑ a-z - строчные латинские буквы (26 символов)
+      ☑ 0-9 - цифры (10 символов)
+      ☑ !@# - специальные символы (~32 символа)
+      ☑ Доп. символы - пользовательский набор
+
+    ⚙️ Дополнительные опции:
+      ☐ ❌ Без похожих (l,1,I,O,0) - исключает визуально похожие символы
+        • Полезно для паролей, которые будут вводиться вручную
+        • Уменьшает алфавит, но повышает удобство
+
+    🔐 ИНДИКАТОР ЭНТРОПИИ:
+    После генерации отображается:
+    • Энтропия в битах - мера случайности пароля
+    • Размер алфавита - количество возможных символов
+    • Цветовая индикация:
+      🟢 >60 бит - очень стойкий (рекомендуется)
+      🟡 40-60 бит - приемлемый для обычных задач
+      🔴 <40 бит - слабый, не рекомендуется
+
+    ПРИМЕРЫ РАСЧЁТА ЭНТРОПИИ:
+    • Пароль из 16 символов, алфавит 94 знака:
+      Энтропия = 16 × log₂(94) ≈ 16 × 6.55 ≈ 105 бит ✅
+    • Пароль из 8 символов, только цифры:
+      Энтропия = 8 × log₂(10) ≈ 8 × 3.32 ≈ 27 бит ❌
+
+    КАК ИСПОЛЬЗОВАТЬ:
+    1️⃣ Настройка параметров:
+      • Установите длину пароля (рекомендуется 16+)
+      • Выберите нужные наборы символов
+      • При необходимости исключите похожие символы
+
+    2️⃣ Генерация:
+      • Нажмите "🎲 Сгенерировать"
+      • Пароль появится в поле результата
+      • Оцените энтропию - при необходимости увеличьте длину
+
+    3️⃣ Копирование:
+      • Нажмите "📋 Копировать" или Ctrl+C
+      • Пароль скопирован в буфер обмена
+
+    🔐 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Создание пароля для менеджера паролей:
+      • Длина: 32 символа
+      • Все наборы символов включены
+      • Энтропия: ~200 бит - максимальная защита
+
+    ✅ Генерация ключа для шифрования:
+      • Длина: 64 символа
+      • Только hex-символы (0-9, a-f) через "Доп. символы"
+      • Используйте для AES-256 ключей
+
+    ✅ Пароль для временного доступа:
+      • Длина: 12 символов
+      • Без похожих символов (удобство ввода)
+      • Энтропия ~70 бит - достаточно для разового использования
+
+    ⚠️ КРИТИЧЕСКИЕ ПРАВИЛА БЕЗОПАСНОСТИ:
+    • Никогда не используйте сгенерированные пароли повторно!
+    • Не сохраняйте пароли в открытом виде - используйте менеджер паролей
+    • Не передавайте пароли по незащищённым каналам
+    • Для каждого сервиса - уникальный пароль
+    • Регулярно меняйте пароли для критически важных аккаунтов
+
+    🔐 СОВЕТ: Используйте комбинацию:
+      • Менеджер паролей (KeePass, Bitwarden) для хранения
+      • Этот генератор для создания новых паролей
+      • Двухфакторную аутентификацию везде, где возможно
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    3. 🕵️ ВАЛИДАТОР СИГНАТУР (FILE SIGNATURE VALIDATOR)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Проверка соответствия расширения файла его реальному содержимому
+    • Выявление маскировки исполняемых файлов (.exe → .jpg)
+    • Обнаружение подмены типов файлов в расследованиях
+    • Предотвращение запуска вредоносного ПО
+
+    ЧТО ТАКОЕ СИГНАТУРА ФАЙЛА?
+    Сигнатура (magic bytes) - уникальная последовательность байтов
+    в начале файла, определяющая его настоящий формат.
+
+    ПРИМЕРЫ СИГНАТУР:
+    📁 PNG:     89 50 4E 47 0D 0A 1A 0A
+    📁 JPEG:    FF D8 FF
+    📁 PDF:     25 50 44 46 (%PDF)
+    📁 ZIP:     50 4B 03 04 (PK..)
+    📁 EXE:     4D 5A (MZ)
+    📁 WAV:     52 49 46 46 .... 57 41 56 45 (RIFF....WAVE)
+
+    КАК РАБОТАЕТ ПРОВЕРКА:
+    1️⃣ Чтение заголовка:
+      • Программа читает первые 16 байт файла
+      • Сравнивает с базой известных сигнатур
+
+    2️⃣ Определение типа:
+      • Если сигнатура найдена - определяется настоящий тип
+      • Сравнивается с расширением имени файла
+
+    3️⃣ Вердикт:
+      ✅ СОВПАДЕНИЕ - расширение соответствует сигнатуре
+      ❌ НЕСОВПАДЕНИЕ - возможна подмена! Будьте осторожны
+
+    КАК ИСПОЛЬЗОВАТЬ:
+    1️⃣ Выбор файла:
+      • Нажмите "📂 Выбрать файл"
+      • Или перетащите файл в окно программы
+
+    2️⃣ Анализ:
+      • Нажмите "🚀 Проверить"
+      • В поле результата отобразится:
+        • Имя файла и его расширение
+        • Сигнатура в HEX-формате
+        • Определённый тип файла
+        • Статус совпадения
+
+    3️⃣ Интерпретация:
+      🟢 "✅ СТАТУС: СОВПАДЕНИЕ" - файл безопасен
+      🔴 "❌ СТАТУС: НЕСОВПАДЕНИЕ" - файл подозрителен!
+
+    🔍 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Расследование инцидента:
+      • Получен файл "отчёт.jpg" от неизвестного отправителя
+      • Валидатор показывает: сигнатура MZ → это EXE-файл!
+      • Вывод: попытка фишинга, файл не открывать
+
+    ✅ Аудит загруженных файлов:
+      • Массовая проверка файлов из email-вложений
+      • Выявление файлов с подменёнными расширениями
+      • Автоматическая изоляция подозрительных объектов
+
+    ✅ Верификация архивов:
+      • Файл "документ.zip" имеет сигнатуру RAR
+      • Возможно, файл повреждён или переименован
+      • Требуется дополнительная проверка
+
+    ⚠️ ОГРАНИЧЕНИЯ:
+    • Проверяются только первые 16 байт - некоторые форматы
+      могут иметь одинаковые сигнатуры
+    • Файлы без сигнатур (текстовые) всегда показывают "Неизвестно"
+    • Некоторые форматы (MP4, AVI) имеют вариативные заголовки
+
+    🔐 СОВЕТЫ:
+    • Всегда проверяйте файлы из ненадёжных источников
+    • Не доверяйте только расширению - смотрите на сигнатуру
+    • При несовпадении - не открывайте файл, проведите антивирусную проверку
+    • Сохраняйте оригинал файла для дальнейшего анализа
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    4. 🔣 КОДИРОВЩИК (ENCODING CONVERTER)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Конвертация данных между различными кодировками
+    • Подготовка данных для передачи в текстовых протоколах
+    • Декодирование данных из логов, сетевого трафика, дампов
+
+    ПОДДЕРЖИВАЕМЫЕ ПРЕОБРАЗОВАНИЯ:
+    🔄 Base64:
+      • Кодирование: текст/бинар → Base64-строка
+      • Декодирование: Base64 → исходные данные
+      • Применение: передача бинарных данных в JSON, email, URL
+
+    🔄 Hex (шестнадцатеричный):
+      • Кодирование: байты → HEX-строка (41 42 43)
+      • Декодирование: HEX → байты
+      • Применение: анализ дампов памяти, сетевых пакетов
+
+    🔄 URL-кодирование:
+      • Кодирование: спецсимволы → %XX (пробел → %20)
+      • Декодирование: %XX → исходные символы
+      • Применение: работа с URL, HTTP-параметрами, формами
+
+    КАК ИСПОЛЬЗОВАТЬ:
+    1️⃣ Ввод данных:
+      • Введите или вставьте данные в верхнее поле
+      • Используйте кнопку "📋 Вставить" или Ctrl+V
+
+    2️⃣ Выбор операции:
+      • Выберите радиокнопку нужного преобразования:
+        • "Base64 →" - кодирование в Base64
+        • "→ Base64" - декодирование из Base64
+        • Аналогично для Hex и URL
+
+    3️⃣ Конвертация:
+      • Нажмите "🔄 Конвертировать"
+      • Результат появится в нижнем поле
+
+    4️⃣ Копирование:
+      • Нажмите "📋 Копировать" для копирования результата
+
+    🔍 ПРАКТИЧЕСКИЕ ПРИМЕРЫ:
+    ✅ Декодирование Base64 из лога:
+      • В логе найдена строка: "U2VjcmV0IERhdGE="
+      • Вставьте в поле, выберите "→ Base64"
+      • Результат: "Secret Data"
+
+    ✅ Подготовка данных для API:
+      • Нужно передать бинарные данные в JSON
+      • Закодируйте файл в Base64
+      • Вставьте Base64-строку в JSON-запрос
+
+    ✅ Анализ URL-параметров:
+      • URL содержит: "search=%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82"
+      • Выберите "→ URL" для декодирования
+      • Результат: "search=привет"
+
+    ✅ Работа с HEX-дампами:
+      • Получен HEX-дамп: "48 65 6C 6C 6F"
+      • Выберите "→ Hex" для декодирования
+      • Результат: "Hello"
+
+    ⚠️ ВАЖНО:
+    • Base64 - это НЕ шифрование! Данные легко декодируются
+    • URL-кодирование не защищает данные, только позволяет
+      передавать спецсимволы в URL
+    • При декодировании невалидных данных появится ошибка
+    • Проверяйте кодировку исходных данных (UTF-8, ASCII и т.д.)
+
+    🔐 СОВЕТ: Для защиты данных используйте вкладку "🔐 Шифрование",
+    а кодировщик - только для преобразования формата данных.
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    5. 🔍 МЕТАДАННЫЕ (METADATA EXTRACTOR)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Извлечение скрытой информации из файлов (EXIF, IPTC, XMP)
+    • Анализ цифрового следа для криминалистики
+    • Проверка подлинности документов и изображений
+    • Выявление геолокации, авторства, истории редактирования
+
+    ПОДДЕРЖИВАЕМЫЕ ФОРМАТЫ:
+    🖼️ Изображения: PNG, JPG, JPEG, BMP, TIFF, TGA
+      • EXIF: камера, настройки съёмки, GPS-координаты
+      • IPTC: автор, права, описание, ключевые слова
+      • XMP: история редактирования, метаданные Adobe
+
+    🎵 Аудио WAV:
+      • Технические параметры: частота, каналы, длительность
+      • ID3-теги (если присутствуют): исполнитель, альбом, год
+
+    📄 PDF-документы:
+      • Автор, заголовок, тема, ключевые слова
+      • Дата создания, модификации, программа-создатель
+      • Встроенные метаданные и свойства
+
+    КАК ИСПОЛЬЗОВАТЬ:
+    1️⃣ Выбор файла:
+      • Нажмите "📂 Обзор..." и выберите файл
+      • Поддерживаются форматы: *.png *.jpg *.jpeg *.bmp *.tiff *.wav *.pdf
+
+    2️⃣ Извлечение:
+      • Нажмите "🔍 Извлечь метаданные"
+      • Анализ выполняется в фоне без блокировки интерфейса
+      • Результаты сгруппированы по категориям в таблице
+
+    3️⃣ Просмотр результатов:
+      • 📁 Файл: имя, размер, даты создания/изменения
+      • 🖼️ Изображение: размеры, цветовой режим, формат
+      • 📷 EXIF: данные камеры, настройки, GPS (если есть)
+      • 🏷️ IPTC: авторские права, описание, категории
+      • 📄 XMP: расширенные метаданные, история
+      • 🎵 Аудио: параметры звука, длительность
+      • 📕 PDF: автор, заголовок, дата создания
+      • 🌍 GPS: широта, долгота, высота (если извлечены)
+
+    4️⃣ Фильтрация и поиск:
+      • Введите текст в поле "Фильтр полей" для поиска
+      • Чекбокс "Показывать пустые поля" для полного просмотра
+
+    5️⃣ Экспорт:
+      • "📋 Копировать" - все метаданные в буфер обмена
+      • "📤 Экспорт" - сохранение в JSON/CSV/TXT
+
+    🔍 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Криминалистический анализ фотографии:
+      • Извлечены GPS-координаты: 55.751244, 37.618423
+      • EXIF показывает: iPhone 12, 14:32, 15.03.2024
+      • Вывод: фото сделано в Москве, в указанное время
+
+    ✅ Проверка подлинности документа:
+      • PDF показывает: создан в Adobe Acrobat Pro
+      • Дата модификации: через 2 часа после создания
+      • Автор: отличается от заявленного отправителя
+      • Вывод: документ редактировался, требуется проверка
+
+    ✅ Анализ цифрового следа:
+      • Изображение содержит XMP-историю: 5 версий редактирования
+      • IPTC указывает на коммерческое использование
+      • EXIF стёрт - признак намеренного сокрытия данных
+      • Вывод: файл требует углублённого анализа
+
+    ✅ Выявление геолокации:
+      • GPS-координаты из EXIF: 48.8566° N, 2.3522° E
+      • Конвертация: Париж, Франция
+      • Перекрёстная проверка с другими метаданными
+      • Вывод: подтверждение места съёмки
+
+    ⚠️ ВАЖНО:
+    • Метаданные могут быть намеренно удалены или подделаны
+    • Отсутствие метаданных ≠ отсутствие информации
+    • GPS-данные извлекаются только если камера их записала
+    • Некоторые программы автоматически удаляют метаданные при сохранении
+
+    🔐 СОВЕТЫ ПО АНАЛИЗУ:
+    • Сравнивайте метаданные с заявленной информацией
+    • Ищите несоответствия в датах, авторах, местоположении
+    • Проверяйте историю редактирования в XMP
+    • Используйте GPS-координаты для верификации алиби
+    • Экспортируйте результаты для отчётности и архива
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ОБЩИЕ РЕКОМЕНДАЦИИ ПО ИСПОЛЬЗОВАНИЮ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    🔐 БЕЗОПАСНОСТЬ:
+    • Все инструменты работают офлайн - данные не покидают ваш компьютер
+    • Не используйте сгенерированные пароли повторно
+    • Храните хеши и пароли в надёжном менеджере
+    • Проверяйте файлы из ненадёжных источников перед открытием
+
+    ⚡ ПРОИЗВОДИТЕЛЬНОСТЬ:
+    • Кэширование метаданных ускоряет повторный анализ
+    • Асинхронная обработка не блокирует интерфейс
+    • Фильтрация результатов экономит время при работе с большими файлами
+
+    📊 ДОКУМЕНТИРОВАНИЕ:
+    • Экспортируйте результаты в JSON/CSV для отчётности
+    • Сохраняйте хеши оригинальных файлов для верификации
+    • Фиксируйте дату и время анализа в протоколах
+
+    🔄 ОБНОВЛЕНИЕ:
+    • Регулярно обновляйте программу для получения новых сигнатур
+    • Проверяйте совместимость с новыми версиями форматов файлов
+    • Следите за обновлениями криптографических стандартов
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ЧАСТО ЗАДАВАЕМЫЕ ВОПРОСЫ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ❓ Почему хеш файла не совпадает с опубликованным?
+      • Файл мог быть изменён при скачивании
+      • Проверьте целостность загрузки (повторите скачивание)
+      • Убедитесь, что сравниваете хеши одного и того же алгоритма
+
+    ❓ Можно ли восстановить удалённые метаданные?
+      • Нет, если метаданные физически удалены из файла
+      • Но можно найти следы в резервных копиях, кэше, логах
+      • Используйте специализированные инструменты для глубокого анализа
+
+    ❓ Почему генератор паролей не предлагает кириллицу?
+      • Латинские символы обеспечивают лучшую совместимость
+      • Кириллица может вызвать проблемы в некоторых системах
+      • При необходимости добавьте кириллицу в "Доп. символы"
+
+    ❓ Как проверить файл, которого нет в базе сигнатур?
+      • Используйте hex-редактор для ручного анализа заголовка
+      • Сравните с документацией формата файла
+      • Отправите запрос на добавление сигнатуры разработчикам
+
+    ❓ Можно ли использовать эти инструменты в коммерческих целях?
+      • Да, согласно лицензии MIT (см. вкладку "❓ Помощь" → "О программе")
+      • При использовании в продуктах укажите авторство
+      • Для корпоративного внедрения свяжитесь с разработчиком
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ИСПОЛЬЗУЕМЫЕ БИБЛИОТЕКИ:
+    • hashlib - криптографические хеш-функции (стандартная)
+    • secrets - криптографически стойкая генерация случайных чисел
+    • base64, urllib.parse - кодирование (стандартные)
+    • PIL/Pillow - работа с изображениями и EXIF
+    • wave - работа с WAV-аудио
+    • re - регулярные выражения для парсинга PDF
+
+    ФОРМАТЫ ЭКСПОРТА:
+    • JSON - структурированные данные для программной обработки
+    • CSV - табличный формат для Excel/Google Sheets
+    • TXT - человекочитаемый отчёт для печати и архива
+
+    КЭШИРОВАНИЕ:
+    • Метаданные кэшируются на 5 минут для ускорения повторного анализа
+    • Кэш очищается автоматически при изменении файла
+    • Можно принудительно обновить кнопкой "🔄 Перезагрузить"
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ПОДДЕРЖКА И ОБРАТНАЯ СВЯЗЬ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    📧 Email: tudubambam@ya.ru
+    🌐 Сайт: www.occulto.pro
+    🐙 GitHub: https://github.com/Proffessor2008/-ccultoNG
+
+    При обращении указывайте:
+    • Версию программы (v{VERSION})
+    • Описание проблемы или запроса
+    • Шаги для воспроизведения (если баг)
+    • Примеры файлов (если возможно и безопасно)
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ЗАКЛЮЧЕНИЕ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    Вкладка "🛡️ Инструменты ИБ" предоставляет профессиональный набор
+    утилит для решения задач информационной безопасности. Следуя
+    рекомендациям из этого руководства, вы сможете эффективно
+    использовать каждый инструмент в своей работе.
+
+    ПОМНИТЕ:
+    • Инструменты - это помощники, а не замена экспертизы
+    • Всегда проверяйте результаты критически
+    • Документируйте свои действия для отчётности
+    • Обновляйте знания о новых угрозах и методах защиты
+
+    Успешной работы! 🛡️🔐
+    """
+        self.display_help_text(help_text)
     def display_help_text(self, text):
         """Отображает текст помощи"""
         self.help_text.config(state='normal')
@@ -16730,19 +14625,33 @@ class SteganographyUltimatePro:
         self.root.after(1500, lambda: self.drop_label.configure(text=original_text, style="DropLabel.TLabel"))
 
     def bind_drag_drop(self) -> None:
-        self.drop_label.drop_target_register(DND_FILES)
-        self.drop_label.dnd_bind('<<DragEnter>>', self.on_drag_enter)
-        self.drop_label.dnd_bind('<<DragLeave>>', self.on_drag_leave)
-        self.drop_label.dnd_bind('<<Drop>>', self.on_drop_image)
+        """Привязывает обработчики drag-and-drop с защитой от AttributeError"""
+        try:
+            # tkinterdnd2 добавляет эти методы динамически
+            if hasattr(self.drop_label, 'drop_target_register'):
+                self.drop_label.drop_target_register(DND_FILES)
+                self.drop_label.dnd_bind('<<DragEnter>>', self.on_drag_enter)
+                self.drop_label.dnd_bind('<<DragLeave>>', self.on_drag_leave)
+                self.drop_label.dnd_bind('<<Drop>>', self.on_drop_image)
+        except AttributeError as e:
+            print(f"⚠️ Drag-and-drop не поддерживается: {e}")
+            # Fallback: оставляем только клик для выбора файла
+            self.drop_label.bind("<Button-1>", lambda e: self.select_image())
 
     def bind_drag_drop_extract(self) -> None:
-        if self.extract_drop_label:
-            self.extract_drop_label.drop_target_register(DND_FILES)
-            self.extract_drop_label.dnd_bind('<<DragEnter>>', lambda e: self.extract_drop_label.configure(
-                style="DropLabelActive.TLabel"))
-            self.extract_drop_label.dnd_bind('<<DragLeave>>',
-                                             lambda e: self.extract_drop_label.configure(style="DropLabel.TLabel"))
-            self.extract_drop_label.dnd_bind('<<Drop>>', self.on_drop_extract_image)
+        """Привязывает обработчики drag-and-drop для вкладки извлечения"""
+        if not hasattr(self, 'extract_drop_label') or self.extract_drop_label is None:
+            return
+        try:
+            if hasattr(self.extract_drop_label, 'drop_target_register'):
+                self.extract_drop_label.drop_target_register(DND_FILES)
+                self.extract_drop_label.dnd_bind('<<DragEnter>>', lambda e:
+                self.extract_drop_label.configure(style="DropLabelActive.TLabel"))
+                self.extract_drop_label.dnd_bind('<<DragLeave>>', lambda e:
+                self.extract_drop_label.configure(style="DropLabel.TLabel"))
+                self.extract_drop_label.dnd_bind('<<Drop>>', self.on_drop_extract_image)
+        except AttributeError:
+            self.extract_drop_label.bind("<Button-1>", lambda e: self.select_extract_image())
 
     def bind_file_drop(self) -> None:
         if self.file_entry_widget:
@@ -16752,9 +14661,15 @@ class SteganographyUltimatePro:
             except Exception as e:
                 print(f"DnD для поля файла не поддерживается: {e}")
 
-    def on_drop_image(self, event: tk.Event) -> None:
+    def on_drop_image(self, event) -> None:  # Убрали строгую типизацию tk.Event
         import os
-        path = event.data.strip('{}')
+        # Безопасное получение данных из события tkinterdnd2
+        event_data = getattr(event, 'data', '')
+        path = event_data.strip('{}')
+
+        if not path:
+            return
+
         if os.path.isfile(path) and Utils.is_supported_container(path):
             self.img_path.set(path)
             self.last_open_dir = os.path.dirname(path)
@@ -16768,7 +14683,6 @@ class SteganographyUltimatePro:
                 self.method_var.set("audio_lsb")
                 self.update_method_combo_state("disabled")
             elif path.lower().endswith((".jpg", ".jpeg")):
-                # Для JPEG предлагаем DCT метод
                 self.method_var.set("jpeg_dct")
                 self.update_method_combo_state("readonly")
             else:
@@ -16825,7 +14739,7 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         if not os.path.exists(image_path):
             return
         preview_win = tk.Toplevel(self.root)
-        preview_win.title(f"🖼️ Предпросмотр – {os.path.basename(image_path)}")
+        preview_win.title(f"🖼️ Предпросмотр - {os.path.basename(image_path)}")
         preview_win.geometry("800x800")
         preview_win.minsize(400, 400)
         preview_win.resizable(True, True)
@@ -17126,7 +15040,7 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
     def update_thumbnail(self, path: str, target_label: tk.Widget) -> None:
         ext = os.path.splitext(path)[1].lower()
         if ext == ".wav":
-            target_label.configure(image='', text='🎵 WAV аудиофайл(предпросмотр невозможен)')
+            target_label.configure()
             target_label.image = None
             return
 
@@ -17138,10 +15052,10 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
                     background.paste(img, mask=img.split()[3])
                     img = background
                 tk_img = ImageTk.PhotoImage(img)
-                target_label.configure(image=tk_img, text='')
+                target_label.configure()
                 target_label.image = tk_img
         except Exception as e:
-            target_label.configure(image='', text=f'❌ Ошибка: {e}')
+            target_label.configure()
             target_label.image = None
 
     def _create_encryption_content(self, parent: ttk.Frame) -> None:
@@ -17182,7 +15096,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         data_type_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(data_type_frame, text="Тип данных:", style="TLabel").pack(side=tk.LEFT)
-
         self.encrypt_data_type = tk.StringVar(value="text")
         ttk.Radiobutton(
             data_type_frame,
@@ -17252,7 +15165,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         file_input_frame.pack(fill=tk.X)
 
         ttk.Label(file_input_frame, text="Файл для шифрования:", style="TLabel").pack(side=tk.LEFT)
-
         self.encrypt_file_path = tk.StringVar()
         file_entry = ttk.Entry(
             file_input_frame,
@@ -17274,7 +15186,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         algorithm_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(algorithm_frame, text="Алгоритм шифрования:", style="TLabel").pack(side=tk.LEFT)
-
         self.encrypt_algorithm = tk.StringVar(value="aes_256_gcm")
         algorithm_combo = ttk.Combobox(
             algorithm_frame,
@@ -17301,7 +15212,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         password_frame.pack(fill=tk.X, pady=(0, 5))
 
         ttk.Label(password_frame, text="Пароль:", style="TLabel").pack(side=tk.LEFT)
-
         self.encrypt_password = tk.StringVar()
         self.encrypt_password_entry = ttk.Entry(
             password_frame,
@@ -17329,6 +15239,14 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
             text="🔐 Зашифровать",
             style="Accent.TButton",
             command=self._start_encryption
+        ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
+
+        # ДОБАВЛЕНА КНОПКА КОПИРОВАНИЯ
+        ttk.Button(
+            button_frame,
+            text="📋 Копировать",
+            style="TButton",
+            command=self._copy_encrypted_data
         ).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
 
         ttk.Button(
@@ -17417,7 +15335,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         decrypt_password_frame.pack(fill=tk.X, pady=(0, 10))
 
         ttk.Label(decrypt_password_frame, text="Пароль:", style="TLabel").pack(side=tk.LEFT)
-
         self.decrypt_password = tk.StringVar()
         self.decrypt_password_entry = ttk.Entry(
             decrypt_password_frame,
@@ -17647,6 +15564,22 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         self._toggle_encrypt_input()
         self._update_encrypt_params_and_docs()
         self._update_algorithm_documentation("aes_256_gcm")
+
+    def _copy_encrypted_data(self):
+        """Копирует зашифрованные данные в буфер обмена"""
+        data = self.encrypt_result.get("1.0", tk.END).strip()
+        if not data:
+            messagebox.showwarning("⚠️ Нет данных", "Нет зашифрованных данных для копирования")
+            return
+
+        try:
+            self.root.clipboard_clear()
+            self.root.clipboard_append(data)
+            self.show_toast("✅ Зашифрованные данные скопированы в буфер обмена")
+            self.log_manager.add_entry("copy_encrypted", "success", {"type": "encrypted_data"})
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка", f"Не удалось скопировать данные: {str(e)}")
+            self.log_manager.add_entry("copy_encrypted", "error", {"error": str(e)})
 
     def _update_encrypt_params_and_docs(self, event=None):
         """Обновляет параметры шифрования И документацию при смене алгоритма"""
@@ -18341,29 +16274,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
             self.operations_count += 1
             self.operations_label.config(text=f"📊 Операций: {self.operations_count}")
 
-            # Разблокируем достижения
-            self.achievement_manager.increment_progress("first_hide")
-            self.achievement_manager.increment_progress("five_operations")
-            self.achievement_manager.increment_progress("ten_operations")
-            self.achievement_manager.increment_progress("twenty_operations")
-
-            if len(data) > 10 * 1024 * 1024:  # 10 MB
-                self.achievement_manager.increment_progress("large_file")
-
-            if method == "audio_lsb":
-                self.achievement_manager.increment_progress("audio_expert")
-
-            # Показываем уведомление о достижении если нужно
-            if self.settings.get("show_achievements", True):
-                unlocked = self.achievement_manager.increment_progress("multiple_methods")
-                if unlocked:
-                    self.notification_manager.show_notification(
-                        f"🏆 Новое достижение разблокировано!\
-{self.achievement_manager.achievements['multiple_methods']['name']}",
-                        "success",
-                        5000
-                    )
-
             def after_success():
                 messagebox.showinfo(
                     "✅ Успех",
@@ -18372,21 +16282,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
                 )
                 if messagebox.askyesno("📂 Открыть папку", "Открыть папку с сохраненным файлом?"):
                     Utils.open_in_file_manager(output)
-                # Показываем подсказку от ассистента
-                # В методе hide_data(), внутри after_success():
-                if self.settings.get("show_tips", True):
-                    # Analyze the current situation to get a context
-                    container_path = img_path
-                    data_size = len(data)
-                    context_list = self.smart_assistant.analyze_situation(container_path, data_size)
-                    if context_list and isinstance(context_list, list) and len(context_list) > 0:
-                        # Извлекаем первый контекст из списка
-                        primary_context = context_list[0][0]  # Имя контекста
-                        analysis_data = context_list[0][2] if len(context_list[0]) > 2 else {}
-                        tip = self.smart_assistant.get_contextual_tip(primary_context, analysis_data)
-                    else:
-                        tip = self.smart_assistant.get_next_tip()
-                    self.notification_manager.show_notification(tip, "info", 4000)
 
             self.root.after(0, after_success)
 
@@ -18538,22 +16433,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
             self.operations_count += 1
             self.operations_label.config(text=f"📊 Операций: {self.operations_count}")
 
-            # Разблокируем достижения
-            self.achievement_manager.increment_progress("first_extract")
-            self.achievement_manager.increment_progress("five_operations")
-            self.achievement_manager.increment_progress("ten_operations")
-            self.achievement_manager.increment_progress("twenty_operations")
-
-            # Показываем уведомление о достижении если нужно
-            if self.settings.get("show_achievements", True):
-                unlocked = self.achievement_manager.increment_progress("multiple_methods")
-                if unlocked:
-                    self.notification_manager.show_notification(
-                        f"🏆 Новое достижение разблокировано!\
-{self.achievement_manager.achievements['multiple_methods']['name']}",
-                        "success",
-                        5000
-                    )
 
         except Exception as e:
             if str(e) == "Операция отменена пользователем":
@@ -18843,7 +16722,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         self.settings["show_tips"] = self.show_tips_var.get()
         self.settings["auto_backup"] = self.auto_backup_var.get()
         self.settings["confirm_before_exit"] = self.confirm_exit_var.get()
-        self.settings["show_achievements"] = self.show_achievements_var.get()
 
         self.save_settings()
         messagebox.showinfo(
@@ -18895,7 +16773,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
                     "show_tips": self.settings.get("show_tips", True),
                     "auto_backup": self.settings.get("auto_backup", True),
                     "confirm_before_exit": self.settings.get("confirm_before_exit", True),
-                    "show_achievements": self.settings.get("show_achievements", True),
                     "export_date": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "version": VERSION
                 }
@@ -18928,7 +16805,7 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
 
                 # Обновляем настройки
                 for key in ["theme", "method", "data_type", "compression_level",
-                            "show_tips", "auto_backup", "confirm_before_exit", "show_achievements"]:
+                            "show_tips", "auto_backup", "confirm_before_exit"]:
                     if key in imported_settings:
                         self.settings[key] = imported_settings[key]
 
@@ -18945,8 +16822,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
                     self.auto_backup_var.set(self.settings.get("auto_backup", True))
                 if hasattr(self, 'confirm_exit_var'):
                     self.confirm_exit_var.set(self.settings.get("confirm_before_exit", True))
-                if hasattr(self, 'show_achievements_var'):
-                    self.show_achievements_var.set(self.settings.get("show_achievements", True))
 
                 # Сохраняем настройки
                 self.save_settings()
@@ -19098,7 +16973,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
                 stats_data = {
                     "analytics": self.analytics_manager.stats,
                     "operation_log": self.log_manager.log,
-                    "achievements": self.achievement_manager.achievements,
                     "export_date": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "version": VERSION
                 }
@@ -19133,173 +17007,6 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
                 messagebox.showinfo("✅ Очистка", "Статистика и история операций успешно очищены!")
             except Exception as e:
                 messagebox.showerror("❌ Ошибка", f"Не удалось очистить статистику: {e}")
-
-    """def refresh_achievements(self):
-
-            # 1. Перезагружаем данные
-            self.achievement_manager = AchievementManager()
-
-            # 2. Очищаем содержимое существующей вкладки (НЕ удаляем саму вкладку!)
-            for widget in self.achievements_tab.winfo_children():
-                widget.destroy()
-
-            # 3. Воссоздаем UI ВНУТРИ существующей вкладки
-            parent_frame = self.achievements_tab
-
-            # Создаем canvas с прокруткой
-            achievements_canvas = tk.Canvas(parent_frame, bg=self.colors["bg"])
-            scrollbar = ttk.Scrollbar(parent_frame, orient="vertical", command=achievements_canvas.yview)
-            scrollable_frame = ttk.Frame(achievements_canvas, style="Card.TFrame")
-
-            scrollable_frame.bind(
-                "<Configure>",
-                lambda e: achievements_canvas.configure(scrollregion=achievements_canvas.bbox("all"))
-            )
-
-            achievements_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-            achievements_canvas.configure(yscrollcommand=scrollbar.set)
-
-            achievements_canvas.pack(side="left", fill="both", expand=True)
-            scrollbar.pack(side="right", fill="y")
-
-            # Заголовок
-            ttk.Label(scrollable_frame, text="🏆 Ваши достижения в ØccultoNG Pro",
-                      font=("Segoe UI Variable Display", 18, "bold"), foreground=self.colors["accent"],
-                      style="TLabel").pack(pady=(20, 30))
-
-            # Разблокированные достижения
-            unlocked_group = ttk.LabelFrame(scrollable_frame, text="✅ Разблокированные достижения", padding=15,
-                                            style="Card.TLabelframe")
-            unlocked_group.pack(fill=tk.X, pady=(0, 15))
-            unlocked_achievements = self.achievement_manager.get_unlocked_achievements()
-            if unlocked_achievements:
-                for key, achievement in unlocked_achievements.items():
-                    self.create_achievement_card(unlocked_group, achievement, unlocked=True)
-            else:
-                ttk.Label(unlocked_group,
-                          text="У вас пока нет разблокированных достижений. Начните использовать программу!",
-                          style="Secondary.TLabel", wraplength=800).pack(pady=20)
-
-            # Заблокированные достижения
-            locked_group = ttk.LabelFrame(scrollable_frame, text="🔒 Достижения для разблокировки", padding=15,
-                                          style="Card.TLabelframe")
-            locked_group.pack(fill=tk.X, pady=(0, 15))
-            locked_achievements = self.achievement_manager.get_locked_achievements()
-            if locked_achievements:
-                for key, achievement in locked_achievements.items():
-                    self.create_achievement_card(locked_group, achievement, unlocked=False)
-            else:
-                ttk.Label(locked_group, text="Поздравляем! Вы разблокировали все достижения!", style="Success.TLabel",
-                          wraplength=800).pack(pady=20)
-
-            # Статистика достижений
-            stats_frame = ttk.Frame(scrollable_frame, style="Card.TFrame")
-            stats_frame.pack(fill=tk.X, pady=(0, 15))
-            total_achievements = len(self.achievement_manager.achievements)
-            completion_percentage = (len(unlocked_achievements) / total_achievements * 100) if total_achievements > 0 else 0
-            ttk.Label(stats_frame,
-                      text=f"Прогресс: {len(unlocked_achievements)}/{total_achievements} ({completion_percentage:.1f}%)",
-                      font=("Segoe UI", 12, "bold"), style="TLabel").pack(pady=10)
-            progress_bar = ttk.Progressbar(stats_frame, orient="horizontal", length=400, mode="determinate",
-                                           style="TProgressbar")
-            progress_bar.pack(pady=(0, 10))
-            progress_bar["value"] = completion_percentage
-
-            # Кнопки
-            btn_frame = ttk.Frame(scrollable_frame, style="Card.TFrame")
-            btn_frame.pack(pady=20)
-            ttk.Button(btn_frame, text="🔄 Обновить", style="TButton", command=self.refresh_achievements).pack(side=tk.LEFT,
-                                                                                                              padx=10)
-            ttk.Button(btn_frame, text="🎁 Показать все", style="TButton", command=self.show_all_achievements).pack(
-                side=tk.LEFT, padx=10)
-
-            # 4. Переключаемся на вкладку, чтобы пользователь видел результат
-            self.notebook.select(self.achievements_tab)
-            messagebox.showinfo("✅ Обновление", "Достижения успешно обновлены!")"""
-
-    def refresh_achievements(self):
-        """Обновляет достижения без полного пересоздания интерфейса"""
-        # 1. Обновляем данные
-        self.achievement_manager = AchievementManager()
-
-        # 2. Обновляем содержимое через существующий метод
-        self.update_all()
-
-        # 3. Показываем уведомление
-        messagebox.showinfo("✅ Обновление", "Достижения успешно обновлены!")
-
-    def show_all_achievements(self):
-        """Показывает все достижения"""
-        # Создаем окно со всеми достижениями
-        achievements_window = tk.Toplevel(self.root)
-        achievements_window.title("🏆 Все достижения")
-        achievements_window.geometry("800x600")
-        achievements_window.transient(self.root)
-        achievements_window.grab_set()
-
-        # Создаем canvas с прокруткой
-        canvas = tk.Canvas(achievements_window, bg=self.colors["bg"])
-        scrollbar = ttk.Scrollbar(achievements_window, orient="vertical", command=canvas.yview)
-        scrollable_frame = ttk.Frame(canvas, style="Card.TFrame")
-
-        scrollable_frame.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
-
-        # Заголовок
-        ttk.Label(
-            scrollable_frame,
-            text="🏆 Все достижения в ØccultoNG Pro",
-            font=("Segoe UI Variable Display", 16, "bold"),
-            foreground=self.colors["accent"],
-            style="TLabel"
-        ).pack(pady=(20, 30))
-
-        # Статистика
-        unlocked = len(self.achievement_manager.get_unlocked_achievements())
-        total = len(self.achievement_manager.achievements)
-        percentage = (unlocked / total * 100) if total > 0 else 0
-
-        stats_frame = ttk.Frame(scrollable_frame, style="Card.TFrame")
-        stats_frame.pack(fill=tk.X, padx=20, pady=(0, 20))
-
-        ttk.Label(
-            stats_frame,
-            text=f"Прогресс: {unlocked}/{total} ({percentage:.1f}%)",
-            font=("Segoe UI", 12, "bold"),
-            style="TLabel"
-        ).pack(pady=10)
-
-        # Прогресс-бар
-        progress_bar = ttk.Progressbar(
-            stats_frame,
-            orient="horizontal",
-            length=400,
-            mode="determinate",
-            style="TProgressbar"
-        )
-        progress_bar.pack(pady=(0, 10))
-        progress_bar["value"] = percentage
-
-        # Все достижения
-        for key, achievement in self.achievement_manager.achievements.items():
-            self.create_achievement_card(scrollable_frame, achievement, unlocked=achievement["unlocked"])
-            ttk.Separator(scrollable_frame, orient="horizontal").pack(fill=tk.X, pady=10)
-
-        # Кнопка закрытия
-        ttk.Button(
-            scrollable_frame,
-            text="❌ Закрыть",
-            style="TButton",
-            command=achievements_window.destroy
-        ).pack(pady=20)
 
     def show_help(self) -> None:
         """Показывает помощь"""
@@ -19859,25 +17566,49 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
         find_window.bind("<Return>", lambda e: find_next())
 
     def install_tooltips(self) -> None:
-        ToolTip(self.drop_label, "Перетащите файл или кликните, чтобы выбрать\
-Поддерживаемые форматы: PNG, BMP, TIFF, TGA, JPG, JPEG, WAV")
-        if self.extract_drop_label:
-            ToolTip(self.extract_drop_label, "Перетащите картинку с данными или кликните для выбора\
-Поддерживаемые форматы: PNG, BMP, TIFF, TGA, JPG, JPEG, WAV")
-        ToolTip(self.hide_button, "Начать скрытие данных (Ctrl+Enter)\
-Проверьте вместимость контейнера перед началом")
-        ToolTip(self.extract_button, "Извлечь данные (Ctrl+Enter)\
-Программа автоматически определит метод извлечения")
-        ToolTip(self.save_button, "Сохранить извлечённые данные (Ctrl+S)\
-Поддерживается сохранение в различные форматы")
-        ToolTip(self.copy_button, "Скопировать извлечённый текст в буфер обмена")
-        ToolTip(self.open_file_button, "Открыть извлечённый файл в приложении по умолчанию")
-        ToolTip(self.copy_hash_button, "Скопировать SHA-256 хеш извлечённых данных\
-Можно использовать для проверки целостности")
-        ToolTip(self.usage_bar, "Индикатор заполнения контейнера\
-Зеленый: ≤70% (оптимально)\
-Желтый: 70-100% (максимально)\
-Красный: >100% (невозможно)")
+        """Устанавливает подсказки с проверкой существования виджетов"""
+        if hasattr(self, 'drop_label') and self.drop_label:
+            ToolTip(self.drop_label,
+                    "Перетащите файл или кликните, чтобы выбрать\n"
+                    "Поддерживаемые форматы: PNG, BMP, TIFF, TGA, JPG, JPEG, WAV")
+
+        if hasattr(self, 'extract_drop_label') and self.extract_drop_label:
+            ToolTip(self.extract_drop_label,
+                    "Перетащите картинку с данными или кликните для выбора\n"
+                    "Поддерживаемые форматы: PNG, BMP, TIFF, TGA, JPG, JPEG, WAV")
+
+        if hasattr(self, 'hide_button') and self.hide_button:
+            ToolTip(self.hide_button,
+                    "Начать скрытие данных (Ctrl+Enter)\n"
+                    "Проверьте вместимость контейнера перед началом")
+
+        if hasattr(self, 'extract_button') and self.extract_button:
+            ToolTip(self.extract_button,
+                    "Извлечь данные (Ctrl+Enter)\n"
+                    "Программа автоматически определит метод извлечения")
+
+        if hasattr(self, 'save_button') and self.save_button:
+            ToolTip(self.save_button,
+                    "Сохранить извлечённые данные (Ctrl+S)\n"
+                    "Поддерживается сохранение в различные форматы")
+
+        if hasattr(self, 'copy_button') and self.copy_button:
+            ToolTip(self.copy_button, "Скопировать извлечённый текст в буфер обмена")
+
+        if hasattr(self, 'open_file_button') and self.open_file_button:
+            ToolTip(self.open_file_button, "Открыть извлечённый файл в приложении по умолчанию")
+
+        if hasattr(self, 'copy_hash_button') and self.copy_hash_button:
+            ToolTip(self.copy_hash_button,
+                    "Скопировать SHA-256 хеш извлечённых данных\n"
+                    "Можно использовать для проверки целостности")
+
+        if hasattr(self, 'usage_bar') and self.usage_bar:
+            ToolTip(self.usage_bar,
+                    "Индикатор заполнения контейнера\n"
+                    "🟢 Зеленый: ≤70% (оптимально)\n"
+                    "🟡 Желтый: 70-100% (максимально)\n"
+                    "🔴 Красный: >100% (невозможно)")
 
 
 if __name__ == "__main__":
