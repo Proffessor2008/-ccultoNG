@@ -1,19 +1,21 @@
 # ØccultoNG Pro - Professional Steganography Toolkit
 
-**Professional steganography toolkit for secure data hiding in images and audio with advanced methods and comprehensive analytics**
+**Professional steganography toolkit for secure data hiding in images and audio with advanced methods, comprehensive analytics, and integrated InfoSec utilities**
 
 [![GitHub Stars](https://img.shields.io/github/stars/Proffessor2008/-ccultoNG?style=for-the-badge&logo=github)](https://github.com/Proffessor2008/-ccultoNG)
 [![License](https://img.shields.io/badge/license-Commercial%20%2F%20Community-blue?style=for-the-badge)](https://github.com/Proffessor2008/-ccultoNG/blob/main/Community%20License%20(Free))
-[![Version](https://img.shields.io/badge/version-2.4.1-007bff?style=for-the-badge)](https://github.com/Proffessor2008/-ccultoNG/releases)
+[![Version](https://img.shields.io/badge/version-2.5.1-007bff?style=for-the-badge)](https://github.com/Proffessor2008/-ccultoNG/releases)
 
 **Officially registered with Rospatent** (Certificate No. 2025693797)  
-**Author**: MustaNG | **Build Date**: 2026-02-01
+**Author**: MustaNG | **Build Date**: 2026-02-28
 
 ## 📌 Description
 
 ØccultoNG Pro is a **professional-grade steganography toolkit** designed for secure data hiding within images and audio files. This application provides a balanced approach between **maximum data capacity**, **stealthiness against detection**, and **error resilience**, making it suitable for both educational and professional use cases.
 
 The tool features a **modern UI** with drag-and-drop functionality, real-time analytics, and multiple advanced steganographic methods to suit various security requirements. It includes comprehensive **integrity verification** (CRC32 + Hamming codes) and **password protection** (PBKDF2-SHA256) for secure data hiding.
+
+**NEW in v2.5.1**: Integrated **InfoSec Tools** module with hash calculators, password generators, file signature validators, encoding converters, and professional metadata extraction for digital forensics workflows.
 
 Advanced steganalysis module with 15+ statistical tests for detecting hidden data in images and audio files, complete with interactive visualizations and professional reporting.
 
@@ -25,12 +27,13 @@ Advanced steganalysis module with 15+ statistical tests for detecting hidden dat
 | **Stego Methods** | LSB only | 6+ advanced (HILL, DCT, AELSB) |
 | **Steganalysis** | ❌ None | **15+ tests** w/ visualizations |
 | **Encryption** | ❌ None | **AES-256 GCM** + ChaCha20 |
+| **InfoSec Tools** | ❌ None | **Hash/Password/Signatures/Metadata** |
 | **Reports** | ❌ None | HTML/CSV w/ graphs |
 | **UI** | CLI/Basic GUI | **Modern 9-theme GUI** + drag-drop |
 | **API** | ❌ None | **Full Python API** + batch |
-| **Price** | Free (limited) |Free\ **$99/year** commercial |
+| **Price** | Free (limited) | Free / **$99/year** commercial |
 
-**TL;DR:** Professional forensics-grade stego toolkit with GUI, analytics, encryption. Free for education, $99/year for commercial.
+**TL;DR:** Professional forensics-grade stego toolkit with GUI, analytics, encryption, and InfoSec utilities. Free for education, $99/year for commercial.
 
 ## ✨ Key Features
 
@@ -40,8 +43,8 @@ Advanced steganalysis module with 15+ statistical tests for detecting hidden dat
 - **Real-time preview** with container statistics and capacity analysis
 - **Progress tracking** with animated progress bars for large files
 - **History tracking** with quick access to recent files
-- **Contextual tooltips** and smart assistant for optimal method selection
-- **Multi-tab interface** for hiding, extracting, batch processing, analytics, and **advanced steganalysis**
+- **Contextual tooltips** for optimal method selection
+- **Multi-tab interface** for hiding, extracting, batch processing, analytics, encryption, and **InfoSec tools**
 
 ### 🔒 Security & Data Integrity
 - **PBKDF2-SHA256** with 100,000 iterations for password protection
@@ -79,196 +82,174 @@ Advanced steganalysis module with 15+ statistical tests for detecting hidden dat
   - Confidence scoring with bootstrap validation
 - **Comparison mode**: Side-by-side analysis of two files to detect subtle differences
 - **Smart recommendations**: Context-aware suggestions based on test results
-- 
-### 🔐 Advanced Encryption Module (NEW in 2.4.1)
 
-ØccultoNG Pro now includes a **professional-grade encryption module** that provides end-to-end cryptographic protection for your sensitive data before steganographic hiding. This dual-layer security approach (encryption + steganography) ensures maximum confidentiality even if the stego-container is detected.
+### 🔐 Advanced Encryption Module
+- **7 cryptographic algorithms**: AES-256 GCM/CBC/CTR/OFB, ChaCha20-Poly1305, ChaCha20, XOR (educational), Base64
+- **PBKDF2-HMAC-SHA256** with 600,000 iterations for key derivation
+- **Proprietary .ongcrypt format** with automatic detection and metadata
+- **Memory-safe key handling** with zeroization after use
+- **Dual-layer security**: Encrypt data first, then hide via steganography
 
-#### 🔑 Supported Cryptographic Algorithms
+### 🛡️ InfoSec Tools Module (NEW in 2.5.1)
 
-| Algorithm | Security Level | Key Size | Mode | Authentication | Best For |
-|-----------|----------------|----------|------|----------------|----------|
-| **AES-256 GCM** | ⭐⭐⭐⭐⭐ | 256-bit | Galois/Counter | Built-in (128-bit tag) | **Recommended default** - Maximum security + performance |
-| **ChaCha20-Poly1305** | ⭐⭐⭐⭐⭐ | 256-bit | Stream cipher | Built-in (Poly1305) | Mobile devices & systems without AES-NI |
-| **AES-256 CBC** | ⭐⭐⭐⭐ | 256-bit | Cipher Block Chaining | HMAC-SHA256 | Legacy compatibility with enterprise systems |
-| **AES-256 CTR** | ⭐⭐⭐⭐ | 256-bit | Counter mode | External HMAC | Parallel processing & streaming data |
-| **AES-256 OFB** | ⭐⭐⭐ | 256-bit | Output Feedback | External HMAC | Legacy systems (not recommended for new data) |
-| **XOR** | ⚠️ | Variable | Stream cipher | None | **Educational purposes only** - Not secure |
-| **Base64** | ❌ | N/A | Encoding only | None | **Not encryption** - Only for data representation |
+A comprehensive suite of independent utilities for information security professionals, digital forensics analysts, and cybersecurity specialists. All tools work **offline** with no external API dependencies.
 
-#### 🔒 Cryptographic Implementation Details
+#### 🔐 Hash Calculator
+Calculate cryptographic hashes for files and text with instant copying.
 
-- **Key Derivation**: PBKDF2-HMAC-SHA256 with **600,000 iterations** (NIST SP 800-132 compliant)
-- **Salt Generation**: 128-bit cryptographically secure random salt per operation
-- **IV/Nonce**: 96-bit (GCM) or 128-bit (CBC/CTR) randomly generated per encryption
-- **Authentication Tags**: 128-bit GCM tags or HMAC-SHA256 for integrity verification
-- **Memory Security**: Keys zeroized from memory immediately after use (`secrets` module)
-- **Side-Channel Protection**: Constant-time comparisons using `secrets.compare_digest()`
-- **Format**: Proprietary `.ongcrypt` format with magic bytes (`ØCCULTONG`) for automatic detection
+**Supported Algorithms:**
+| Algorithm | Output Size | Security Level | Use Case |
+|-----------|-------------|----------------|----------|
+| **MD5** | 128-bit | ⚠️ Low | File integrity checks, legacy compatibility |
+| **SHA-1** | 160-bit | ⚠️ Medium | Git commits, legacy systems |
+| **SHA-256** | 256-bit | ✅ High | **Recommended** - Digital signatures, password hashing |
+| **SHA-512** | 512-bit | ✅ Very High | Maximum security requirements |
+
+**Features:**
+- 📁 Hash files or paste text directly
+- 📋 One-click copy for individual hashes or "Copy All" button
+- ⚡ Real-time calculation as you type
+- 🔄 Auto-recalculate when text changes
+
+**Usage Example:**
+```
+1. Drag file to "File" field OR paste text in text area
+2. Click "Calculate Hashes" (or wait for auto-calculation)
+3. Click "📋 Copy" next to any hash, or "Copy All" for full report
+4. Verify downloaded files against published SHA-256 hashes
+```
+
+#### 🔑 Password Generator
+Generate cryptographically strong passwords with configurable parameters.
+
+**Configuration Options:**
+```
+📏 Length: 8-64 characters (slider)
+🔤 Character sets:
+  ☑ A-Z (uppercase)
+  ☑ a-z (lowercase)  
+  ☑ 0-9 (digits)
+  ☑ !@#$%^&* (special characters)
+  ☑ Custom characters (user-defined)
+⚙️ Options:
+  ☐ Exclude ambiguous (l, 1, I, O, 0) - for manual entry
+```
+
+**Entropy Calculation:**
+```
+Entropy (bits) = length × log₂(alphabet_size)
+
+Example: 16 chars × 94 possible symbols = 16 × 6.55 ≈ 105 bits ✅
+
+Color indicators:
+🟢 >60 bits: Very strong (recommended for critical accounts)
+🟡 40-60 bits: Acceptable for regular use
+🔴 <40 bits: Weak - increase length or character sets
+```
+
+**Security Best Practices:**
+- Use unique passwords for each service
+- Store passwords in a dedicated password manager
+- Enable two-factor authentication where possible
+- Never reuse passwords across different platforms
+
+#### 🕵️ File Signature Validator
+Detect file type spoofing by comparing file extension with actual binary signature (magic bytes).
+
+**Supported Signatures:**
+```
+📁 PNG:     89 50 4E 47 0D 0A 1A 0A
+📁 JPEG:    FF D8 FF
+📁 PDF:     25 50 44 46 (%PDF)
+📁 ZIP:     50 4B 03 04 (PK..)
+📁 EXE:     4D 5A (MZ)
+📁 WAV:     52 49 46 46 .... 57 41 56 45
+📁 MP4:     00 00 00 18/1C/20 ftyp...
+📁 ELF:     7F 45 4C 46
+```
+
+**Workflow:**
+```
+1. Select suspicious file (e.g., "invoice.jpg" from unknown sender)
+2. Click "Check Signature"
+3. Review results:
+   ✅ MATCH: Extension matches signature → File is likely genuine
+   ❌ MISMATCH: Extension ≠ signature → Potential malware/spoofing!
+4. Take appropriate action (quarantine, scan with antivirus, etc.)
+```
+
+**Use Cases:**
+- 🔍 Email attachment verification
+- 🛡️ Malware triage and forensics
+- 📦 Upload validation for web applications
+- 🔐 Security audit of downloaded files
+
+#### 🔣 Encoding Converter
+Convert data between common encoding formats for analysis and transmission.
+
+**Supported Conversions:**
+| Operation | Input → Output | Use Case |
+|-----------|---------------|----------|
+| **Base64 Encode** | Binary/Text → Base64 | Email attachments, JSON payloads |
+| **Base64 Decode** | Base64 → Binary/Text | Extract data from logs, APIs |
+| **Hex Encode** | Binary → Hex string | Memory dumps, network packet analysis |
+| **Hex Decode** | Hex → Binary | Reverse engineering, forensic analysis |
+| **URL Encode** | Text → %XX format | HTTP parameters, form data |
+| **URL Decode** | %XX → Text | Parse URLs, decode query strings |
+
+**Features:**
+- 📋 Paste button + Ctrl+V support for quick input
+- 🔄 Instant conversion with error handling
+- 📤 Copy result with one click
+- ⚠️ Clear warnings for invalid input formats
+
+#### 🔍 Metadata Extractor (Professional)
+Extract and analyze file metadata for digital forensics and investigation workflows.
+
+**Supported Formats:**
+```
+🖼️ Images: PNG, JPG, JPEG, BMP, TIFF, TGA
+  • EXIF: Camera model, GPS coordinates, timestamp, software
+  • IPTC: Author, copyright, keywords, caption
+  • XMP: Editing history, Adobe-specific metadata
   
-#### 🛡️ Dual-Layer Security Workflow
-
-```mermaid
-flowchart TD
-    A[Original Data] --> B{Encrypt?}
-    B -->|Yes| C[AES-256 GCM]
-    B -->|No| D[Raw Data]
-    C --> E[Encrypted Payload]
-    D --> F[Steganographic Hiding]
-    E --> F
-    F --> G[Stego-Container]
-    G --> H[Transmission]
-    H --> I{Detected?}
-    I -->|Yes| J[Ciphertext only]
-    I -->|No| K[Hidden]
-```
-#### 💻 Encryption API Examples
-
-##### Basic Text Encryption
-```python
-from stegoproexp import EncryptionManager
-
-# Encrypt text with AES-256 GCM
-encrypted = EncryptionManager.encrypt(
-    data="Top secret intelligence report",
-    password="C0mpl3xP@ss!2026#Secure",
-    algorithm="aes_256_gcm"
-)
-
-print(encrypted)
-# Output: {"algorithm":"aes_256_gcm","version":"1.0","ciphertext":"U2FsdGVkX1+...","salt":"aB3cD4eF5gH6...","nonce":"iJ7kL8mN9oP0...","tag":"qR2sT3uV4wX5...","timestamp":"2026-02-12 14:30:45","format":"occultong_encrypted_v1"}
-
-# Decrypt with same password
-decrypted = EncryptionManager.decrypt(encrypted, "C0mpl3xP@ss!2026#Secure")
-print(decrypted)  # "Top secret intelligence report"
-```
-
-##### File Encryption with Progress Tracking
-```python
-from stegoproexp import EncryptionManager
-
-# Encrypt large file (up to 100 MB)
-EncryptionManager.encrypt_file(
-    input_path="confidential_report.pdf",
-    output_path="report.ongcrypt",
-    password="Ultra$ecureP@ss2026!",
-    algorithm="chacha20_poly1305",
-    progress_callback=lambda p: print(f"Encryption progress: {p:.1f}%")
-)
-
-# Decrypt file
-EncryptionManager.decrypt_file(
-    input_path="report.ongcrypt",
-    output_path="decrypted_report.pdf",
-    password="Ultra$ecureP@ss2026!"
-)
-```
-
-##### Integrated Steganography + Encryption Workflow
-```python
-from stegoproexp import AdvancedStego, EncryptionManager
-
-# Step 1: Encrypt sensitive data first
-encrypted_payload = EncryptionManager.encrypt(
-    data=b"Classified satellite imagery coordinates",
-    password="M1ss1l3L@unchC0d3!",
-    algorithm="aes_256_gcm"
-)
-
-# Step 2: Hide encrypted payload in image (dual-layer security)
-AdvancedStego.hide_hill(
-    container_path="vacation_photo.jpg",
-    data=encrypted_payload.encode('utf-8'),  # Already encrypted!
-    password=None,  # No additional password needed (already encrypted)
-    output_path="innocent_looking_photo.jpg"
-)
-
-# Step 3: Extraction requires BOTH steganalysis detection AND password
-extracted_encrypted = AdvancedStego.extract_hill("innocent_looking_photo.jpg")
-decrypted_data = EncryptionManager.decrypt(extracted_encrypted, "M1ss1l3L@unchC0d3!")
-print(decrypted_data)  # "Classified satellite imagery coordinates"
-```
-
-#### 🎯 Security Best Practices for Encryption
-
-##### ✅ DO:
-- Always use **AES-256 GCM** or **ChaCha20-Poly1305** for new data
-- Create **unique passwords** for each encryption operation (12+ characters, mixed case, numbers, symbols)
-- Store passwords in a **dedicated password manager** (Bitwarden, 1Password, KeePassXC)
-- Use encryption **BEFORE** steganographic hiding for maximum security
-- Verify decryption immediately after encryption to prevent data loss
-- Enable **two-factor authentication** when sharing passwords through separate channels
-- Regularly update to the latest version for cryptographic algorithm improvements
-
-##### ❌ DON'T:
-- Never use **XOR** or **Base64** for protecting real sensitive data
-- Never reuse passwords across multiple encryption operations
-- Never store passwords in the same location as encrypted files
-- Never transmit password and encrypted data through the same channel
-- Never use dictionary words, personal information, or sequential characters in passwords
-- Never skip integrity verification after decryption
-
-#### 🔍 Password Strength Requirements
-
-| Strength Level | Minimum Length | Character Types | Example | Security Duration* |
-|----------------|----------------|-----------------|---------|---------------------|
-| **Weak** | < 8 chars | 1 type | `password` | Seconds to crack |
-| **Medium** | 8-11 chars | 2 types | `Password123` | Hours to days |
-| **Strong** | 12-15 chars | 3 types | `Blue$ky7!Mountain` | Years to decades |
-| **Very Strong** | 16+ chars | 4 types | `J7$mP9#kL2@nQ5vX!R8*tY3` | **Centuries+** (quantum-resistant) |
-
-*\*Against brute-force attacks using current consumer hardware. Quantum computers would reduce this significantly, hence the recommendation for 16+ character passwords.*
-
-#### 📊 Performance Benchmarks (Intel i7-12700H)
-
-| Algorithm | 1 MB Text | 10 MB File | 100 MB File | CPU Usage |
-|-----------|-----------|------------|-------------|-----------|
-| AES-256 GCM | 0.08 sec | 0.75 sec | 7.2 sec | 45% (AES-NI accelerated) |
-| ChaCha20-Poly1305 | 0.12 sec | 1.15 sec | 11.3 sec | 65% (software only) |
-| AES-256 CBC | 0.09 sec | 0.82 sec | 8.1 sec | 48% (AES-NI accelerated) |
-| AES-256 CTR | 0.07 sec | 0.68 sec | 6.9 sec | 42% (AES-NI accelerated) |
-
-*All tests performed on Windows 11 with Python 3.11 and PyCryptodome 3.23.0*
-
-#### ⚠️ Critical Security Warnings
-
-> **❗ PASSWORD LOSS = PERMANENT DATA LOSS**  
-> There is **NO backdoor** and **NO recovery mechanism**. If you lose your password, the encrypted data is **cryptographically unrecoverable** - even with unlimited computational resources. Always verify decryption immediately after encryption and store passwords securely.
-
-> **❗ XOR IS NOT SECURE ENCRYPTION**  
-> The XOR "algorithm" is included **ONLY for educational purposes** to demonstrate why proper cryptography matters. It provides **ZERO security** against modern attacks and should never be used for real data protection.
-
-> **❗ BASE64 IS NOT ENCRYPTION**  
-> Base64 is a **binary-to-text encoding scheme**, not an encryption algorithm. Anyone can decode Base64 without a password. Never mistake encoding for encryption.
-
-#### 💡 Integration with Steganalysis Module
-
-The encryption module works seamlessly with the steganalysis engine:
-
-1. **Pre-hiding encryption**: Encrypt data → Hide in container → Analyze container with steganalysis to verify stealthiness
-2. **Post-extraction verification**: Extract data → Run integrity checks → Decrypt with password
-3. **Forensic workflow**: Analyze suspicious file → Extract payload → Attempt decryption (requires password)
-4. **Security validation**: Hide encrypted payload → Run steganalysis → Verify detection resistance of combined approach
-
-#### 🆕 New in Version 2.4.1
-- ✅ Professional encryption module with 7 algorithms
-- ✅ Dual-layer security (encryption + steganography)
-- ✅ Proprietary `.ongcrypt` format with automatic detection
-- ✅ PBKDF2-HMAC-SHA256 with 600,000 iterations
-- ✅ Integrated documentation panel with security level indicators
-- ✅ Password strength meter and generator
-- ✅ Comprehensive help section with step-by-step guides
-- ✅ Cross-platform file encryption/decryption
-- ✅ Progress tracking for large file operations
-- ✅ Memory-safe key handling with zeroization
-```
-
+🎵 Audio: WAV
+  • Technical: Sample rate, channels, bit depth, duration
+  • ID3 tags: Artist, album, year (if present)
   
+📄 Documents: PDF
+  • Properties: Title, author, creator, producer, creation date
+  • Embedded metadata and custom properties
+```
+
+**Key Features:**
+- ⚡ **Async processing** - UI remains responsive during analysis
+- 💾 **Smart caching** - 5-minute TTL for repeated file analysis
+- 🔎 **Search & filter** - Find specific metadata fields instantly
+- 🌍 **GPS parsing** - Automatic coordinate extraction and formatting
+- 📤 **Multi-format export** - JSON, CSV, or TXT reports
+- 🎨 **Grouped TreeView** - Organized display by metadata category
+- 📋 **Context menu** - Right-click to copy individual values or entire groups
+
+**Forensic Workflow Example:**
+```
+1. Load suspect image file
+2. Click "Extract Metadata"
+3. Review results:
+   📁 File: name, size, timestamps
+   📷 EXIF: camera model, GPS: 55.751244, 37.618423 → Moscow
+   🏷️ IPTC: Author: "John Doe", Copyright: "2024"
+   📄 XMP: Last modified by Adobe Photoshop 24.0
+4. Filter by "GPS" to isolate location data
+5. Export to JSON for case documentation
+6. Cross-reference with other evidence
+```
+
+**Privacy Note:** Metadata extraction is read-only. No data is transmitted externally.
+
 ### 📊 Analytics & Productivity
 - **Comprehensive usage statistics** with method and format analysis
 - **Detailed operation history** with timestamped entries
-- **Achievement system** with gamification elements and streak tracking
-- **Smart Assistant** with contextual tips and recommendations
 - **Batch processing** for up to 5 files simultaneously
 - **Real-time capacity analysis** for optimal method selection
 - **Data visualization** for statistical analysis
@@ -284,7 +265,7 @@ The encryption module works seamlessly with the steganalysis engine:
 | **JPEG DCT** | Medium | **High** ⭐ | Medium | JPEG |
 | **WAV LSB** | Maximum | Weak | Weak | WAV |
 
-### 🔎 Steganalysis Detection Methods (NEW)
+### 🔎 Steganalysis Detection Methods
 
 | Test Category | Detection Strength | Best For | Formats |
 |---------------|-------------------|----------|---------|
@@ -310,7 +291,7 @@ The encryption module works seamlessly with the steganalysis engine:
 ### Steps
 ```bash
 # Clone the repository
-git clone https://github.com/Proffessor2008/-ccultoNG.git
+git clone https://github.com/Proffessor2008/-ccultoNG.git   
 cd -ccultoNG
 
 # Create and activate virtual environment
@@ -345,7 +326,7 @@ python stegoproexp.py
 4. **Click "Extract"**: Data is revealed and ready for use
 5. **Data extracted!**: Copy, save, or analyze the results
 
-### 🔍 Analyzing Files for Hidden Data (NEW)
+### 🔍 Analyzing Files for Hidden Data
 1. **Open Analysis tab**: Navigate to the dedicated steganalysis workspace
 2. **Select file**: Drag and drop image or audio file to analyze
 3. **Start analysis**: Click "Analyze" to run 15+ statistical tests
@@ -356,7 +337,7 @@ python stegoproexp.py
 5. **Export report**: Generate professional HTML/CSV/TXT reports with findings
 6. **Compare files** (optional): Load second file to detect subtle differences
 
-### 🔐 Encrypting Sensitive Data (NEW in 2.4.1)
+### 🔐 Encrypting Sensitive Data
 1. **Open Encryption tab**: Navigate to the dedicated encryption workspace (🔐 icon)
 2. **Choose data type**: Select "Text" or "File" for encryption
 3. **Enter data**: Type text or select file to protect
@@ -367,7 +348,91 @@ python stegoproexp.py
 8. **Verify immediately**: Decrypt once to confirm password correctness before storage
 
 > 💡 **Pro Tip**: For maximum security, encrypt data FIRST, then hide the encrypted payload using steganography. This creates dual-layer protection where even if steganalysis detects hidden data, the attacker still faces 256-bit encryption.
-> 
+
+### 🛡️ Using InfoSec Tools (NEW in 2.5.1)
+
+#### Hash Calculator Workflow
+```
+1. Navigate to "🛡️ InfoSec Tools" → "🔐 Hash Sums" tab
+2. Option A - File hashing:
+   • Click "Browse" and select target file
+   • Hashes calculate automatically
+   • Click "📋 Copy" next to SHA-256 for verification
+3. Option B - Text hashing:
+   • Paste text in upper field (Ctrl+V supported)
+   • Hashes update in real-time as you type
+   • Use "Copy All" to export full hash report
+4. Verify downloaded software against published hashes
+```
+
+#### Password Generator Workflow
+```
+1. Navigate to "🛡️ InfoSec Tools" → "🔑 Password Generator"
+2. Configure parameters:
+   • Set length to 16+ for critical accounts
+   • Enable all character sets for maximum entropy
+   • Check "Exclude ambiguous" if password will be typed manually
+3. Click "🎲 Generate"
+4. Review entropy indicator:
+   • 🟢 Green (>60 bits): Suitable for banking, email, etc.
+   • 🟡 Yellow (40-60 bits): Acceptable for low-risk services
+   • 🔴 Red (<40 bits): Increase length or character diversity
+5. Click "📋 Copy" and paste into password manager
+6. ⚠️ Never reuse generated passwords across services
+```
+
+#### Signature Validator Workflow
+```
+1. Navigate to "🛡️ InfoSec Tools" → "🕵️ Signature Validator"
+2. Select suspicious file (e.g., "report.exe" claiming to be PDF)
+3. Click "Check Signature"
+4. Interpret results:
+   ✅ "MATCH: Extension corresponds to signature"
+      → File type is genuine, proceed with caution
+   ❌ "MISMATCH: Possible extension spoofing!"
+      → File may be malicious; quarantine and scan with antivirus
+5. For mismatches:
+   • Do NOT open the file directly
+   • Upload to VirusTotal or similar service
+   • Report to security team if in enterprise environment
+```
+
+#### Encoding Converter Workflow
+```
+1. Navigate to "🛡️ InfoSec Tools" → "🔣 Encoding Converter"
+2. Paste encoded data in input field
+3. Select conversion type:
+   • "→ Base64" to decode Base64 strings
+   • "→ Hex" to convert hex dumps to binary
+   • "→ URL" to decode URL-encoded parameters
+4. Click "Convert"
+5. Review output:
+   • Valid conversions appear in lower field
+   • Errors display clear messages (e.g., "Invalid Base64 padding")
+6. Copy result for further analysis or use
+```
+
+#### Metadata Extractor Workflow
+```
+1. Navigate to "🛡️ InfoSec Tools" → "🔍 Metadata"
+2. Click "Browse..." and select target file
+   • Supported: PNG, JPG, BMP, TIFF, WAV, PDF
+3. Click "🔍 Extract Metadata"
+   • Analysis runs asynchronously; UI remains responsive
+   • Progress shown in status bar
+4. Review grouped results in TreeView:
+   • 📁 File: Basic file information
+   • 📷 EXIF: Camera settings, GPS coordinates
+   • 🏷️ IPTC: Copyright, author, keywords
+   • 🌍 GPS: Latitude/longitude if available
+5. Use search filter to find specific fields
+6. Right-click any value → "Copy value" or "Copy group"
+7. Export complete report:
+   • JSON: For programmatic processing
+   • CSV: For spreadsheet analysis
+   • TXT: For human-readable documentation
+```
+
 ## 💻 Usage Examples
 
 ### Basic Data Hiding (Python API)
@@ -408,7 +473,7 @@ data = JPEGStego.extract_dct("stego_photo.jpg", "password")
 print(data)  # b"Secret data"
 ```
 
-### 🔍 Steganalysis API (NEW in 2.3.1)
+### 🔍 Steganalysis API
 ```python
 from stegoproexp import FileAnalyzer
 
@@ -432,6 +497,90 @@ FileAnalyzer.export_report_html(
 )
 ```
 
+### 🛡️ InfoSec Tools API Examples
+
+#### Hash Calculation
+```python
+import hashlib
+
+# Calculate SHA-256 for file verification
+def verify_file(filepath, expected_hash):
+    sha256 = hashlib.sha256()
+    with open(filepath, 'rb') as f:
+        for chunk in iter(lambda: f.read(4096), b''):
+            sha256.update(chunk)
+    return sha256.hexdigest() == expected_hash
+
+# Usage
+if verify_file("downloaded_app.exe", "a1b2c3..."):
+    print("✅ File integrity verified")
+else:
+    print("❌ File may be corrupted or tampered")
+```
+
+#### Password Generation
+```python
+import secrets
+import string
+
+def generate_password(length=16, use_special=True):
+    chars = string.ascii_letters + string.digits
+    if use_special:
+        chars += string.punctuation
+    return ''.join(secrets.choice(chars) for _ in range(length))
+
+# Generate strong password
+pwd = generate_password(20)
+print(f"Generated: {pwd}")
+# Example output: J7$mP9#kL2@nQ5vX!R8t
+```
+
+#### File Signature Check
+```python
+def check_file_signature(filepath):
+    """Check if file extension matches magic bytes"""
+    signatures = {
+        b'\x89PNG\r\n\x1a\n': '.png',
+        b'\xff\xd8\xff': '.jpg',
+        b'%PDF': '.pdf',
+        b'PK\x03\x04': '.zip',
+        b'MZ': '.exe',
+    }
+    with open(filepath, 'rb') as f:
+        header = f.read(16)
+    for sig, ext in signatures.items():
+        if header.startswith(sig):
+            return ext
+    return None
+
+# Detect spoofed file
+detected = check_file_signature("suspicious.jpg")
+if detected != ".jpg":
+    print(f"⚠️ Warning: File signature indicates {detected}, not .jpg")
+```
+
+#### Metadata Extraction (Images)
+```python
+from PIL import Image
+from PIL.ExifTags import TAGS
+
+def extract_image_metadata(filepath):
+    """Extract EXIF metadata from image"""
+    metadata = {}
+    with Image.open(filepath) as img:
+        exif = img.getexif()
+        if exif:
+            for tag_id, value in exif.items():
+                tag = TAGS.get(tag_id, tag_id)
+                metadata[tag] = value
+    return metadata
+
+# Usage
+meta = extract_image_metadata("photo.jpg")
+if 'GPSLatitude' in meta:
+    print(f"📍 Location: {meta['GPSLatitude']}")
+```
+
 ### Capacity Analysis
 ```python
 from stegoproexp import ImageProcessor
@@ -452,6 +601,7 @@ stegoproexp/
 ├── requirements.txt        # Python dependencies
 ├── README.md               # This documentation
 ├── stego_settings_pro.json # User configuration (auto-created)
+├── ib_tools.py            # InfoSec Tools module (NEW in 2.5.1)
 └── analysis/
     ├── file_analyzer.py    # Core steganalysis engine (15+ tests)
     └── visualization.py    # Interactive plot generation
@@ -462,13 +612,13 @@ stegoproexp/
 - `JPEGStego` - JPEG DCT method implementation
 - `AudioStego` - WAV LSB method
 - `ImageProcessor` - Image handling and analysis
-- `FileAnalyzer` - **NEW**: Comprehensive steganalysis engine with 15+ statistical tests
-- `AnalysisTab` - **NEW**: UI interface for steganalysis with visualizations
+- `FileAnalyzer` - Comprehensive steganalysis engine with 15+ statistical tests
+- `AnalysisTab` - UI interface for steganalysis with visualizations
+- `IBToolsTab` - **NEW**: InfoSec utilities (hash, password, signatures, encoding, metadata)
+- `EncryptionManager` - Cryptographic operations module
 - `ThemeManager` - UI theme management
 - `HistoryLog` - Operation history tracking
-- `SmartAssistant` - Contextual recommendations
 - `NotificationManager` - User notifications
-- `AchievementManager` - Gamification system
 - `AnalyticsManager` - Usage statistics
 
 ## 🧪 Advanced Features
@@ -495,22 +645,20 @@ stegoproexp/
 - Noise pattern analysis for steganalysis
 - Entropy analysis for data integrity
 - DCT coefficient analysis for JPEG files
-- **NEW**: Ker's Pair Analysis for robust LSB detection (α-metric < 0.05 indicates steganography)
+- **Ker's Pair Analysis** for robust LSB detection (α-metric < 0.05 indicates steganography)
 
-### Smart Assistant
-- Contextual tips based on current operation
-- Method recommendations for optimal results
-- Security warnings for potential vulnerabilities
-- Capacity analysis for data size planning
-- **NEW**: Steganalysis interpretation guidance based on test results
-- Learning system that adapts to user preferences
+### 🔐 Encryption Integration
+- Encrypt data before steganographic hiding for dual-layer security
+- Support for modern AEAD ciphers (AES-GCM, ChaCha20-Poly1305)
+- Memory-safe key handling with automatic zeroization
+- Proprietary `.ongcrypt` format for reliable file identification
 
-### Achievement System
-- 20+ achievements with multiple rarity levels
-- Streak tracking (daily usage)
-- Experience points and leveling system
-- Visual badges for completed achievements
-- Detailed statistics and progress tracking
+### 🛡️ InfoSec Tools Integration
+- All tools operate offline with no external dependencies
+- Async processing prevents UI blocking during analysis
+- Smart caching reduces redundant computations
+- Professional export formats for forensic documentation
+- Context-aware error handling with actionable guidance
 
 ## 🔐 Security Best Practices
 
@@ -519,9 +667,11 @@ stegoproexp/
 - Choose HILL-CA or JPEG DCT for maximum stealth
 - Use AELSB with Hamming for critical data (error correction)
 - Regularly back up important files
-- Use the Smart Assistant for optimal method selection
-- **NEW**: Run steganalysis on suspicious files before opening/processing
-- **NEW**: Compare files with known originals when possible (use comparison mode)
+- **Run steganalysis on suspicious files before opening/processing**
+- **Compare files with known originals when possible (use comparison mode)**
+- **Verify file signatures before executing downloaded files**
+- **Use hash verification for software integrity checks**
+- **Encrypt sensitive data before steganographic hiding**
 
 ### ❌ DON'T:
 - Use simple passwords like "123" or "password"
@@ -529,7 +679,10 @@ stegoproexp/
 - Hide public data (no need for steganography)
 - Share your license key publicly
 - Use for illegal activities
-- **NEW**: Rely on single-test results-always review comprehensive analysis
+- **Rely on single-test steganalysis results** - always review comprehensive analysis
+- **Open files with mismatched signatures** without antivirus scanning
+- **Reuse passwords** across different encryption operations
+- **Store passwords** in the same location as encrypted files
 
 ## ❓ Frequently Asked Questions
 
@@ -560,7 +713,7 @@ A: The module uses **15+ independent statistical tests** with cross-validation:
 - High confidence (>85% suspicion): Strong indicator of steganography (false positive rate < 5%)
 - Medium confidence (55-85%): Requires manual verification or comparison with original
 - Low confidence (<40%): Likely clean file, but not guaranteed (advanced methods may evade detection)
-- **Note**: No steganalysis tool is 100% accurate-always combine with other verification methods
+- **Note**: No steganalysis tool is 100% accurate - always combine with other verification methods
 
 **Q: 🔍 What does the Ker's Pair Analysis (α-metric) mean?**  
 A: This advanced test detects LSB steganography by analyzing pixel pair distributions:
@@ -612,13 +765,36 @@ A: **Technically yes, but strongly discouraged**. Using unique passwords per fil
 - Limits blast radius of password reuse attacks
 - Follows zero-trust security principles  
 Use a password manager to generate and store unique passwords for each encryption operation.
-- 
+
+**Q: 🛡️ Are InfoSec Tools safe to use on sensitive files?**  
+A: **Yes, completely safe**:
+- All tools run locally with no network communication
+- No data is transmitted to external servers
+- Metadata extraction is read-only (no file modification)
+- Hash calculations use standard cryptographic libraries
+- Password generation uses `secrets` module (cryptographically secure RNG)
+
+**Q: 🛡️ Can I automate InfoSec Tools via script?**  
+A: The tools are designed for GUI use, but core functionality is accessible via Python imports:
+```python
+# Example: Programmatic hash calculation
+import hashlib
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        while chunk := f.read(8192):
+            h.update(chunk)
+    return h.hexdigest()
+```
+For full automation, consider using the underlying libraries directly (`hashlib`, `Pillow`, etc.).
+
 ## 🤝 Contributing
 
 We welcome contributions in the following areas:
 
 - **New steganographic methods**
 - **Advanced steganalysis techniques**
+- **InfoSec Tools enhancements** (new hash algorithms, metadata parsers, etc.)
 - **UI/UX improvements**
 - **Performance optimizations**
 - **Additional platform support**
@@ -637,6 +813,7 @@ We welcome contributions in the following areas:
 - Write unit tests for new functionality
 - Maintain existing code style and patterns
 - **For analysis modules**: Include statistical validation and false positive rate documentation
+- **For InfoSec Tools**: Ensure offline operation and clear error messaging
 
 ## 📜 License
 
@@ -663,7 +840,7 @@ For commercial use, please contact: **tudubambam@yandex.ru**
 **Author**: MustaNG  
 **GitHub**: [https://github.com/Proffessor2008/-ccultoNG](https://github.com/Proffessor2008/-ccultoNG)  
 **Email**: tudubambam@yandex.ru  
-**Version**: 2.3.1 (February 1, 2026)
+**Version**: 2.5.1 (February 28, 2026)
 
 ## 🙏 Support the Project
 
@@ -673,7 +850,7 @@ If you find ØccultoNG Pro useful:
 - 🍴 **Fork** and contribute improvements
 - 📢 **Share** with your colleagues and friends
 - 🐞 **Report bugs** through GitHub Issues
-- 💡 **Suggest features** for future development (especially new steganalysis techniques!)
+- 💡 **Suggest features** for future development (especially new steganalysis techniques or InfoSec tools!)
 
 ---
 **Made with ❤️ by MustaNG**  
