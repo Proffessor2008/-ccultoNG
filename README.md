@@ -4,7 +4,7 @@
 
 [![GitHub Stars](https://img.shields.io/github/stars/Proffessor2008/-ccultoNG?style=for-the-badge&logo=github)](https://github.com/Proffessor2008/-ccultoNG)
 [![License](https://img.shields.io/badge/license-Commercial%20%2F%20Community-blue?style=for-the-badge)](https://github.com/Proffessor2008/-ccultoNG/blob/main/Community%20License%20(Free))
-[![Version](https://img.shields.io/badge/version-2.5.1-007bff?style=for-the-badge)](https://github.com/Proffessor2008/-ccultoNG/releases)
+[![Version](https://img.shields.io/badge/version-2.6.1-007bff?style=for-the-badge)](https://github.com/Proffessor2008/-ccultoNG/releases)
 
 **Officially registered with Rospatent** (Certificate No. 2025693797)  
 **Author**: MustaNG | **Build Date**: 2026-02-28
@@ -90,162 +90,216 @@ Advanced steganalysis module with 15+ statistical tests for detecting hidden dat
 - **Memory-safe key handling** with zeroization after use
 - **Dual-layer security**: Encrypt data first, then hide via steganography
 
-### 🛡️ InfoSec Tools Module (NEW in 2.5.1)
+# 🛡️ InfoSec Tools Module (UPDATED in v2.6.1)
 
-A comprehensive suite of independent utilities for information security professionals, digital forensics analysts, and cybersecurity specialists. All tools work **offline** with no external API dependencies.
+> **NEW in v2.6.1**: Major expansion of the InfoSec Tools module with **8 new professional utilities**, enhanced existing tools, and improved workflow integration for digital forensics, incident response, and security auditing.
 
-#### 🔐 Hash Calculator
-Calculate cryptographic hashes for files and text with instant copying.
+A comprehensive suite of **13 independent utilities** for information security professionals, digital forensics analysts, and cybersecurity specialists. All tools work **completely offline** with no external API dependencies, ensuring data privacy and operational security.
 
-**Supported Algorithms:**
-| Algorithm | Output Size | Security Level | Use Case |
-|-----------|-------------|----------------|----------|
-| **MD5** | 128-bit | ⚠️ Low | File integrity checks, legacy compatibility |
-| **SHA-1** | 160-bit | ⚠️ Medium | Git commits, legacy systems |
-| **SHA-256** | 256-bit | ✅ High | **Recommended** - Digital signatures, password hashing |
-| **SHA-512** | 512-bit | ✅ Very High | Maximum security requirements |
+---
 
-**Features:**
-- 📁 Hash files or paste text directly
-- 📋 One-click copy for individual hashes or "Copy All" button
-- ⚡ Real-time calculation as you type
-- 🔄 Auto-recalculate when text changes
+## 🆕 What's New in v2.6.1
 
-**Usage Example:**
+### 🔹 New Tools Added
+
+| Tool | Purpose | Key Benefit |
+|------|---------|-------------|
+| **📊 Entropy Analyzer** | Detect encrypted, compressed, or random data in files | Identify hidden payloads, steganography containers, or packed malware without deep reverse engineering |
+| **🔤 String Extractor** | Find readable text patterns in binary files (executables, memory dumps, network captures) | Quickly locate URLs, IPs, credentials, or suspicious strings during incident investigation |
+| **🔎 Steganoanalysis** | Detect hidden data in images using statistical methods (Chi-square, RS-analysis, LSB plane analysis) | Verify if an image contains steganographic content before further analysis |
+| **💾 PE Analyzer** | Inspect Windows executable headers (DOS, PE, sections, imports) | Rapid triage of suspicious EXE/DLL files without running them |
+| **📦 Archive Analyzer** | View contents of ZIP/TAR archives without extraction | Safely audit email attachments or downloaded archives for malicious payloads |
+| **🆔 UUID/GUID Generator** | Generate RFC 4122 compliant unique identifiers (v1, v3, v4, v5) | Create secure IDs for logging, session tokens, or database keys |
+| **⏱️ Unix Time Converter** | Convert between Unix timestamps and human-readable dates across timezones | Correlate events from logs, filesystems, and network captures with different time formats |
+| **🌐 IP/Domain Validator** | Validate and convert IP addresses (IPv4/IPv6) and domain names | Clean and verify IOC lists, firewall rules, or threat intelligence feeds |
+
+### 🔹 Enhanced Existing Tools
+
+#### 🔐 Hash Calculator - Now with Professional Features
 ```
-1. Drag file to "File" field OR paste text in text area
-2. Click "Calculate Hashes" (or wait for auto-calculation)
-3. Click "📋 Copy" next to any hash, or "Copy All" for full report
-4. Verify downloaded files against published SHA-256 hashes
-```
-
-#### 🔑 Password Generator
-Generate cryptographically strong passwords with configurable parameters.
-
-**Configuration Options:**
-```
-📏 Length: 8-64 characters (slider)
-🔤 Character sets:
-  ☑ A-Z (uppercase)
-  ☑ a-z (lowercase)  
-  ☑ 0-9 (digits)
-  ☑ !@#$%^&* (special characters)
-  ☑ Custom characters (user-defined)
-⚙️ Options:
-  ☐ Exclude ambiguous (l, 1, I, O, 0) - for manual entry
+✅ 11 algorithms: MD5, SHA-1, SHA-256/512, SHA3-256/512, BLAKE2b/s, RIPEMD160
+✅ Batch processing: Hash multiple files or entire folders recursively
+✅ Reference comparison: Verify files against published hashes instantly
+✅ Export options: JSON, CSV, or TXT reports for audit documentation
+✅ History tracking: Review last 1000 hash operations with timestamps
 ```
 
-**Entropy Calculation:**
+**Why it matters**: Critical for verifying software integrity, documenting evidence in forensic cases, and ensuring data hasn't been tampered with during transfer.
+
+#### 🔑 Password Generator - Smarter & More Flexible
 ```
-Entropy (bits) = length × log₂(alphabet_size)
-
-Example: 16 chars × 94 possible symbols = 16 × 6.55 ≈ 105 bits ✅
-
-Color indicators:
-🟢 >60 bits: Very strong (recommended for critical accounts)
-🟡 40-60 bits: Acceptable for regular use
-🔴 <40 bits: Weak - increase length or character sets
-```
-
-**Security Best Practices:**
-- Use unique passwords for each service
-- Store passwords in a dedicated password manager
-- Enable two-factor authentication where possible
-- Never reuse passwords across different platforms
-
-#### 🕵️ File Signature Validator
-Detect file type spoofing by comparing file extension with actual binary signature (magic bytes).
-
-**Supported Signatures:**
-```
-📁 PNG:     89 50 4E 47 0D 0A 1A 0A
-📁 JPEG:    FF D8 FF
-📁 PDF:     25 50 44 46 (%PDF)
-📁 ZIP:     50 4B 03 04 (PK..)
-📁 EXE:     4D 5A (MZ)
-📁 WAV:     52 49 46 46 .... 57 41 56 45
-📁 MP4:     00 00 00 18/1C/20 ftyp...
-📁 ELF:     7F 45 4C 46
+✅ 4 generation modes: Random, Passphrase, PIN, XKCD-style memorable passwords
+✅ Strength evaluation: Real-time entropy calculation + crack time estimation
+✅ Custom wordlists: Russian/English word banks for passphrase generation
+✅ Export to password managers: KeePass-compatible CSV format
+✅ History with filtering: Track generated passwords without storing them insecurely
 ```
 
-**Workflow:**
+**Why it matters**: Generate cryptographically strong credentials for services, encryption keys, or test accounts - with confidence in their actual security level.
+
+#### 🕵️ File Signature Validator - Deeper Inspection
 ```
-1. Select suspicious file (e.g., "invoice.jpg" from unknown sender)
-2. Click "Check Signature"
-3. Review results:
-   ✅ MATCH: Extension matches signature → File is likely genuine
-   ❌ MISMATCH: Extension ≠ signature → Potential malware/spoofing!
-4. Take appropriate action (quarantine, scan with antivirus, etc.)
-```
-
-**Use Cases:**
-- 🔍 Email attachment verification
-- 🛡️ Malware triage and forensics
-- 📦 Upload validation for web applications
-- 🔐 Security audit of downloaded files
-
-#### 🔣 Encoding Converter
-Convert data between common encoding formats for analysis and transmission.
-
-**Supported Conversions:**
-| Operation | Input → Output | Use Case |
-|-----------|---------------|----------|
-| **Base64 Encode** | Binary/Text → Base64 | Email attachments, JSON payloads |
-| **Base64 Decode** | Base64 → Binary/Text | Extract data from logs, APIs |
-| **Hex Encode** | Binary → Hex string | Memory dumps, network packet analysis |
-| **Hex Decode** | Hex → Binary | Reverse engineering, forensic analysis |
-| **URL Encode** | Text → %XX format | HTTP parameters, form data |
-| **URL Decode** | %XX → Text | Parse URLs, decode query strings |
-
-**Features:**
-- 📋 Paste button + Ctrl+V support for quick input
-- 🔄 Instant conversion with error handling
-- 📤 Copy result with one click
-- ⚠️ Clear warnings for invalid input formats
-
-#### 🔍 Metadata Extractor (Professional)
-Extract and analyze file metadata for digital forensics and investigation workflows.
-
-**Supported Formats:**
-```
-🖼️ Images: PNG, JPG, JPEG, BMP, TIFF, TGA
-  • EXIF: Camera model, GPS coordinates, timestamp, software
-  • IPTC: Author, copyright, keywords, caption
-  • XMP: Editing history, Adobe-specific metadata
-  
-🎵 Audio: WAV
-  • Technical: Sample rate, channels, bit depth, duration
-  • ID3 tags: Artist, album, year (if present)
-  
-📄 Documents: PDF
-  • Properties: Title, author, creator, producer, creation date
-  • Embedded metadata and custom properties
+✅ 100+ file format signatures: Images, documents, archives, executables, databases
+✅ Deep scanning (carving): Detect embedded files within containers
+✅ Structure validation: Check for truncated or malformed file headers
+✅ Detailed reporting: HEX signature, MIME type, and risk assessment in one view
 ```
 
-**Key Features:**
-- ⚡ **Async processing** - UI remains responsive during analysis
-- 💾 **Smart caching** - 5-minute TTL for repeated file analysis
-- 🔎 **Search & filter** - Find specific metadata fields instantly
-- 🌍 **GPS parsing** - Automatic coordinate extraction and formatting
-- 📤 **Multi-format export** - JSON, CSV, or TXT reports
-- 🎨 **Grouped TreeView** - Organized display by metadata category
-- 📋 **Context menu** - Right-click to copy individual values or entire groups
+**Why it matters**: Catch file type spoofing attacks (e.g., malware disguised as PDF) before they reach your system - essential for email security and upload validation.
 
-**Forensic Workflow Example:**
+#### 🔣 Encoding Converter - Broader Format Support
 ```
-1. Load suspect image file
-2. Click "Extract Metadata"
-3. Review results:
-   📁 File: name, size, timestamps
-   📷 EXIF: camera model, GPS: 55.751244, 37.618423 → Moscow
-   🏷️ IPTC: Author: "John Doe", Copyright: "2024"
-   📄 XMP: Last modified by Adobe Photoshop 24.0
-4. Filter by "GPS" to isolate location data
-5. Export to JSON for case documentation
-6. Cross-reference with other evidence
+✅ 14 encoding operations: Base32/64/85, Hex, URL, HTML, Unicode Escape, and more
+✅ File support: Encode/decode entire files, not just text snippets
+✅ Auto-detection: Smart recognition of input encoding to prevent errors
+✅ Batch mode: Process multiple files with consistent settings
 ```
 
-**Privacy Note:** Metadata extraction is read-only. No data is transmitted externally.
+**Why it matters**: Decode obfuscated payloads from logs, prepare data for API transmission, or analyze network traffic - all without leaving the application.
+
+#### 🔍 Metadata Extractor - Forensic-Grade Analysis
+```
+✅ Office document support: Extract author, edit history, and custom properties from DOCX/XLSX/PPTX
+✅ Thumbnail extraction: Recover embedded preview images from files
+✅ Edit timeline analysis: Track modification history in XMP/IPTC metadata
+✅ Hidden data detection: Flag suspicious or stripped metadata fields
+✅ Multi-format export: JSON for automation, CSV for spreadsheets, TXT for reports
+```
+
+**Why it matters**: Uncover digital provenance, verify document authenticity, or identify privacy leaks in shared files - critical for investigations and compliance.
+
+---
+
+## 🎯 How to Use InfoSec Tools (Quick Start)
+
+### General Workflow
+```
+1. Open the "🛡️ InfoSec Tools" tab in the main interface
+2. Select the tool you need from the categorized notebook:
+   • 🔐 Cryptography (Hash, Password, UUID)
+   • 🔬 File Analysis (Signatures, Entropy, Strings, PE, Archives)
+   • 🔄 Data & Encoding (Converter, Metadata, Time)
+   • 🌐 Network Tools (IP/Domain, Steganoanalysis)
+3. Follow the tool-specific interface:
+   • Drag-and-drop files where supported
+   • Configure options via checkboxes, sliders, or dropdowns
+   • Click the primary action button (🚀 / 🔍 / 🎲)
+4. Review results in the formatted output area
+5. Export, copy, or save results as needed
+```
+
+### Practical Examples
+
+#### 🔐 Verify a Downloaded File
+```
+Scenario: You downloaded "security_tool.exe" and want to confirm it matches the vendor's published SHA-256 hash.
+
+1. Go to "🔐 Hash Calculator"
+2. Click "📂 Add Files" and select security_tool.exe
+3. Ensure SHA-256 is checked in algorithm list
+4. Paste the vendor's hash into "Reference hash" field
+5. Click "🔍 Compare"
+6. Result: ✅ "MATCH" = file is authentic | ❌ "NO MATCH" = file may be tampered
+```
+
+#### 🔍 Investigate a Suspicious Image
+```
+Scenario: An employee received "invoice.png" from an unknown sender.
+
+1. Go to "🔎 Steganoanalysis"
+2. Drag the image into the analysis area
+3. Enable Chi-square + RS-analysis + Visual LSB checks
+4. Click "🔍 Start Analysis"
+5. Review results:
+   • Chi-square p-value < 0.05 → possible hidden data
+   • RS-analysis asymmetry → LSB manipulation detected
+   • LSB entropy ≈ 1.0 → random-looking bit plane (suspicious)
+6. If suspicious: quarantine file and run full antivirus scan
+```
+
+#### 📊 Analyze a Binary File for Hidden Strings
+```
+Scenario: You have a memory dump and need to find embedded URLs or credentials.
+
+1. Go to "🔤 String Extractor"
+2. Load the binary file
+3. Set minimum string length to 6 (filters noise)
+4. Enable ASCII + UTF-16 LE encoding detection
+5. Optional: Add regex filter like "https?://\S+" to find URLs only
+6. Click "🔍 Extract Strings"
+7. Review results table with offset, string, and length
+8. Copy suspicious entries for further investigation
+```
+
+#### 🕵️ Validate Email Attachments in Bulk
+```
+Scenario: Audit 50 email attachments for file type spoofing.
+
+1. Go to "🕵️ Signature Validator"
+2. Click "📁 Add Folder" and select the attachments directory
+3. Enable "Deep scan (carving)" to detect nested payloads
+4. Click "🚀 Check All"
+5. Review summary:
+   • ✅ Green = extension matches signature
+   • ❌ Red = mismatch → investigate further
+6. Export report to CSV for documentation
+```
+
+---
+
+## 💡 Why These Tools Matter
+
+### For Security Professionals
+- **Speed**: Perform common forensic tasks in seconds, not minutes
+- **Accuracy**: Use cryptographically sound algorithms and statistically validated detection methods
+- **Documentation**: Export professional reports for case files, audits, or compliance
+- **Safety**: All analysis is read-only and offline - no risk of executing malicious code
+
+### For Developers & DevSecOps
+- **Integration**: Copy-paste hashes, UUIDs, or encoded values directly into code/configs
+- **Testing**: Generate test credentials, validate input sanitization, or simulate IOC feeds
+- **Debugging**: Decode obfuscated logs, inspect binary outputs, or verify timestamp handling
+
+### For Education & Training
+- **Hands-on learning**: Experiment with cryptography, encoding, and steganalysis concepts safely
+- **Visual feedback**: See entropy graphs, signature hex dumps, and metadata trees in real-time
+- **Best practices**: Built-in warnings and recommendations reinforce secure habits
+
+---
+
+## 🔐 Security & Privacy Guarantees
+
+✅ **100% offline operation** - No data leaves your machine  
+✅ **No telemetry or analytics** - Your usage is never tracked  
+✅ **Read-only analysis** - Files are never modified during inspection  
+✅ **Memory-safe handling** - Sensitive data (passwords, keys) is zeroized after use  
+✅ **Open algorithms** - All cryptographic methods use well-vetted, standard libraries  
+
+> ℹ️ **Note**: InfoSec Tools are designed to *assist* security workflows - not replace professional judgment. Always corroborate findings with additional tools and expert review.
+
+---
+
+## 🔄 Integration with Core Steganography Features
+
+The InfoSec Tools module complements ØccultoNG Pro's primary steganography functions:
+
+```
+🔐 Dual-Layer Security Workflow:
+1. Encrypt sensitive data using "🔐 Encryption" tab (AES-256 GCM)
+2. Hide the encrypted payload using steganography ("📦 Hide Data" tab)
+3. Verify integrity using "🔐 Hash Calculator" (SHA-256 of final stego-file)
+4. Document the process using metadata export and report generation
+
+🔍 Forensic Analysis Workflow:
+1. Suspect image received → analyze with "🔎 Steganoanalysis"
+2. If hidden data suspected → extract with "🔍 Extract Data" tab
+3. If extracted data is encrypted → decrypt using "🔐 Encryption" tab
+4. Verify final content using hash comparison and metadata review
+```
+
+This integrated approach enables end-to-end secure communication and thorough incident investigation - all within a single, cohesive application.
+
+---
 
 ### 📊 Analytics & Productivity
 - **Comprehensive usage statistics** with method and format analysis
