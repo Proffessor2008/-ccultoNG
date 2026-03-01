@@ -2158,35 +2158,45 @@ class BatchProcessor:
         return {'type': 'binary', 'size': len(data)}
 
     def guess_data_type(self, data):
-        """Пытается определить тип данных"""
+        """Пытается определить тип данных — ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         if not data:
             return 'unknown'
 
-        # Проверка на текст
+        # 🔥 ПРОВЕРКА МАГИЧЕСКИХ ЧИСЕЛ СНАЧАЛА (приоритет!)
+        magic_numbers = {
+            b'\x89PNG\r\n\x1a\n': 'png',
+            b'\xff\xd8\xff': 'jpeg',
+            b'GIF87a': 'gif',
+            b'GIF89a': 'gif',
+            b'BM': 'bmp',
+            b'PK\x03\x04': 'zip',
+            b'PK\x05\x06': 'zip',
+            b'PK\x07\x08': 'zip',
+            b'Rar!': 'rar',
+            b'7z\xbc\xaf': '.7z',
+            b'%PDF': 'pdf',
+            b'\x7fELF': 'elf',
+            b'MZ': 'exe',
+            b'RIFF': 'wav',
+        }
+
+        for magic, filetype in magic_numbers.items():
+            if data.startswith(magic):
+                return filetype
+
+        # Только ПОТОМ проверяем на текст
         try:
             text = data.decode('utf-8', errors='ignore')
-            text_ratio = len(text) / len(data)
+            # Считаем только ПЕЧАТАЕМЫЕ символы (null-байты не считаем текстом!)
+            printable_chars = sum(1 for c in text if c.isprintable() or c in '\n\r\t')
+            text_ratio = printable_chars / len(data) if len(data) > 0 else 0
+
             if text_ratio > 0.8:
                 return 'text'
             elif text_ratio > 0.5:
                 return 'mixed'
         except:
             pass
-
-        # Проверка магических чисел
-        magic_numbers = {
-            b'\x89PNG\r\n\x1a\n': 'png',
-            b'\xff\xd8\xff': 'jpeg',
-            b'GIF': 'gif',
-            b'BM': 'bmp',
-            b'PK\x03\x04': 'zip',
-            b'Rar!': 'rar',
-            b'%PDF': 'pdf'
-        }
-
-        for magic, filetype in magic_numbers.items():
-            if data.startswith(magic):
-                return filetype
 
         return 'binary'
 
