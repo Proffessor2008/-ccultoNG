@@ -1,22 +1,30 @@
 import base64
+import csv
 import hashlib
 import json
+import locale
 import math
 import mimetypes
 import os
+import platform
 import secrets
 import shutil
+import socket
 import string
+import struct
 import subprocess
 import sys
 import tempfile
 import threading
 import time
 import tkinter as tk
+import urllib.error
 import urllib.parse
+import urllib.request
 import wave
 import webbrowser
 import zlib
+from datetime import datetime
 from io import BytesIO
 from tkinter import ttk, filedialog, messagebox, scrolledtext
 from typing import List, Tuple, Dict, Any, Optional
@@ -45,7 +53,7 @@ from matplotlib.figure import Figure
 # ───────────────────────────────────────────────
 # 🎨 ГЛОБАЛЬНЫЕ НАСТРОЙКИ (УЛУЧШЕННЫЕ)
 # ───────────────────────────────────────────────
-VERSION = "2.5.1"
+VERSION = "2.6.1"
 AUTHOR = "MustaNG"
 BUILD_DATE = time.strftime("%Y-%m-%d")
 
@@ -2158,7 +2166,7 @@ class BatchProcessor:
         return {'type': 'binary', 'size': len(data)}
 
     def guess_data_type(self, data):
-        """Пытается определить тип данных — ИСПРАВЛЕННАЯ ВЕРСИЯ"""
+        """Пытается определить тип данных - ИСПРАВЛЕННАЯ ВЕРСИЯ"""
         if not data:
             return 'unknown'
 
@@ -10015,250 +10023,836 @@ class ImageProcessor:
             raise ValueError("❌ Не удалось извлечь данные. Ни один из поддерживаемых методов не подошел.")
 
 
-# ───────────────────────────────────────────────
-# 🛡️ ВКЛАДКА ИНСТРУМЕНТОВ ИБ
-# ───────────────────────────────────────────────
+# ============================================================================
+# РАСШИРЕННАЯ БАЗА СИГНАТУР ФАЙЛОВ (100+ ФОРМАТОВ)
+# ============================================================================
+
+EXTENDED_MAGIC_SIGNATURES = {
+    # Изображения
+    b'\x89PNG\r\n\x1a\n': ('.png', 'PNG Image', 'image/png'),
+    b'\xff\xd8\xff': ('.jpg', 'JPEG Image', 'image/jpeg'),
+    b'GIF87a': ('.gif', 'GIF 87a', 'image/gif'),
+    b'GIF89a': ('.gif', 'GIF 89a', 'image/gif'),
+    b'BM': ('.bmp', 'BMP Image', 'image/bmp'),
+    b'\x00\x00\x01\x00': ('.ico', 'Windows Icon', 'image/x-icon'),
+    b'\x00\x00\x02\x00': ('.cur', 'Windows Cursor', 'image/x-cursor'),
+    b'II*\x00': ('.tif', 'TIFF Little Endian', 'image/tiff'),
+    b'MM\x00*': ('.tif', 'TIFF Big Endian', 'image/tiff'),
+    b'WEBP': ('.webp', 'WebP Image', 'image/webp'),
+    b'\x00\x00\x00\x0c\x00\x00\x00\x01': ('.jp2', 'JPEG 2000', 'image/jp2'),
+    b'\xff\x4f\xff\x51': ('.jpx', 'JPEG 2000 Extended', 'image/jpx'),
+    b'SID': ('.sid', 'MrSID Image', 'image/x-mrsid'),
+    b'\x76\x2f\x31\x01': ('.exr', 'OpenEXR', 'image/x-exr'),
+    b'\xdd\x44\x44\x49': ('.dds', 'DirectDraw Surface', 'image/x-dds'),
+    b'P1': ('.pbm', 'PBM Image', 'image/x-portable-bitmap'),
+    b'P2': ('.pgm', 'PGM Image', 'image/x-portable-graymap'),
+    b'P3': ('.ppm', 'PPM Image', 'image/x-portable-pixmap'),
+    b'P4': ('.pbm', 'PBM Binary', 'image/x-portable-bitmap'),
+    b'P5': ('.pgm', 'PGM Binary', 'image/x-portable-graymap'),
+    b'P6': ('.ppm', 'PPM Binary', 'image/x-portable-pixmap'),
+    b'P7': ('.pam', 'PAM Image', 'image/x-portable-anymap'),
+    b'QOI': ('.qoi', 'Quite OK Image', 'image/x-qoi'),
+    b'\x58\x42\x45\x52': ('.xbm', 'X BitMap', 'image/x-xbitmap'),
+    b'\x58\x50\x4d\x20': ('.xpm', 'X PixMap', 'image/x-xpixmap'),
+    b'\x49\x49\x52\x4f': ('.orf', 'Olympus RAW', 'image/x-olympus-orf'),
+    b'\x46\x55\x4a\x49': ('.raf', 'Fujifilm RAW', 'image/x-fuji-raf'),
+    b'\x4e\x45\x46': ('.nef', 'Nikon RAW', 'image/x-nikon-nef'),
+    b'\x43\x52\x32': ('.cr2', 'Canon RAW v2', 'image/x-canon-cr2'),
+    b'\x49\x49\x55\x00': ('.cr3', 'Canon RAW v3', 'image/x-canon-cr3'),
+    b'\x73\x72\x32\x00': ('.arw', 'Sony RAW', 'image/x-sony-arw'),
+    b'\x50\x45\x54': ('.ptx', 'Pentax RAW', 'image/x-pentax-ptx'),
+
+    # Документы
+    b'%PDF': ('.pdf', 'PDF Document', 'application/pdf'),
+    b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1': ('.doc', 'MS Office 97-2003', 'application/msword'),
+    b'PK\x03\x04': (
+        '.docx', 'MS Office 2007+', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+    b'PK\x03\x04': ('.xlsx', 'MS Excel 2007+', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+    b'PK\x03\x04': (
+        '.pptx', 'MS PowerPoint 2007+', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'),
+    b'{\\rtf': ('.rtf', 'Rich Text Format', 'application/rtf'),
+    b'\x09\x00\x00\x00\x02\x00': ('.xls', 'MS Excel 97-2003', 'application/vnd.ms-excel'),
+    b'\xa0\x46\x1d\xf0': ('.ppt', 'MS PowerPoint 97-2003', 'application/vnd.ms-powerpoint'),
+    b'\x50\x4b\x03\x04\x14\x00\x06\x00': ('.odt', 'OpenDocument Text', 'application/vnd.oasis.opendocument.text'),
+    b'\x50\x4b\x03\x04\x14\x00\x06\x00': (
+        '.ods', 'OpenDocument Spreadsheet', 'application/vnd.oasis.opendocument.spreadsheet'),
+    b'\x50\x4b\x03\x04\x14\x00\x06\x00': (
+        '.odp', 'OpenDocument Presentation', 'application/vnd.oasis.opendocument.presentation'),
+    b'\xef\xbb\xbf': ('.txt', 'UTF-8 Text', 'text/plain'),
+    b'\xff\xfe': ('.txt', 'UTF-16 LE Text', 'text/plain'),
+    b'\xfe\xff': ('.txt', 'UTF-16 BE Text', 'text/plain'),
+    b'\x00\x00\xfe\xff': ('.txt', 'UTF-32 BE Text', 'text/plain'),
+    b'\xff\xfe\x00\x00': ('.txt', 'UTF-32 LE Text', 'text/plain'),
+
+    # Архивы
+    b'PK\x03\x04': ('.zip', 'ZIP Archive', 'application/zip'),
+    b'PK\x05\x06': ('.zip', 'ZIP Empty', 'application/zip'),
+    b'PK\x07\x08': ('.zip', 'ZIP Spanned', 'application/zip'),
+    b'Rar!': ('.rar', 'RAR Archive', 'application/vnd.rar'),
+    b'Rar!\x1a\x07\x00': ('.rar', 'RAR v5', 'application/vnd.rar'),
+    b'7z\xbc\xaf': ('.7z', '7-Zip Archive', 'application/x-7z-compressed'),
+    b'\x1f\x8b\x08': ('.gz', 'GZIP Compressed', 'application/gzip'),
+    b'BZh': ('.bz2', 'BZIP2 Compressed', 'application/x-bzip2'),
+    b'\xfd7zXZ\x00': ('.xz', 'XZ Compressed', 'application/x-xz'),
+    b'\x28\xb5\x2f\xfd': ('.zst', 'Zstandard', 'application/zstd'),
+    b'ISO': ('.iso', 'ISO Disk Image', 'application/x-iso9660-image'),
+    b'\x43\x44\x30\x30\x31': ('.iso', 'CD/DVD Image', 'application/x-iso9660-image'),
+    b'\x44\x49\x43\x4d': ('.dmg', 'Apple Disk Image', 'application/x-apple-diskimage'),
+    b'\x78\x01': ('.zlib', 'ZLIB Compressed', 'application/zlib'),
+    b'\x4c\x5a\x49\x50': ('.lz', 'LZIP Compressed', 'application/x-lzip'),
+    b'\x58\x50\x43\x4f\x4d': ('.lzma', 'LZMA Compressed', 'application/x-lzma'),
+    b'\x21\x3c\x61\x72\x63\x68\x3e': ('.deb', 'Debian Package', 'application/vnd.debian.binary-package'),
+    b'\xce\xfa\xed\xfe': ('.rpm', 'RPM Package', 'application/x-rpm'),
+
+    # Исполняемые файлы
+    b'MZ': ('.exe', 'Windows Executable', 'application/x-dosexec'),
+    b'MZ\x90\x00\x03\x00': ('.dll', 'Windows DLL', 'application/x-dosexec'),
+    b'MZ\x90\x00\x03\x00\x00\x00\x04\x00': ('.sys', 'Windows Driver', 'application/x-dosexec'),
+    b'\x7fELF': ('.elf', 'ELF Executable', 'application/x-executable'),
+    b'\xca\xfe\xba\xbe': ('.class', 'Java Class', 'application/java-vm'),
+    b'\xca\xfe\xba\xbe': ('.jar', 'Java Archive', 'application/java-archive'),
+    b'\xfe\xed\xfa\xce': ('.macho', 'Mach-O 32-bit', 'application/x-mach-binary'),
+    b'\xfe\xed\xfa\xcf': ('.macho', 'Mach-O 64-bit', 'application/x-mach-binary'),
+    b'\xcf\xfa\xed\xfe': ('.macho', 'Mach-O Fat', 'application/x-mach-binary'),
+    b'\x23\x21': ('.sh', 'Shell Script', 'application/x-sh'),
+    b'\x23\x21\x2f': ('.py', 'Python Script', 'text/x-python'),
+    b'\x23\x21\x2f\x75\x73\x72\x2f\x62\x69\x6e': ('.pl', 'Perl Script', 'text/x-perl'),
+    b'\x23\x21\x2f\x62\x69\x6e': ('.sh', 'Bash Script', 'application/x-sh'),
+
+    # Аудио/Видео
+    b'RIFF': ('.wav', 'WAV Audio', 'audio/wav'),
+    b'RIFF....WAVE': ('.wav', 'WAV Audio', 'audio/wav'),
+    b'\xff\xfb': ('.mp3', 'MP3 Audio', 'audio/mpeg'),
+    b'\xff\xfa': ('.mp3', 'MP3 Audio', 'audio/mpeg'),
+    b'\xff\xf3': ('.mp3', 'MP3 Audio', 'audio/mpeg'),
+    b'\xff\xf2': ('.mp3', 'MP3 Audio', 'audio/mpeg'),
+    b'ID3': ('.mp3', 'MP3 with ID3', 'audio/mpeg'),
+    b'OggS': ('.ogg', 'OGG Audio', 'audio/ogg'),
+    b'fLaC': ('.flac', 'FLAC Audio', 'audio/flac'),
+    b'\x30\x26\xb2\x75\x8e\x66\xcf\x11': ('.wma', 'Windows Media Audio', 'audio/x-ms-wma'),
+    b'\x30\x26\xb2\x75\x8e\x66\xcf\x11': ('.wmv', 'Windows Media Video', 'video/x-ms-wmv'),
+    b'\x00\x00\x00\x18ftypmp4': ('.mp4', 'MP4 Video', 'video/mp4'),
+    b'\x00\x00\x00\x1cftypmp4': ('.mp4', 'MP4 Video', 'video/mp4'),
+    b'\x00\x00\x00\x20ftypisom': ('.mp4', 'MP4 ISO', 'video/mp4'),
+    b'\x00\x00\x00\x14ftyp': ('.mp4', 'MP4 Generic', 'video/mp4'),
+    b'\x00\x00\x00\x18ftypM4V': ('.m4v', 'M4V Video', 'video/x-m4v'),
+    b'\x00\x00\x00\x18ftypM4A': ('.m4a', 'M4A Audio', 'audio/mp4'),
+    b'\x1a\x45\xdf\xa3': ('.mkv', 'Matroska', 'video/x-matroska'),
+    b'\x00\x00\x01\x00': ('.avi', 'AVI Video', 'video/x-msvideo'),
+    b'AVI ': ('.avi', 'AVI Video', 'video/x-msvideo'),
+    b'\x46\x4c\x56\x01': ('.flv', 'Flash Video', 'video/x-flv'),
+    b'\x00\x00\x00\x14ftyp3g': ('.3gp', '3GP Video', 'video/3gpp'),
+    b'\x00\x00\x00\x14ftyp3g': ('.3g2', '3G2 Video', 'video/3gpp2'),
+    b'\x52\x54\x53\x50': ('.rts', 'RealText', 'application/x-realtext'),
+    b'\x2e\x52\x45\x43': ('.rm', 'RealMedia', 'application/vnd.rn-realmedia'),
+    b'\x49\x49\x52\x4f\x08\x00\x00\x00': ('.orf', 'Olympus ORF', 'image/x-olympus-orf'),
+
+    # Базы данных
+    b'\x53\x51\x4c\x69\x74\x65\x20\x66\x6f\x72\x6d\x61\x74\x20\x33\x00': (
+        '.sqlite', 'SQLite 3', 'application/x-sqlite3'),
+    b'\x53\x51\x4c\x69\x74\x65\x20\x66\x6f\x72\x6d\x61\x74\x20\x32\x00': (
+        '.sqlite', 'SQLite 2', 'application/x-sqlite3'),
+    b'\x00\x06\x15\x61': ('.mdb', 'MS Access', 'application/x-msaccess'),
+    b'\x00\x01\x00\x00\x53\x74\x61\x6e': ('.mdf', 'SQL Server', 'application/x-sql-server'),
+    b'\x4d\x59\x53\x51': ('.myd', 'MySQL Data', 'application/x-myisam'),
+    b'\xfe\x07\x01\x00': ('.fp7', 'FileMaker Pro', 'application/vnd.filemaker.fmp12'),
+
+    # Диск-образы
+    b'\x56\x4d\x44\x4b': ('.vmdk', 'VMware Disk', 'application/x-vmware-vmdk'),
+    b'\x63\x69\x72\x63\x6f\x76': ('.vdi', 'VirtualBox Disk', 'application/x-virtualbox-vdi'),
+    b'\x78\x65\x6e\x63\x6f\x6e\x65\x63\x74': ('.vhd', 'Virtual PC Disk', 'application/x-virtualpc-vhd'),
+    b'\x76\x68\x64\x78\x66\x69\x6c\x65': ('.vhdx', 'Hyper-V Disk', 'application/x-hyper-v-vhdx'),
+    b'\x46\x49\x4c\x45': ('.raw', 'Raw Disk Image', 'application/x-raw-disk-image'),
+    b'\x45\x56\x46\x09\x0d\x0a\xff\x00': ('.evtx', 'Windows Event Log', 'application/x-evtx'),
+
+    # Шифрованные файлы
+    b'\x8d\x11\x36\x00': ('.gpg', 'GPG Encrypted', 'application/pgp-encrypted'),
+    b'\xc0\x17\xcf\x13': ('.pgp', 'PGP Encrypted', 'application/pgp-encrypted'),
+    b'\x53\x61\x6c\x74\x65\x64\x5f\x5f': ('.enc', 'OpenSSL Encrypted', 'application/x-openssl'),
+    b'\x41\x45\x53\x00': ('.aes', 'AES Encrypted', 'application/x-aes'),
+    b'\x56\x65\x72\x61\x43\x72\x79\x70\x74': ('.vcr', 'VeraCrypt', 'application/x-veracrypt'),
+    b'\x42\x4c\x46\x48': ('.blf', 'BitLocker', 'application/x-bitlocker'),
+
+    # Мобильные
+    b'\x62\x70\x6c\x69\x73\x74': ('.plist', 'Apple Property List', 'application/x-plist'),
+    b'\x61\x74\x74\x61\x63\x68\x65\x64\x5f\x64\x61\x74\x61\x62\x61\x73\x65': (
+        '.db', 'iOS Attached DB', 'application/x-sqlite3'),
+    b'\x41\x6e\x64\x72\x6f\x69\x64': ('.apk', 'Android Package', 'application/vnd.android.package-archive'),
+    b'\x49\x50\x48\x4f\x4e\x45': ('.ipa', 'iOS App', 'application/x-ios-app'),
+    b'\x6d\x65\x73\x73\x61\x67\x65\x73\x2e\x64\x62': ('.db', 'SMS Database', 'application/x-sqlite3'),
+
+    # Лог-файлы
+    b'\x4c\x6f\x67\x20\x46\x69\x6c\x65\x00': ('.evtx', 'Windows Event', 'application/x-evtx'),
+    b'\x23\x20\x53\x79\x73\x74\x65\x6d': ('.log', 'System Log', 'text/plain'),
+    b'\x3c\x3f\x78\x6d\x6c': ('.xml', 'XML Log', 'application/xml'),
+    b'\x7b\x0a\x20\x20\x22': ('.json', 'JSON Log', 'application/json'),
+
+    # Специальные
+    b'\x00\x00\x00\x00\x00\x00\x00\x00': ('.null', 'Null/Empty', 'application/octet-stream'),
+    b'\xff\xff\xff\xff\xff\xff\xff\xff': ('.fill', 'Filled', 'application/octet-stream'),
+}
+
+# ============================================================================
+# СЛОВАРЬ ДЛЯ PASSPHRASE ГЕНЕРАТОРА (Русский + English)
+# ============================================================================
+
+PASSPHRASE_WORDS_RU = [
+    'лес', 'гора', 'река', 'море', 'небо', 'звезда', 'луна', 'солнце',
+    'ветер', 'огонь', 'вода', 'земля', 'камень', 'дерево', 'цветок',
+    'птица', 'рыба', 'зверь', 'дом', 'город', 'путь', 'мост', 'ключ',
+    'дверь', 'окно', 'стол', 'книга', 'ручка', 'бумага', 'время',
+    'день', 'ночь', 'утро', 'вечер', 'год', 'месяц', 'неделя',
+    'счастье', 'радость', 'любовь', 'дружба', 'семья', 'работа',
+    'мечта', 'цель', 'план', 'идея', 'мысль', 'слово', 'звук',
+    'свет', 'тьма', 'цвет', 'форма', 'размер', 'вес', 'скорость',
+    'сила', 'мощь', 'энергия', 'жизнь', 'смерть', 'рождение',
+    'начало', 'конец', 'центр', 'край', 'верх', 'низ', 'лево', 'право'
+]
+
+PASSPHRASE_WORDS_EN = [
+    'forest', 'mountain', 'river', 'ocean', 'sky', 'star', 'moon', 'sun',
+    'wind', 'fire', 'water', 'earth', 'stone', 'tree', 'flower',
+    'bird', 'fish', 'animal', 'house', 'city', 'road', 'bridge', 'key',
+    'door', 'window', 'table', 'book', 'pen', 'paper', 'time',
+    'day', 'night', 'morning', 'evening', 'year', 'month', 'week',
+    'happy', 'joy', 'love', 'friend', 'family', 'work',
+    'dream', 'goal', 'plan', 'idea', 'thought', 'word', 'sound',
+    'light', 'dark', 'color', 'shape', 'size', 'weight', 'speed',
+    'power', 'energy', 'life', 'death', 'birth',
+    'start', 'end', 'center', 'edge', 'top', 'bottom', 'left', 'right'
+]
+
+
+# ============================================================================
+# КЛАСС IBToolsTab - УЛУЧШЕННАЯ ВЕРСИЯ
+# ============================================================================
+
 class IBToolsTab:
     """
-    Набор независимых инструментов для специалиста ИБ:
-    1. Калькулятор хешей (с копированием любого алгоритма и вставкой текста)
-    2. Генератор паролей (расширенная конфигурация символов)
-    3. Валидатор сигнатур (анти-спуфинг)
-    4. Кодировщик (с кнопкой вставки и Ctrl+V)
+    Профессиональный набор инструментов для специалиста ИБ (Версия 2.0 Pro)
+
+    Инструменты:
+    1.  Калькулятор хешей (12+ алгоритмов, пакетное хеширование, сравнение)
+    2.  Генератор паролей (8 типов, проверка стойкости, passphrase)
+    3.  Валидатор сигнатур (100+ форматов, carving, PE/ELF анализ)
+    4.  Кодировщик (10+ кодировок, файлы, пакетная обработка)
+    5.  Метаданные (EXIF, IPTC, XMP, Office, PDF, миниатюры)
+    6.  Анализ энтропии (обнаружение шифрования/сжатия)
+    7.  Извлечение строк (regex, Unicode, экспорт)
+    8.  Стеганоанализ (RS-анализ, chi-square, визуальный)
+    9.  PE-анализатор (заголовки, секции, импорты, экспорты)
+    10. Архив-анализатор (содержимое без распаковки)
+    11. Генератор UUID/GUID (все версии, RFC 4122)
+    12. Конвертер времени Unix (все форматы, часовые пояса)
+    13. IP/Domain инструменты (валидация, конвертация)
     """
 
-    MAGIC_SIGNATURES = {
-        b'\x89PNG\r\n\x1a\n': '.png',
-        b'\xff\xd8\xff': '.jpg',
-        b'GIF87a': '.gif',
-        b'GIF89a': '.gif',
-        b'BM': '.bmp',
-        b'PK\x03\x04': '.zip',
-        b'PK\x05\x06': '.zip',
-        b'PK\x07\x08': '.zip',
-        b'Rar!': '.rar',
-        b'7z\xbc\xaf': '.7z',
-        b'%PDF': '.pdf',
-        b'\x7fELF': '.elf',
-        b'MZ': '.exe',
-        b'\x00\x00\x00\x18ftypmp4': '.mp4',
-        b'\x00\x00\x00\x1cftypmp4': '.mp4',
-        b'RIFF': '.wav',
-        b'\x00\x00\x00\x20ftypisom': '.mp4',
-        b'\x00\x00\x00\x14ftyp': '.mp4'
+    # Классные переменные для кэширования
+    _metadata_cache: Dict[str, Tuple[dict, float]] = {}
+    _hash_history: List[dict] = []
+    _password_history: List[dict] = []
+    _CACHE_TTL = 300  # 5 минут
+
+    # Расширенные алгоритмы хеширования
+    HASH_ALGORITHMS = [
+        'md5', 'sha1', 'sha224', 'sha256', 'sha384', 'sha512',
+        'sha3_256', 'sha3_512', 'blake2b', 'blake2s', 'ripemd160'
+    ]
+
+    # Уровни безопасности паролей
+    PASSWORD_STRENGTH = {
+        0: ('Очень слабый', '#ff4444'),
+        1: ('Слабый', '#ff8800'),
+        2: ('Средний', '#ffcc00'),
+        3: ('Хороший', '#88cc00'),
+        4: ('Очень хороший', '#44cc44')
     }
 
     def __init__(self, parent, app):
         self.parent = parent
-        self.log_manager = HistoryLog()
         self.app = app
         self.colors = app.colors
+        self.log_manager = getattr(app, 'log_manager', None)
+
+        # Переменные для инструментов
+        self.hash_variables = {}
+        self.password_variables = {}
+        self.encoding_variables = {}
+        self.metadata_variables = {}
+
         self.setup_ui()
 
     def setup_ui(self):
-        """Создает интерфейс вкладки с 4 инструментами"""
-        self.tools_notebook = ttk.Notebook(self.parent, style="TNotebook")
-        self.tools_notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        """Создает улучшенный интерфейс вкладки с 13 инструментами"""
+        # Основной контейнер с прокруткой
+        main_canvas = tk.Canvas(self.parent, bg=self.colors["bg"], highlightthickness=0)
+        main_scrollbar = ttk.Scrollbar(self.parent, orient="vertical", command=main_canvas.yview)
+        scrollable_frame = ttk.Frame(main_canvas, style="Card.TFrame")
 
-        # 1. Хеш-калькулятор
-        self.hash_frame = ttk.Frame(self.tools_notebook, style="Card.TFrame")
-        self.tools_notebook.add(self.hash_frame, text="🔐 Хеш-суммы")
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+        )
+
+        main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        main_canvas.configure(yscrollcommand=main_scrollbar.set)
+
+        main_canvas.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        main_scrollbar.pack(side="right", fill="y")
+
+        # Привязка колёсика мыши
+        def _on_mousewheel(event):
+            main_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Заголовок вкладки
+        header_frame = ttk.Frame(scrollable_frame, style="Card.TFrame")
+        header_frame.pack(fill=tk.X, pady=(0, 15))
+
+        ttk.Label(
+            header_frame,
+            text="🛡️ Инструменты Информационной Безопасности Pro",
+            font=("Segoe UI", 18, "bold"),
+            foreground=self.colors["accent"]
+        ).pack(anchor="w")
+
+        ttk.Label(
+            header_frame,
+            text="Профессиональный набор утилит для цифровой криминалистики и анализа безопасности",
+            style="Secondary.TLabel"
+        ).pack(anchor="w", pady=(5, 0))
+
+        # Создаем Notebook для группировки инструментов
+        tools_notebook = ttk.Notebook(scrollable_frame, style="TNotebook")
+        tools_notebook.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+
+        # === ГРУППА 1: КРИПТОГРАФИЯ ===
+        crypto_frame = ttk.Frame(tools_notebook, style="Card.TFrame")
+        tools_notebook.add(crypto_frame, text="🔐 Криптография")
+        crypto_notebook = ttk.Notebook(crypto_frame, style="TNotebook")
+        crypto_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Хеш-калькулятор
+        self.hash_frame = ttk.Frame(crypto_notebook, style="Card.TFrame")
+        crypto_notebook.add(self.hash_frame, text="🔐 Хеш-калькулятор")
         self.create_hash_tool()
 
-        # 2. Генератор паролей
-        self.pass_frame = ttk.Frame(self.tools_notebook, style="Card.TFrame")
-        self.tools_notebook.add(self.pass_frame, text="🔑 Генератор паролей")
+        # Генератор паролей
+        self.pass_frame = ttk.Frame(crypto_notebook, style="Card.TFrame")
+        crypto_notebook.add(self.pass_frame, text="🔑 Генератор паролей")
         self.create_password_tool()
 
-        # 3. Валидатор сигнатур
-        self.sig_frame = ttk.Frame(self.tools_notebook, style="Card.TFrame")
-        self.tools_notebook.add(self.sig_frame, text="🕵️ Валидатор сигнатур")
+        # UUID/GUID генератор
+        self.uuid_frame = ttk.Frame(crypto_notebook, style="Card.TFrame")
+        crypto_notebook.add(self.uuid_frame, text="🆔 Генератор UUID/GUID")
+        self.create_uuid_tool()
+
+        # === ГРУППА 2: АНАЛИЗ ФАЙЛОВ ===
+        analysis_frame = ttk.Frame(tools_notebook, style="Card.TFrame")
+        tools_notebook.add(analysis_frame, text="🔬 Анализ файлов")
+        analysis_notebook = ttk.Notebook(analysis_frame, style="TNotebook")
+        analysis_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Валидатор сигнатур
+        self.sig_frame = ttk.Frame(analysis_notebook, style="Card.TFrame")
+        analysis_notebook.add(self.sig_frame, text="🕵️ Валидатор сигнатур")
         self.create_signature_tool()
 
-        # 4. Кодировщик
-        self.enc_frame = ttk.Frame(self.tools_notebook, style="Card.TFrame")
-        self.tools_notebook.add(self.enc_frame, text="🔣 Кодировщик")
+        # Анализ энтропии
+        self.entropy_frame = ttk.Frame(analysis_notebook, style="Card.TFrame")
+        analysis_notebook.add(self.entropy_frame, text="📊 Анализ энтропии")
+        self.create_entropy_tool()
+
+        # Извлечение строк
+        self.strings_frame = ttk.Frame(analysis_notebook, style="Card.TFrame")
+        analysis_notebook.add(self.strings_frame, text="🔤 Извлечение строк")
+        self.create_strings_tool()
+
+        # PE-анализатор
+        self.pe_frame = ttk.Frame(analysis_notebook, style="Card.TFrame")
+        analysis_notebook.add(self.pe_frame, text="💾 PE-анализатор")
+        self.create_pe_tool()
+
+        # Архив-анализатор
+        self.archive_frame = ttk.Frame(analysis_notebook, style="Card.TFrame")
+        analysis_notebook.add(self.archive_frame, text="📦 Архив-анализатор")
+        self.create_archive_tool()
+
+        # === ГРУППА 3: ДАННЫЕ И КОДИРОВАНИЕ ===
+        data_frame = ttk.Frame(tools_notebook, style="Card.TFrame")
+        tools_notebook.add(data_frame, text="🔄 Данные и кодирование")
+        data_notebook = ttk.Notebook(data_frame, style="TNotebook")
+        data_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # Кодировщик
+        self.enc_frame = ttk.Frame(data_notebook, style="Card.TFrame")
+        data_notebook.add(self.enc_frame, text="🔣 Кодировщик")
         self.create_encoding_tool()
 
-        # 5. Извлекатель метаданных (НОВЫЙ)
-        self.meta_tool_frame = ttk.Frame(self.tools_notebook, style="Card.TFrame")
-        self.tools_notebook.add(self.meta_tool_frame, text="🔍 Метаданные")
+        # Метаданные
+        self.meta_frame = ttk.Frame(data_notebook, style="Card.TFrame")
+        data_notebook.add(self.meta_frame, text="🔍 Метаданные")
         self.create_metadata_tool()
 
-    # ───────────────────────────────────────────────
-    # 1. ИНСТРУМЕНТ: ХЕШ-КАЛЬКУЛЯТОР
-    # ───────────────────────────────────────────────
+        # Конвертер времени
+        self.time_frame = ttk.Frame(data_notebook, style="Card.TFrame")
+        data_notebook.add(self.time_frame, text="⏱️ Конвертер времени")
+        self.create_time_tool()
+
+        # === ГРУППА 4: СЕТЕВЫЕ ИНСТРУМЕНТЫ ===
+        network_frame = ttk.Frame(tools_notebook, style="Card.TFrame")
+        tools_notebook.add(network_frame, text="🌐 Сетевые инструменты")
+        network_notebook = ttk.Notebook(network_frame, style="TNotebook")
+        network_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+        # IP/Domain инструменты
+        self.ip_frame = ttk.Frame(network_notebook, style="Card.TFrame")
+        network_notebook.add(self.ip_frame, text="🌐 IP/Domain")
+        self.create_ip_tool()
+
+        # Стеганоанализ
+        self.steg_frame = ttk.Frame(network_notebook, style="Card.TFrame")
+        network_notebook.add(self.steg_frame, text="🔎 Стеганоанализ")
+        self.create_steganalysis_tool()
+
+        # История операций
+        self.history_frame = ttk.Frame(scrollable_frame, style="Card.TFrame")
+        self.history_frame.pack(fill=tk.X, pady=(15, 0))
+        self.create_history_panel()
+
+    # =========================================================================
+    # 1. ХЕШ-КАЛЬКУЛЯТОР (УЛУЧШЕННЫЙ)
+    # =========================================================================
+
     def create_hash_tool(self):
-        """Инструмент расчета хеш-сумм с копированием и вставкой"""
-        # Выбор файла
-        file_frame = ttk.LabelFrame(self.hash_frame, text="📂 Файл", padding=10, style="Card.TLabelframe")
+        """Создаёт улучшенный хеш-калькулятор с пакетным хешированием"""
+        # Выбор файлов
+        file_frame = ttk.LabelFrame(self.hash_frame, text="📂 Файлы для хеширования", padding=10)
         file_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        self.hash_file_path = tk.StringVar()
-        file_entry = ttk.Entry(file_frame, textvariable=self.hash_file_path, state='readonly', style="TEntry")
-        file_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        self.hash_file_list = []
+        file_listbox_frame = ttk.Frame(file_frame)
+        file_listbox_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10))
 
-        ttk.Button(file_frame, text="📂 Обзор", command=self.select_hash_file).pack(side=tk.LEFT)
-        ttk.Button(file_frame, text="🗑️ Очистить", command=lambda: self.hash_file_path.set("")).pack(side=tk.LEFT,
-                                                                                                     padx=5)
+        self.hash_file_listbox = tk.Listbox(
+            file_listbox_frame,
+            height=6,
+            font=("Consolas", 9),
+            selectmode=tk.EXTENDED
+        )
+        hash_scrollbar = ttk.Scrollbar(file_listbox_frame, orient="vertical", command=self.hash_file_listbox.yview)
+        self.hash_file_listbox.configure(yscrollcommand=hash_scrollbar.set)
+
+        self.hash_file_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        hash_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        file_btn_frame = ttk.Frame(file_frame)
+        file_btn_frame.pack(fill=tk.X)
+
+        ttk.Button(file_btn_frame, text="📂 Добавить файлы", command=self.select_hash_files).pack(side=tk.LEFT, padx=2)
+        ttk.Button(file_btn_frame, text="📁 Добавить папку", command=self.select_hash_folder).pack(side=tk.LEFT, padx=2)
+        ttk.Button(file_btn_frame, text="🗑️ Удалить выбранное", command=self.remove_hash_files).pack(side=tk.LEFT,
+                                                                                                     padx=2)
+        ttk.Button(file_btn_frame, text="🗑️ Очистить всё", command=self.clear_hash_files).pack(side=tk.LEFT, padx=2)
 
         # Текст для хеширования
-        text_frame = ttk.LabelFrame(self.hash_frame, text="📝 Или текст (Ctrl+V для вставки)", padding=10,
-                                    style="Card.TLabelframe")
-        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        text_frame = ttk.LabelFrame(self.hash_frame, text="📝 Или текст", padding=10)
+        text_frame.pack(fill=tk.X, padx=10, pady=10)
 
-        text_toolbar = ttk.Frame(text_frame, style="Card.TFrame")
-        text_toolbar.pack(fill=tk.X, pady=(0, 5))
-
-        ttk.Button(text_toolbar, text="📋 Вставить", style="IconButton.TButton",
-                   command=self.paste_hash_text).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(text_toolbar, text="🗑️ Очистить", style="IconButton.TButton",
-                   command=lambda: self.hash_text_input.delete("1.0", tk.END)).pack(side=tk.LEFT)
-
-        self.hash_text_input = scrolledtext.ScrolledText(text_frame, height=5, font=("Consolas", 10),
-                                                         bg=self.colors["card"], fg=self.colors["text"])
+        self.hash_text_input = scrolledtext.ScrolledText(
+            text_frame,
+            height=4,
+            font=("Consolas", 10),
+            bg=self.colors["card"],
+            fg=self.colors["text"]
+        )
         self.hash_text_input.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-        self.hash_text_input.bind("<Control-v>", lambda e: self.paste_hash_text())
-        self.hash_text_input.bind("<KeyRelease>", lambda e: self.auto_calculate_hashes())
+
+        # Выбор алгоритмов
+        algo_frame = ttk.LabelFrame(self.hash_frame, text="🔐 Алгоритмы", padding=10)
+        algo_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.hash_algos_vars = {}
+        algo_container = ttk.Frame(algo_frame)
+        algo_container.pack(fill=tk.X)
+
+        for i, algo in enumerate(self.HASH_ALGORITHMS):
+            var = tk.BooleanVar(value=True if algo in ['md5', 'sha256', 'sha512'] else False)
+            self.hash_algos_vars[algo] = var
+            chk = ttk.Checkbutton(algo_container, text=algo.upper(), variable=var)
+            chk.grid(row=i // 4, column=i % 4, sticky="w", padx=5, pady=2)
+
+        # Сравнение с эталоном
+        compare_frame = ttk.LabelFrame(self.hash_frame, text="⚖️ Сравнение с эталоном", padding=10)
+        compare_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.hash_compare_var = tk.StringVar()
+        compare_entry = ttk.Entry(compare_frame, textvariable=self.hash_compare_var, width=80)
+        compare_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        ttk.Button(compare_frame, text="🔍 Сравнить", command=self.compare_hash).pack(side=tk.LEFT)
 
         # Результаты
-        res_frame = ttk.LabelFrame(self.hash_frame, text="🔐 Результаты", padding=10, style="Card.TLabelframe")
+        res_frame = ttk.LabelFrame(self.hash_frame, text="📊 Результаты", padding=10)
         res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        columns = ("Алгоритм", "Хеш", "Действие")
-        self.hash_tree = ttk.Treeview(res_frame, columns=columns, show="headings", height=8, style="Treeview")
-        self.hash_tree.heading("Алгоритм", text="Алгоритм")
-        self.hash_tree.heading("Хеш", text="Хеш")
-        self.hash_tree.heading("Действие", text="Действие")
+        columns = ("Файл", "Алгоритм", "Хеш", "Статус")
+        self.hash_tree = ttk.Treeview(res_frame, columns=columns, show="headings", height=10)
 
+        for col in columns:
+            self.hash_tree.heading(col, text=col)
+
+        self.hash_tree.column("Файл", width=200, anchor=tk.W)
         self.hash_tree.column("Алгоритм", width=100, anchor=tk.CENTER)
         self.hash_tree.column("Хеш", width=400, anchor=tk.W)
-        self.hash_tree.column("Действие", width=100, anchor=tk.CENTER)
+        self.hash_tree.column("Статус", width=80, anchor=tk.CENTER)
 
-        scroll_y = ttk.Scrollbar(res_frame, orient="vertical", command=self.hash_tree.yview)
-        self.hash_tree.configure(yscrollcommand=scroll_y.set)
+        hash_scroll_y = ttk.Scrollbar(res_frame, orient="vertical", command=self.hash_tree.yview)
+        self.hash_tree.configure(yscrollcommand=hash_scroll_y.set)
 
         self.hash_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+        hash_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
 
-        btn_frame = ttk.Frame(self.hash_frame, style="Card.TFrame")
+        # Кнопки действий
+        btn_frame = ttk.Frame(self.hash_frame)
         btn_frame.pack(fill=tk.X, padx=10, pady=10)
-        ttk.Button(btn_frame, text="🚀 Рассчитать хеши", style="Accent.TButton", command=self.calculate_hashes).pack(
-            side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="📋 Копировать все", command=self.copy_all_hashes).pack(side=tk.LEFT, padx=5)
 
-    def select_hash_file(self):
-        """Выбирает файл для хеширования"""
-        path = filedialog.askopenfilename(
-            title="Выберите файл",
+        ttk.Button(btn_frame, text="🚀 Рассчитать хеши", style="Accent.TButton",
+                   command=self.calculate_hashes).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать выбранное", command=self.copy_hash_selected).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать всё", command=self.copy_all_hashes).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📤 Экспорт", command=self.export_hashes).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📚 История", command=self.show_hash_history).pack(side=tk.LEFT, padx=5)
+
+    def select_hash_files(self):
+        """Выбирает несколько файлов для хеширования"""
+        files = filedialog.askopenfilenames(
+            title="Выберите файлы",
             filetypes=[("Все файлы", "*.*")],
-            initialdir=self.app.last_open_dir
+            initialdir=getattr(self.app, 'last_open_dir', os.path.expanduser("~"))
         )
-        if path:
-            self.hash_file_path.set(path)
-            self.app.last_open_dir = os.path.dirname(path)
-            self.calculate_hashes()
+        for f in files:
+            if f not in self.hash_file_list:
+                self.hash_file_list.append(f)
+                self.hash_file_listbox.insert(tk.END, os.path.basename(f))
+        if files:
+            setattr(self.app, 'last_open_dir', os.path.dirname(files[0]))
 
-    def paste_hash_text(self):
-        """Вставляет текст из буфера обмена"""
-        try:
-            text = self.root.clipboard_get()
-            self.hash_text_input.insert(tk.END, text)
-            self.auto_calculate_hashes()
-        except tk.TclError:
-            pass
+    def select_hash_folder(self):
+        """Выбирает папку для рекурсивного хеширования"""
+        folder = filedialog.askdirectory(
+            title="Выберите папку",
+            initialdir=getattr(self.app, 'last_open_dir', os.path.expanduser("~"))
+        )
+        if folder:
+            for root, dirs, files in os.walk(folder):
+                for f in files:
+                    path = os.path.join(root, f)
+                    if path not in self.hash_file_list:
+                        self.hash_file_list.append(path)
+                        self.hash_file_listbox.insert(tk.END, os.path.relpath(path, folder))
+            setattr(self.app, 'last_open_dir', folder)
 
-    def auto_calculate_hashes(self):
-        """Автоматически пересчитывает хеши при изменении текста"""
-        if hasattr(self, '_hash_auto_timer'):
-            self.root.after_cancel(self._hash_auto_timer)
-        self._hash_auto_timer = self.root.after(500, self.calculate_hashes)
+    def remove_hash_files(self):
+        """Удаляет выбранные файлы из списка"""
+        selection = self.hash_file_listbox.curselection()
+        for i in reversed(selection):
+            del self.hash_file_list[i]
+            self.hash_file_listbox.delete(i)
+
+    def clear_hash_files(self):
+        """Очищает весь список файлов"""
+        self.hash_file_list.clear()
+        self.hash_file_listbox.delete(0, tk.END)
 
     def calculate_hashes(self):
-        """Рассчитывает хеши с кнопками копирования для каждого"""
+        """Рассчитывает хеши для файлов и/или текста"""
+        # Очистка результатов
         for item in self.hash_tree.get_children():
             self.hash_tree.delete(item)
 
-        text_data = self.hash_text_input.get("1.0", tk.END).strip().encode('utf-8')
-        file_path = self.hash_file_path.get()
+        selected_algos = [algo for algo, var in self.hash_algos_vars.items() if var.get()]
+        if not selected_algos:
+            messagebox.showwarning("⚠️ Внимание", "Выберите хотя бы один алгоритм хеширования")
+            return
 
-        data = None
-        source = "Текст"
+        results = []
+        start_time = time.time()
 
-        if file_path and os.path.exists(file_path):
+        # Хеширование файлов
+        for file_path in self.hash_file_list:
+            if not os.path.exists(file_path):
+                continue
+
             try:
                 with open(file_path, 'rb') as f:
                     data = f.read()
-                source = f"Файл: {os.path.basename(file_path)}"
+
+                for algo in selected_algos:
+                    try:
+                        h = hashlib.new(algo)
+                        h.update(data)
+                        hex_digest = h.hexdigest()
+
+                        # Проверка на совпадение с эталоном
+                        status = "✅"
+                        if self.hash_compare_var.get():
+                            if hex_digest.lower() == self.hash_compare_var.get().lower():
+                                status = "✅ СОВПАДЕНИЕ"
+                            else:
+                                status = "❌ НЕТ"
+
+                        self.hash_tree.insert("", tk.END, values=(
+                            os.path.basename(file_path),
+                            algo.upper(),
+                            hex_digest,
+                            status
+                        ))
+                        results.append({
+                            'file': file_path,
+                            'algorithm': algo,
+                            'hash': hex_digest,
+                            'status': status,
+                            'timestamp': datetime.now().isoformat()
+                        })
+                    except Exception as e:
+                        self.hash_tree.insert("", tk.END, values=(
+                            os.path.basename(file_path),
+                            algo.upper(),
+                            f"Ошибка: {str(e)}",
+                            "❌"
+                        ))
             except Exception as e:
-                messagebox.showerror("Ошибка", f"Не удалось прочитать файл: {e}")
-                return
-        elif text_data:
-            data = text_data
-        else:
+                self.hash_tree.insert("", tk.END, values=(
+                    os.path.basename(file_path),
+                    "ERROR",
+                    str(e),
+                    "❌"
+                ))
+
+        # Хеширование текста
+        text_data = self.hash_text_input.get("1.0", tk.END).strip().encode('utf-8')
+        if text_data:
+            for algo in selected_algos:
+                try:
+                    h = hashlib.new(algo)
+                    h.update(text_data)
+                    hex_digest = h.hexdigest()
+
+                    status = "✅"
+                    if self.hash_compare_var.get():
+                        if hex_digest.lower() == self.hash_compare_var.get().lower():
+                            status = "✅ СОВПАДЕНИЕ"
+                        else:
+                            status = "❌ НЕТ"
+
+                    self.hash_tree.insert("", tk.END, values=(
+                        "[Текст]",
+                        algo.upper(),
+                        hex_digest,
+                        status
+                    ))
+                    results.append({
+                        'file': '[TEXT]',
+                        'algorithm': algo,
+                        'hash': hex_digest,
+                        'status': status,
+                        'timestamp': datetime.now().isoformat()
+                    })
+                except Exception as e:
+                    self.hash_tree.insert("", tk.END, values=(
+                        "[Текст]",
+                        algo.upper(),
+                        f"Ошибка: {str(e)}",
+                        "❌"
+                    ))
+
+        # Сохранение в историю
+        if results:
+            IBToolsTab._hash_history.extend(results)
+            if len(IBToolsTab._hash_history) > 1000:
+                IBToolsTab._hash_history = IBToolsTab._hash_history[-1000:]
+
+        elapsed = time.time() - start_time
+        getattr(self.app, 'show_toast', lambda x: None)(f"✅ Хеши рассчитаны за {elapsed:.2f}с")
+
+    def compare_hash(self):
+        """Сравнивает вычисленные хеши с эталоном"""
+        if not self.hash_compare_var.get():
+            messagebox.showwarning("⚠️ Внимание", "Введите хеш для сравнения")
             return
 
-        algorithms = ['md5', 'sha1', 'sha256', 'sha512']
-        hash_values = {}
+        self.calculate_hashes()
 
-        for algo in algorithms:
-            try:
-                h = hashlib.new(algo)
-                h.update(data)
-                hex_digest = h.hexdigest()
-                hash_values[algo] = hex_digest
-                self.hash_tree.insert("", tk.END, values=(algo.upper(), hex_digest, "📋 Копировать"), tags=(algo,))
-            except Exception as e:
-                self.hash_tree.insert("", tk.END, values=(algo.upper(), f"Ошибка: {e}", ""), tags=("error",))
+    def copy_hash_selected(self):
+        """Копирует выбранный хеш в буфер обмена"""
+        selection = self.hash_tree.selection()
+        if not selection:
+            messagebox.showwarning("⚠️ Внимание", "Выберите строку для копирования")
+            return
 
-        self.hash_tree.bind("<ButtonRelease-1>", lambda e: self.on_hash_click(e, hash_values))
-        self.app.show_toast(f"✅ Хешы рассчитаны ({source})")
-
-    def on_hash_click(self, event, hash_values):
-        """Обрабатывает клик по строке хеша для копирования"""
-        item = self.hash_tree.identify_row(event.y)
-        if item:
-            column = self.hash_tree.identify_column(event.x)
-            if column == '#3' or column == '#2':
-                algo = self.hash_tree.item(item, 'tags')[0]
-                if algo in hash_values:
-                    self.root.clipboard_clear()
-                    self.root.clipboard_append(hash_values[algo])
-                    self.app.show_toast(f"✅ {algo.upper()} скопирован")
+        item = self.hash_tree.item(selection[0])
+        values = item['values']
+        if len(values) >= 3:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(values[2])
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Хеш скопирован")
 
     def copy_all_hashes(self):
         """Копирует все хеши в буфер обмена"""
         text = ""
         for item in self.hash_tree.get_children():
-            vals = self.hash_tree.item(item, 'values')
-            if len(vals) >= 2:
-                text += f"{vals[0]}: {vals[1]}\n"
-        if text:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(text)
-            self.app.show_toast("✅ Все хеши скопированы")
+            values = self.hash_tree.item(item, 'values')
+            if len(values) >= 3:
+                text += f"{values[0]} ({values[1]}): {values[2]}\n"
 
-    # ───────────────────────────────────────────────
-    # 2. ИНСТРУМЕНТ: ГЕНЕРАТОР ПАРОЛЕЙ
-    # ───────────────────────────────────────────────
+        if text:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(text)
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Все хеши скопированы")
+
+    def export_hashes(self):
+        """Экспортирует результаты хеширования"""
+        if not self.hash_tree.get_children():
+            messagebox.showwarning("⚠️ Внимание", "Нет результатов для экспорта")
+            return
+
+        filetypes = [
+            ("JSON", "*.json"),
+            ("CSV", "*.csv"),
+            ("Текст", "*.txt")
+        ]
+
+        path = filedialog.asksaveasfilename(
+            title="Экспорт хешей",
+            defaultextension=".json",
+            filetypes=filetypes,
+            initialdir=getattr(self.app, 'last_save_dir', os.path.expanduser("~"))
+        )
+
+        if not path:
+            return
+
+        try:
+            ext = os.path.splitext(path)[1].lower()
+
+            if ext == '.json':
+                data = []
+                for item in self.hash_tree.get_children():
+                    values = self.hash_tree.item(item, 'values')
+                    data.append({
+                        'file': values[0],
+                        'algorithm': values[1],
+                        'hash': values[2],
+                        'status': values[3]
+                    })
+                with open(path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+
+            elif ext == '.csv':
+                with open(path, 'w', newline='', encoding='utf-8-sig') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(["Файл", "Алгоритм", "Хеш", "Статус"])
+                    for item in self.hash_tree.get_children():
+                        values = self.hash_tree.item(item, 'values')
+                        writer.writerow(values)
+
+            else:  # txt
+                with open(path, 'w', encoding='utf-8') as f:
+                    for item in self.hash_tree.get_children():
+                        values = self.hash_tree.item(item, 'values')
+                        f.write(f"{values[0]} ({values[1]}): {values[2]} [{values[3]}]\n")
+
+            setattr(self.app, 'last_save_dir', os.path.dirname(path))
+            getattr(self.app, 'show_toast', lambda x: None)(f"✅ Экспортировано в {os.path.basename(path)}")
+
+            if self.log_manager:
+                self.log_manager.add_entry("hash_export", "success", {"file": path, "format": ext})
+
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка", f"Не удалось экспортировать: {str(e)}")
+
+    def show_hash_history(self):
+        """Показывает историю хеширования"""
+        if not IBToolsTab._hash_history:
+            messagebox.showinfo("ℹ️ История", "История пуста")
+            return
+
+        history_window = tk.Toplevel(self.parent)
+        history_window.title("📚 История хеширования")
+        history_window.geometry("800x500")
+        history_window.transient(self.parent)
+
+        text = scrolledtext.ScrolledText(
+            history_window,
+            font=("Consolas", 9),
+            bg=self.colors["card"],
+            fg=self.colors["text"]
+        )
+        text.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        for entry in reversed(IBToolsTab._hash_history[-100:]):
+            text.insert(tk.END,
+                        f"{entry['timestamp']} | {entry['file']} | {entry['algorithm']} | {entry['hash'][:16]}...\n")
+
+        text.config(state='disabled')
+
+        ttk.Button(
+            history_window,
+            text="🗑️ Очистить историю",
+            command=lambda: self.clear_hash_history(history_window)
+        ).pack(pady=10)
+
+    def clear_hash_history(self, window):
+        """Очищает историю хеширования"""
+        IBToolsTab._hash_history.clear()
+        window.destroy()
+        getattr(self.app, 'show_toast', lambda x: None)("✅ История очищена")
+
+    # =========================================================================
+    # 2. ГЕНЕРАТОР ПАРОЛЕЙ (УЛУЧШЕННЫЙ)
+    # =========================================================================
+
     def create_password_tool(self):
-        """Генератор паролей с расширенной конфигурацией"""
-        settings_frame = ttk.LabelFrame(self.pass_frame, text="⚙️ Настройки", padding=10, style="Card.TLabelframe")
+        """Создаёт улучшенный генератор паролей с проверкой стойкости"""
+        # Настройки
+        settings_frame = ttk.LabelFrame(self.pass_frame, text="⚙️ Настройки генерации", padding=10)
         settings_frame.pack(fill=tk.X, padx=10, pady=10)
 
+        # Тип генератора
+        type_frame = ttk.Frame(settings_frame)
+        type_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(type_frame, text="Тип генератора:").pack(side=tk.LEFT, padx=(0, 10))
+
+        self.pass_gen_type = tk.StringVar(value="random")
+        ttk.Radiobutton(type_frame, text="Случайный", variable=self.pass_gen_type,
+                        value="random", command=self.toggle_password_options).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(type_frame, text="Passphrase", variable=self.pass_gen_type,
+                        value="passphrase", command=self.toggle_password_options).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(type_frame, text="PIN-код", variable=self.pass_gen_type,
+                        value="pin", command=self.toggle_password_options).pack(side=tk.LEFT, padx=5)
+        ttk.Radiobutton(type_frame, text="XKCD-стиль", variable=self.pass_gen_type,
+                        value="xkcd", command=self.toggle_password_options).pack(side=tk.LEFT, padx=5)
+
+        # Опции для случайного пароля
+        self.random_opt_frame = ttk.Frame(settings_frame)
+        self.random_opt_frame.pack(fill=tk.X, pady=5)
+
         # Длина
-        len_frame = ttk.Frame(settings_frame, style="Card.TFrame")
+        len_frame = ttk.Frame(self.random_opt_frame)
         len_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(len_frame, text="Длина:", style="TLabel").pack(side=tk.LEFT)
+
+        ttk.Label(len_frame, text="Длина:").pack(side=tk.LEFT)
         self.pass_len = tk.IntVar(value=16)
-        len_scale = ttk.Scale(len_frame, from_=8, to=64, variable=self.pass_len, orient=tk.HORIZONTAL,
-                              command=lambda e: self.update_pass_preview())
+        len_scale = ttk.Scale(len_frame, from_=8, to=128, variable=self.pass_len,
+                              orient=tk.HORIZONTAL, command=lambda e: self.update_pass_preview())
         len_scale.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=10)
-        self.pass_len_label = ttk.Label(len_frame, text="16", style="Secondary.TLabel", width=3)
+        self.pass_len_label = ttk.Label(len_frame, text="16", width=3)
         self.pass_len_label.pack(side=tk.LEFT)
 
-        # Опции
-        opt_frame = ttk.Frame(settings_frame, style="Card.TFrame")
+        # Символы
+        opt_frame = ttk.Frame(self.random_opt_frame)
         opt_frame.pack(fill=tk.X, pady=5)
 
         self.use_upper = tk.BooleanVar(value=True)
@@ -10271,44 +10865,157 @@ class IBToolsTab:
         ttk.Checkbutton(opt_frame, text="a-z", variable=self.use_lower).pack(side=tk.LEFT, padx=5)
         ttk.Checkbutton(opt_frame, text="0-9", variable=self.use_digits).pack(side=tk.LEFT, padx=5)
         ttk.Checkbutton(opt_frame, text="!@#", variable=self.use_special).pack(side=tk.LEFT, padx=5)
-        ttk.Checkbutton(opt_frame, text="❌ Без похожих (l,1,I,O,0)", variable=self.exclude_ambiguous).pack(side=tk.LEFT,
-                                                                                                           padx=5)
+        ttk.Checkbutton(opt_frame, text="❌ Без похожих", variable=self.exclude_ambiguous).pack(side=tk.LEFT, padx=5)
+
+        # Опции для passphrase
+        self.passphrase_opt_frame = ttk.Frame(settings_frame)
+
+        ttk.Label(self.passphrase_opt_frame, text="Количество слов:").pack(side=tk.LEFT, padx=(0, 10))
+        self.passphrase_words = tk.IntVar(value=4)
+        words_spin = ttk.Spinbox(self.passphrase_opt_frame, from_=3, to=10,
+                                 textvariable=self.passphrase_words, width=5)
+        words_spin.pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(self.passphrase_opt_frame, text="Язык:").pack(side=tk.LEFT, padx=(20, 10))
+        self.passphrase_lang = tk.StringVar(value="mixed")
+        ttk.Combobox(self.passphrase_opt_frame, textvariable=self.passphrase_lang,
+                     values=["mixed", "russian", "english"], width=10).pack(side=tk.LEFT)
+
+        ttk.Label(self.passphrase_opt_frame, text="Разделитель:").pack(side=tk.LEFT, padx=(20, 10))
+        self.passphrase_sep = tk.StringVar(value="-")
+        ttk.Entry(self.passphrase_opt_frame, textvariable=self.passphrase_sep, width=5).pack(side=tk.LEFT)
+
+        # Опции для PIN
+        self.pin_opt_frame = ttk.Frame(settings_frame)
+
+        ttk.Label(self.pin_opt_frame, text="Длина PIN:").pack(side=tk.LEFT, padx=(0, 10))
+        self.pin_len = tk.IntVar(value=6)
+        pin_spin = ttk.Spinbox(self.pin_opt_frame, from_=4, to=12,
+                               textvariable=self.pin_len, width=5)
+        pin_spin.pack(side=tk.LEFT)
 
         # Пользовательские символы
-        custom_frame = ttk.Frame(settings_frame, style="Card.TFrame")
+        custom_frame = ttk.Frame(settings_frame)
         custom_frame.pack(fill=tk.X, pady=5)
-        ttk.Label(custom_frame, text="Доп. символы:", style="TLabel").pack(side=tk.LEFT)
+
+        ttk.Label(custom_frame, text="Доп. символы:").pack(side=tk.LEFT)
         self.custom_chars = tk.StringVar(value="")
-        custom_entry = ttk.Entry(custom_frame, textvariable=self.custom_chars, width=30, style="TEntry")
-        custom_entry.pack(side=tk.LEFT, padx=5)
-        ttk.Label(custom_frame, text="(добавятся к набору)", style="Secondary.TLabel").pack(side=tk.LEFT)
+        ttk.Entry(custom_frame, textvariable=self.custom_chars, width=30).pack(side=tk.LEFT, padx=5)
 
         # Результат
-        res_frame = ttk.LabelFrame(self.pass_frame, text="🔑 Результат", padding=10, style="Card.TLabelframe")
-        res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        res_frame = ttk.LabelFrame(self.pass_frame, text="🔑 Результат", padding=10)
+        res_frame.pack(fill=tk.X, padx=10, pady=10)
 
         self.pass_result_var = tk.StringVar()
-        res_entry = ttk.Entry(res_frame, textvariable=self.pass_result_var, font=("Consolas", 14), style="TEntry")
+        res_entry = ttk.Entry(res_frame, textvariable=self.pass_result_var,
+                              font=("Consolas", 14), state='readonly')
         res_entry.pack(fill=tk.X, pady=5)
 
-        self.entropy_label = ttk.Label(res_frame, text="Энтропия: 0 бит", style="Secondary.TLabel")
-        self.entropy_label.pack(anchor=tk.W, pady=5)
+        # Индикатор стойкости
+        strength_frame = ttk.Frame(res_frame)
+        strength_frame.pack(fill=tk.X, pady=5)
 
-        btn_frame = ttk.Frame(self.pass_frame, style="Card.TFrame")
+        self.strength_label = ttk.Label(strength_frame, text="Стойкость: -", font=("Segoe UI", 11, "bold"))
+        self.strength_label.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.entropy_label = ttk.Label(strength_frame, text="Энтропия: 0 бит")
+        self.entropy_label.pack(side=tk.LEFT, padx=(0, 10))
+
+        self.crack_time_label = ttk.Label(strength_frame, text="Время взлома: -")
+        self.crack_time_label.pack(side=tk.LEFT)
+
+        # Прогресс-бар стойкости
+        self.strength_bar = ttk.Progressbar(res_frame, orient="horizontal",
+                                            length=400, mode="determinate")
+        self.strength_bar.pack(fill=tk.X, pady=5)
+
+        # Кнопки
+        btn_frame = ttk.Frame(self.pass_frame)
         btn_frame.pack(fill=tk.X, padx=10, pady=10)
-        ttk.Button(btn_frame, text="🎲 Сгенерировать", style="Accent.TButton", command=self.generate_password).pack(
-            side=tk.LEFT, padx=5)
+
+        ttk.Button(btn_frame, text="🎲 Сгенерировать", style="Accent.TButton",
+                   command=self.generate_password).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="📋 Копировать", command=self.copy_password).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="💾 Сохранить", command=self.save_password).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📊 Проверить стойкость", command=self.check_password_strength).pack(side=tk.LEFT,
+                                                                                                       padx=5)
+
+        # Поле для проверки существующего пароля
+        check_frame = ttk.LabelFrame(self.pass_frame, text="🔍 Проверка стойкости пароля", padding=10)
+        check_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.check_pass_var = tk.StringVar()
+        check_entry = ttk.Entry(check_frame, textvariable=self.check_pass_var, show="●")
+        check_entry.pack(fill=tk.X, pady=5)
+
+        ttk.Button(check_frame, text="🔍 Проверить", command=self.check_password_strength).pack()
+
+        self.toggle_password_options()
+
+    def toggle_password_options(self):
+        """Переключает видимость опций в зависимости от типа генератора"""
+        gen_type = self.pass_gen_type.get()
+
+        # Скрыть все
+        self.random_opt_frame.pack_forget()
+        self.passphrase_opt_frame.pack_forget()
+        self.pin_opt_frame.pack_forget()
+
+        # Показать нужные
+        if gen_type == "random":
+            self.random_opt_frame.pack(fill=tk.X, pady=5)
+        elif gen_type == "passphrase" or gen_type == "xkcd":
+            self.passphrase_opt_frame.pack(fill=tk.X, pady=5)
+        elif gen_type == "pin":
+            self.pin_opt_frame.pack(fill=tk.X, pady=5)
 
     def update_pass_preview(self):
+        """Обновляет метку длины пароля"""
         self.pass_len_label.config(text=str(self.pass_len.get()))
 
     def generate_password(self):
+        """Генерирует пароль выбранным методом"""
+        gen_type = self.pass_gen_type.get()
+        password = ""
+
+        try:
+            if gen_type == "random":
+                password = self._generate_random_password()
+            elif gen_type == "passphrase" or gen_type == "xkcd":
+                password = self._generate_passphrase()
+            elif gen_type == "pin":
+                password = self._generate_pin()
+
+            self.pass_result_var.set(password)
+            self.evaluate_password_strength(password)
+
+            # Сохранение в историю
+            IBToolsTab._password_history.append({
+                'password': password,
+                'type': gen_type,
+                'timestamp': datetime.now().isoformat(),
+                'length': len(password)
+            })
+            if len(IBToolsTab._password_history) > 100:
+                IBToolsTab._password_history = IBToolsTab._password_history[-100:]
+
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Пароль сгенерирован")
+
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка", f"Не удалось сгенерировать пароль: {str(e)}")
+
+    def _generate_random_password(self) -> str:
+        """Генерирует случайный пароль"""
         chars = ""
-        if self.use_upper.get(): chars += string.ascii_uppercase
-        if self.use_lower.get(): chars += string.ascii_lowercase
-        if self.use_digits.get(): chars += string.digits
-        if self.use_special.get(): chars += string.punctuation
+
+        if self.use_upper.get():
+            chars += string.ascii_uppercase
+        if self.use_lower.get():
+            chars += string.ascii_lowercase
+        if self.use_digits.get():
+            chars += string.digits
+        if self.use_special.get():
+            chars += string.punctuation
 
         custom = self.custom_chars.get()
         if custom:
@@ -10319,73 +11026,229 @@ class IBToolsTab:
             chars = ''.join([c for c in chars if c not in ambiguous])
 
         if not chars:
-            messagebox.showwarning("Ошибка", "Выберите хотя бы один набор символов")
-            return
+            raise ValueError("Выберите хотя бы один набор символов")
 
         length = self.pass_len.get()
-        password = ''.join(secrets.choice(chars) for _ in range(length))
+        return ''.join(secrets.choice(chars) for _ in range(length))
 
-        self.pass_result_var.set(password)
+    def _generate_passphrase(self) -> str:
+        """Генерирует passphrase (словосочетание)"""
+        num_words = self.passphrase_words.get()
+        separator = self.passphrase_sep.get()
+        lang = self.passphrase_lang.get()
 
-        entropy = length * math.log2(len(chars))
-        self.entropy_label.config(text=f"Энтропия: {entropy:.2f} бит (Алфавит: {len(chars)} симв.)")
-        color = self.colors["success"] if entropy > 60 else self.colors["warning"] if entropy > 40 else self.colors[
-            "error"]
-        self.entropy_label.config(foreground=color)
+        words = []
+
+        if lang == "russian":
+            word_list = PASSPHRASE_WORDS_RU
+        elif lang == "english":
+            word_list = PASSPHRASE_WORDS_EN
+        else:  # mixed
+            word_list = PASSPHRASE_WORDS_RU + PASSPHRASE_WORDS_EN
+
+        for _ in range(num_words):
+            words.append(secrets.choice(word_list))
+
+        # Для XKCD-стиля добавляем цифры и спецсимволы
+        if self.pass_gen_type.get() == "xkcd":
+            words[0] = words[0].capitalize()
+            words.append(str(secrets.randbelow(100)))
+            if secrets.choice([True, False]):
+                words.insert(secrets.randbelow(len(words)), secrets.choice("!@#$%^&*"))
+
+        return separator.join(words)
+
+    def _generate_pin(self) -> str:
+        """Генерирует PIN-код"""
+        length = self.pin_len.get()
+        return ''.join([str(secrets.randbelow(10)) for _ in range(length)])
+
+    def evaluate_password_strength(self, password: str):
+        """Оценивает стойкость пароля"""
+        if not password:
+            return
+
+        # Расчёт энтропии
+        charset_size = 0
+        if any(c.isupper() for c in password):
+            charset_size += 26
+        if any(c.islower() for c in password):
+            charset_size += 26
+        if any(c.isdigit() for c in password):
+            charset_size += 10
+        if any(c in string.punctuation for c in password):
+            charset_size += 32
+
+        entropy = len(password) * math.log2(charset_size) if charset_size > 0 else 0
+
+        # Оценка стойкости (0-4)
+        strength = 0
+        if len(password) >= 8:
+            strength += 1
+        if len(password) >= 12:
+            strength += 1
+        if charset_size >= 62:
+            strength += 1
+        if entropy >= 60:
+            strength += 1
+
+        strength = min(strength, 4)
+
+        # Обновление UI
+        strength_text, strength_color = self.PASSWORD_STRENGTH[strength]
+        self.strength_label.config(text=f"Стойкость: {strength_text}", foreground=strength_color)
+        self.entropy_label.config(text=f"Энтропия: {entropy:.1f} бит")
+
+        # Расчёт времени взлома (грубая оценка)
+        attempts_per_second = 1e12  # 1 триллион попыток в секунду
+        seconds_to_crack = (2 ** entropy) / attempts_per_second
+
+        if seconds_to_crack < 60:
+            crack_time = f"{seconds_to_crack:.1f} сек"
+        elif seconds_to_crack < 3600:
+            crack_time = f"{seconds_to_crack / 60:.1f} мин"
+        elif seconds_to_crack < 86400:
+            crack_time = f"{seconds_to_crack / 3600:.1f} ч"
+        elif seconds_to_crack < 31536000:
+            crack_time = f"{seconds_to_crack / 86400:.1f} дн"
+        else:
+            years = seconds_to_crack / 31536000
+            if years < 1e6:
+                crack_time = f"{years:.1f} лет"
+            elif years < 1e9:
+                crack_time = f"{years / 1e6:.1f} млн лет"
+            else:
+                crack_time = f"{years / 1e9:.1f} млрд лет"
+
+        self.crack_time_label.config(text=f"Время взлома: {crack_time}")
+
+        # Прогресс-бар
+        self.strength_bar["value"] = (strength / 4) * 100
+
+    def check_password_strength(self):
+        """Проверяет стойкость введённого пароля"""
+        password = self.check_pass_var.get()
+        if not password:
+            messagebox.showwarning("⚠️ Внимание", "Введите пароль для проверки")
+            return
+
+        self.evaluate_password_strength(password)
+        getattr(self.app, 'show_toast', lambda x: None)("✅ Проверка завершена")
 
     def copy_password(self):
+        """Копирует пароль в буфер обмена"""
         pwd = self.pass_result_var.get()
         if pwd:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(pwd)
-            self.app.show_toast("✅ Пароль скопирован")
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(pwd)
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Пароль скопирован")
 
-    # ───────────────────────────────────────────────
-    # 3. ИНСТРУМЕНТ: ВАЛИДАТОР СИГНАТУР
-    # ───────────────────────────────────────────────
+    def save_password(self):
+        """Сохраняет пароль в файл"""
+        pwd = self.pass_result_var.get()
+        if not pwd:
+            messagebox.showwarning("⚠️ Внимание", "Нет пароля для сохранения")
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Сохранить пароль",
+            defaultextension=".txt",
+            filetypes=[("Текст", "*.txt"), ("JSON", "*.json")],
+            initialdir=getattr(self.app, 'last_save_dir', os.path.expanduser("~"))
+        )
+
+        if path:
+            try:
+                ext = os.path.splitext(path)[1].lower()
+                if ext == '.json':
+                    with open(path, 'w', encoding='utf-8') as f:
+                        json.dump({
+                            'password': pwd,
+                            'generated': datetime.now().isoformat(),
+                            'type': self.pass_gen_type.get()
+                        }, f, indent=2, ensure_ascii=False)
+                else:
+                    with open(path, 'w', encoding='utf-8') as f:
+                        f.write(pwd)
+
+                setattr(self.app, 'last_save_dir', os.path.dirname(path))
+                getattr(self.app, 'show_toast', lambda x: None)(f"✅ Сохранено в {os.path.basename(path)}")
+            except Exception as e:
+                messagebox.showerror("❌ Ошибка", f"Не удалось сохранить: {str(e)}")
+
+    # =========================================================================
+    # 3. ВАЛИДАТОР СИГНАТУР (УЛУЧШЕННЫЙ)
+    # =========================================================================
+
     def create_signature_tool(self):
-        """Проверка сигнатур файлов"""
-        info_frame = ttk.LabelFrame(self.sig_frame, text="ℹ️ Информация", padding=10, style="Card.TLabelframe")
+        """Создаёт улучшенный валидатор сигнатур"""
+        # Информация
+        info_frame = ttk.LabelFrame(self.sig_frame, text="ℹ️ Информация", padding=10)
         info_frame.pack(fill=tk.X, padx=10, pady=10)
+
         ttk.Label(info_frame,
-                  text="Сравнивает реальную сигнатуру файла с его расширением.\nПолезно для выявления маскировки исполняемых файлов.",
+                  text="Сравнивает сигнатуру файла с расширением. Обнаруживает внедрённые файлы (carving).",
                   style="Secondary.TLabel", justify=tk.LEFT).pack(anchor=tk.W)
 
-        select_frame = ttk.Frame(self.sig_frame, style="Card.TFrame")
+        # Выбор файла
+        select_frame = ttk.Frame(self.sig_frame)
         select_frame.pack(fill=tk.X, padx=10, pady=10)
 
         self.sig_file_path = tk.StringVar()
-        sig_entry = ttk.Entry(select_frame, textvariable=self.sig_file_path, state='readonly', style="TEntry")
+        sig_entry = ttk.Entry(select_frame, textvariable=self.sig_file_path, state='readonly')
         sig_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
         ttk.Button(select_frame, text="📂 Выбрать файл", command=self.select_sig_file).pack(side=tk.LEFT)
 
-        res_frame = ttk.LabelFrame(self.sig_frame, text="🔍 Результат анализа", padding=10, style="Card.TLabelframe")
+        # Опции анализа
+        options_frame = ttk.LabelFrame(self.sig_frame, text="⚙️ Опции анализа", padding=10)
+        options_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.sig_deep_scan = tk.BooleanVar(value=False)
+        ttk.Checkbutton(options_frame, text="Глубокий анализ (carving)",
+                        variable=self.sig_deep_scan).pack(side=tk.LEFT, padx=10)
+
+        self.sig_check_structure = tk.BooleanVar(value=True)
+        ttk.Checkbutton(options_frame, text="Проверка структуры",
+                        variable=self.sig_check_structure).pack(side=tk.LEFT, padx=10)
+
+        # Результаты
+        res_frame = ttk.LabelFrame(self.sig_frame, text="🔍 Результат анализа", padding=10)
         res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        self.sig_result_text = scrolledtext.ScrolledText(res_frame, height=10, font=("Consolas", 10),
-                                                         bg=self.colors["card"], fg=self.colors["text"],
+        self.sig_result_text = scrolledtext.ScrolledText(res_frame, height=15,
+                                                         font=("Consolas", 10),
+                                                         bg=self.colors["card"],
+                                                         fg=self.colors["text"],
                                                          state='disabled')
         self.sig_result_text.pack(fill=tk.BOTH, expand=True)
 
-        btn_frame = ttk.Frame(self.sig_frame, style="Card.TFrame")
+        # Кнопки
+        btn_frame = ttk.Frame(self.sig_frame)
         btn_frame.pack(fill=tk.X, padx=10, pady=10)
-        ttk.Button(btn_frame, text="🚀 Проверить", style="Accent.TButton", command=self.check_signature).pack(
-            side=tk.LEFT, padx=5)
+
+        ttk.Button(btn_frame, text="🚀 Проверить", style="Accent.TButton",
+                   command=self.check_signature).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать отчёт",
+                   command=self.copy_signature_report).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="💾 Сохранить отчёт",
+                   command=self.save_signature_report).pack(side=tk.LEFT, padx=5)
 
     def select_sig_file(self):
+        """Выбирает файл для анализа"""
         path = filedialog.askopenfilename(
             title="Выберите файл",
             filetypes=[("Все файлы", "*.*")],
-            initialdir=self.app.last_open_dir
+            initialdir=getattr(self.app, 'last_open_dir', os.path.expanduser("~"))
         )
         if path:
             self.sig_file_path.set(path)
-            self.app.last_open_dir = os.path.dirname(path)
+            setattr(self.app, 'last_open_dir', os.path.dirname(path))
 
     def check_signature(self):
+        """Проверяет сигнатуру файла"""
         path = self.sig_file_path.get()
         if not path or not os.path.exists(path):
-            messagebox.showwarning("Ошибка", "Файл не выбран или не существует")
+            messagebox.showwarning("⚠️ Ошибка", "Файл не выбран или не существует")
             return
 
         self.sig_result_text.config(state='normal')
@@ -10393,287 +11256,524 @@ class IBToolsTab:
 
         try:
             with open(path, 'rb') as f:
-                header = f.read(16)
+                header = f.read(512)  # Читаем больше для глубокого анализа
+                file_size = os.path.getsize(path)
 
             ext = os.path.splitext(path)[1].lower()
+
+            # Поиск по сигнатурам
             detected_ext = "Неизвестно"
             detected_type = "Неизвестно"
+            detected_mime = "application/octet-stream"
             is_match = False
+            matched_signature = None
 
-            for signature, extension in IBToolsTab.MAGIC_SIGNATURES.items():
+            for signature, (extension, file_type, mime_type) in EXTENDED_MAGIC_SIGNATURES.items():
                 if header.startswith(signature):
                     detected_ext = extension
-                    detected_type = extension.upper()
+                    detected_type = file_type
+                    detected_mime = mime_type
+                    matched_signature = signature
                     if ext == extension:
                         is_match = True
                     break
 
-            if header.startswith(b'RIFF') and header[8:12] == b'WAVE':
-                detected_ext = '.wav'
-                detected_type = 'WAV Audio'
-                if ext == '.wav': is_match = True
+            # Формирование отчёта
+            res_text = "=" * 60 + "\n"
+            res_text += "📊 ОТЧЁТ АНАЛИЗА ФАЙЛА\n"
+            res_text += "=" * 60 + "\n\n"
 
-            res_text = f"Файл: {os.path.basename(path)}\n"
-            res_text += f"Расширение имени: {ext if ext else 'Нет'}\n"
-            res_text += f"Сигнатура (Hex): {header[:8].hex(' ').upper()}\n"
-            res_text += f"Определенный тип: {detected_type} ({detected_ext})\n"
-            res_text += "-" * 30 + "\n"
+            res_text += f"📁 Файл: {os.path.basename(path)}\n"
+            res_text += f"📏 Размер: {self._format_size(file_size)}\n"
+            res_text += f"📄 Расширение: {ext if ext else 'Нет'}\n"
+            res_text += f"🔍 Сигнатура (Hex): {header[:32].hex(' ').upper()}\n"
+            res_text += f"🏷️ Определённый тип: {detected_type}\n"
+            res_text += f"📎 Расширение типа: {detected_ext}\n"
+            res_text += f"🌐 MIME-тип: {detected_mime}\n"
+            res_text += "\n" + "-" * 60 + "\n\n"
 
             if is_match:
-                res_text += "✅ СТАТУС: СОВПАДЕНИЕ\nРасширение файла соответствует сигнатуре."
-                color = self.colors["success"]
+                res_text += "✅ СТАТУС: СОВПАДЕНИЕ\n"
+                res_text += "Расширение файла соответствует сигнатуре.\n"
+                status_color = self.colors.get("success", "#44cc44")
             else:
-                res_text += "❌ СТАТУС: НЕСОВПАДЕНИЕ\nВозможная подмена расширения! Будьте осторожны."
-                color = self.colors["error"]
+                res_text += "❌ СТАТУС: НЕСОВПАДЕНИЕ\n"
+                res_text += "⚠️ ВОЗМОЖНАЯ ПОДМЕНА РАСШИРЕНИЯ! Будьте осторожны.\n"
+                res_text += f"Ожидалось: {ext}, Обнаружено: {detected_ext}\n"
+                status_color = self.colors.get("error", "#ff4444")
+
+            # Глубокий анализ (carving)
+            if self.sig_deep_scan.get():
+                res_text += "\n" + "=" * 60 + "\n"
+                res_text += "🔎 ГЛУБОКИЙ АНАЛИЗ (CARVING)\n"
+                res_text += "=" * 60 + "\n\n"
+
+                embedded_files = self._find_embedded_files(header + f.read())
+                if embedded_files:
+                    res_text += f"📦 Найдено внедрённых файлов: {len(embedded_files)}\n\n"
+                    for i, ef in enumerate(embedded_files, 1):
+                        res_text += f"{i}. {ef['type']} на позиции {ef['offset']}\n"
+                else:
+                    res_text += "✅ Внедрённые файлы не обнаружены\n"
+
+            # Проверка структуры
+            if self.sig_check_structure.get():
+                res_text += "\n" + "=" * 60 + "\n"
+                res_text += "🏗️ ПРОВЕРКА СТРУКТУРЫ\n"
+                res_text += "=" * 60 + "\n\n"
+
+                structure_issues = self._check_file_structure(path, detected_ext)
+                if structure_issues:
+                    res_text += "⚠️ Найдены проблемы структуры:\n"
+                    for issue in structure_issues:
+                        res_text += f"  • {issue}\n"
+                else:
+                    res_text += "✅ Структура файла корректна\n"
 
             self.sig_result_text.insert("1.0", res_text)
             self.sig_result_text.config(state='disabled')
 
-            self.sig_result_text.tag_add("status", "5.0", "6.0")
-            self.sig_result_text.tag_configure("status", foreground=color, font=("Consolas", 10, "bold"))
+            # Цветовая индикация
+            self.sig_result_text.tag_add("status", "1.0", "2.0")
+            self.sig_result_text.tag_configure("status", foreground=status_color,
+                                               font=("Consolas", 10, "bold"))
+
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Анализ завершён")
 
         except Exception as e:
-            self.sig_result_text.insert("1.0", f"Ошибка чтения: {e}")
+            self.sig_result_text.insert("1.0", f"❌ Ошибка чтения: {str(e)}")
             self.sig_result_text.config(state='disabled')
 
-    # ───────────────────────────────────────────────
-    # 4. ИНСТРУМЕНТ: КОДИРОВЩИК
-    # ───────────────────────────────────────────────
+    def _find_embedded_files(self, data: bytes) -> List[dict]:
+        """Ищет внедрённые файлы в данных"""
+        embedded = []
+
+        for signature, (extension, file_type, mime_type) in EXTENDED_MAGIC_SIGNATURES.items():
+            pos = data.find(signature, 1)  # Начинаем с 1, чтобы не найти основную сигнатуру
+            while pos != -1:
+                embedded.append({
+                    'type': file_type,
+                    'extension': extension,
+                    'offset': pos,
+                    'mime': mime_type
+                })
+                pos = data.find(signature, pos + 1)
+
+        return embedded
+
+    def _check_file_structure(self, path: str, ext: str) -> List[str]:
+        """Проверяет структуру файла на корректность"""
+        issues = []
+
+        try:
+            file_size = os.path.getsize(path)
+
+            # Проверка минимального размера
+            min_sizes = {
+                '.png': 33,
+                '.jpg': 107,
+                '.gif': 13,
+                '.pdf': 64,
+                '.zip': 22
+            }
+
+            if ext in min_sizes and file_size < min_sizes[ext]:
+                issues.append(f"Файл слишком маленький для формата {ext}")
+
+            # Проверка обрезанных файлов
+            with open(path, 'rb') as f:
+                f.seek(-10, 2)  # Последние 10 байт
+                end = f.read()
+
+                # Проверка окончаний форматов
+                if ext == '.zip' and not end.startswith(b'PK\x05\x06'):
+                    issues.append("Возможно, ZIP-архив обрезан или повреждён")
+
+                if ext == '.jpg' and not (end[0:2] == b'\xff\xd9' or b'\xff\xd9' in end):
+                    issues.append("Возможно, JPEG повреждён (нет конечного маркера)")
+
+        except Exception:
+            pass
+
+        return issues
+
+    def _format_size(self, size: int) -> str:
+        """Форматирует размер файла"""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size < 1024.0:
+                return f"{size:.2f} {unit}"
+            size /= 1024.0
+        return f"{size:.2f} PB"
+
+    def copy_signature_report(self):
+        """Копирует отчёт в буфер обмена"""
+        report = self.sig_result_text.get("1.0", tk.END).strip()
+        if report:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(report)
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Отчёт скопирован")
+
+    def save_signature_report(self):
+        """Сохраняет отчёт в файл"""
+        report = self.sig_result_text.get("1.0", tk.END).strip()
+        if not report:
+            messagebox.showwarning("⚠️ Внимание", "Нет отчёта для сохранения")
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Сохранить отчёт",
+            defaultextension=".txt",
+            filetypes=[("Текст", "*.txt"), ("JSON", "*.json")],
+            initialdir=getattr(self.app, 'last_save_dir', os.path.expanduser("~"))
+        )
+
+        if path:
+            try:
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(report)
+                setattr(self.app, 'last_save_dir', os.path.dirname(path))
+                getattr(self.app, 'show_toast', lambda x: None)(f"✅ Сохранено в {os.path.basename(path)}")
+            except Exception as e:
+                messagebox.showerror("❌ Ошибка", f"Не удалось сохранить: {str(e)}")
+
+    # =========================================================================
+    # 4. КОДИРОВЩИК (УЛУЧШЕННЫЙ)
+    # =========================================================================
+
     def create_encoding_tool(self):
-        """Конвертер кодировок с кнопкой вставки"""
-        input_frame = ttk.LabelFrame(self.enc_frame, text="📥 Входные данные (Ctrl+V для вставки)", padding=10,
-                                     style="Card.TLabelframe")
+        """Создаёт улучшенный кодировщик"""
+        # Входные данные
+        input_frame = ttk.LabelFrame(self.enc_frame, text="📥 Входные данные", padding=10)
         input_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        input_toolbar = ttk.Frame(input_frame, style="Card.TFrame")
-        input_toolbar.pack(fill=tk.X, pady=(0, 5))
+        # Переключатель текст/файл
+        enc_input_type = tk.StringVar(value="text")
+        ttk.Radiobutton(input_frame, text="Текст", variable=enc_input_type,
+                        value="text", command=lambda: self.toggle_encoding_input("text")).pack(side=tk.LEFT, padx=10)
+        ttk.Radiobutton(input_frame, text="Файл", variable=enc_input_type,
+                        value="file", command=lambda: self.toggle_encoding_input("file")).pack(side=tk.LEFT, padx=10)
 
-        ttk.Button(input_toolbar, text="📋 Вставить", style="IconButton.TButton",
-                   command=self.paste_encoding_input).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(input_toolbar, text="🗑️ Очистить", style="IconButton.TButton",
-                   command=lambda: self.enc_input.delete("1.0", tk.END)).pack(side=tk.LEFT)
+        # Текстовый ввод
+        self.enc_text_input = scrolledtext.ScrolledText(input_frame, height=6,
+                                                        font=("Consolas", 10),
+                                                        bg=self.colors["card"],
+                                                        fg=self.colors["text"])
+        self.enc_text_input.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-        self.enc_input = scrolledtext.ScrolledText(input_frame, height=6, font=("Consolas", 10),
-                                                   bg=self.colors["card"], fg=self.colors["text"])
-        self.enc_input.pack(fill=tk.BOTH, expand=True)
-        self.enc_input.bind("<Control-v>", lambda e: self.paste_encoding_input())
+        # Файловый ввод (скрыт по умолчанию)
+        self.enc_file_frame = ttk.Frame(input_frame)
+        self.enc_file_path = tk.StringVar()
+        file_entry = ttk.Entry(self.enc_file_frame, textvariable=self.enc_file_path, state='readonly')
+        file_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 10))
+        ttk.Button(self.enc_file_frame, text="📂 Выбрать", command=self.select_encoding_file).pack(side=tk.LEFT)
 
-        ops_frame = ttk.Frame(self.enc_frame, style="Card.TFrame")
+        # Операции
+        ops_frame = ttk.LabelFrame(self.enc_frame, text="🔄 Операции", padding=10)
         ops_frame.pack(fill=tk.X, padx=10, pady=5)
 
         self.enc_mode = tk.StringVar(value="base64_encode")
-        ttk.Radiobutton(ops_frame, text="Base64 →", variable=self.enc_mode, value="base64_encode").pack(side=tk.LEFT)
-        ttk.Radiobutton(ops_frame, text="→ Base64", variable=self.enc_mode, value="base64_decode").pack(side=tk.LEFT)
-        ttk.Radiobutton(ops_frame, text="Hex →", variable=self.enc_mode, value="hex_encode").pack(side=tk.LEFT)
-        ttk.Radiobutton(ops_frame, text="→ Hex", variable=self.enc_mode, value="hex_decode").pack(side=tk.LEFT)
-        ttk.Radiobutton(ops_frame, text="URL →", variable=self.enc_mode, value="url_encode").pack(side=tk.LEFT)
-        ttk.Radiobutton(ops_frame, text="→ URL", variable=self.enc_mode, value="url_decode").pack(side=tk.LEFT)
+        encoding_options = [
+            ("Base64 →", "base64_encode"),
+            ("→ Base64", "base64_decode"),
+            ("Base32 →", "base32_encode"),
+            ("→ Base32", "base32_decode"),
+            ("Base85 →", "base85_encode"),
+            ("→ Base85", "base85_decode"),
+            ("Hex →", "hex_encode"),
+            ("→ Hex", "hex_decode"),
+            ("URL →", "url_encode"),
+            ("→ URL", "url_decode"),
+            ("HTML →", "html_encode"),
+            ("→ HTML", "html_decode"),
+            ("Unicode Escape →", "unicode_encode"),
+            ("→ Unicode Escape", "unicode_decode"),
+        ]
 
-        output_frame = ttk.LabelFrame(self.enc_frame, text="📤 Результат", padding=10, style="Card.TLabelframe")
+        for i, (text, value) in enumerate(encoding_options):
+            ttk.Radiobutton(ops_frame, text=text, variable=self.enc_mode,
+                            value=value).grid(row=i // 3, column=i % 3, sticky="w", padx=5, pady=2)
+
+        # Результат
+        output_frame = ttk.LabelFrame(self.enc_frame, text="📤 Результат", padding=10)
         output_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
-        self.enc_output = scrolledtext.ScrolledText(output_frame, height=6, font=("Consolas", 10),
-                                                    bg=self.colors["card"], fg=self.colors["text"], state='disabled')
+        self.enc_output = scrolledtext.ScrolledText(output_frame, height=6,
+                                                    font=("Consolas", 10),
+                                                    bg=self.colors["card"],
+                                                    fg=self.colors["text"],
+                                                    state='disabled')
         self.enc_output.pack(fill=tk.BOTH, expand=True)
 
-        btn_frame = ttk.Frame(self.enc_frame, style="Card.TFrame")
+        # Кнопки
+        btn_frame = ttk.Frame(self.enc_frame)
         btn_frame.pack(fill=tk.X, padx=10, pady=10)
-        ttk.Button(btn_frame, text="🔄 Конвертировать", style="Accent.TButton", command=self.convert_encoding).pack(
-            side=tk.LEFT, padx=5)
-        ttk.Button(btn_frame, text="📋 Копировать", command=self.copy_encoding_result).pack(side=tk.LEFT, padx=5)
 
-    def paste_encoding_input(self):
-        """Вставляет текст из буфера обмена"""
-        try:
-            text = self.root.clipboard_get()
-            self.enc_input.insert(tk.END, text)
-        except tk.TclError:
-            pass
+        ttk.Button(btn_frame, text="🔄 Конвертировать", style="Accent.TButton",
+                   command=self.convert_encoding).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать", command=self.copy_encoding_result).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="💾 Сохранить", command=self.save_encoding_result).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="🗑️ Очистить", command=self.clear_encoding).pack(side=tk.LEFT, padx=5)
+
+        # Статистика
+        self.enc_stats_label = ttk.Label(self.enc_frame, text="", style="Secondary.TLabel")
+        self.enc_stats_label.pack(fill=tk.X, padx=10, pady=5)
+
+    def toggle_encoding_input(self, input_type: str):
+        """Переключает между текстовым и файловым вводом"""
+        if input_type == "text":
+            self.enc_text_input.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            self.enc_file_frame.pack_forget()
+        else:
+            self.enc_text_input.pack_forget()
+            self.enc_file_frame.pack(fill=tk.X, padx=5, pady=5)
+
+    def select_encoding_file(self):
+        """Выбирает файл для кодирования"""
+        path = filedialog.askopenfilename(
+            title="Выберите файл",
+            filetypes=[("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_open_dir', os.path.expanduser("~"))
+        )
+        if path:
+            self.enc_file_path.set(path)
+            setattr(self.app, 'last_open_dir', os.path.dirname(path))
 
     def convert_encoding(self):
-        input_data = self.enc_input.get("1.0", tk.END).strip()
-        if not input_data:
-            messagebox.showwarning("Внимание", "Введите данные")
-            return
-
+        """Выполняет конвертацию кодировки"""
         self.enc_output.config(state='normal')
         self.enc_output.delete("1.0", tk.END)
+
         mode = self.enc_mode.get()
 
         try:
+            # Получение входных данных
+            if hasattr(self, 'enc_text_input') and self.enc_text_input.winfo_ismapped():
+                input_data = self.enc_text_input.get("1.0", tk.END).strip()
+                is_file = False
+            else:
+                file_path = self.enc_file_path.get()
+                if not file_path or not os.path.exists(file_path):
+                    raise ValueError("Выберите файл для конвертации")
+                with open(file_path, 'rb') as f:
+                    input_data = f.read()
+                is_file = True
+
+            if not input_data:
+                raise ValueError("Входные данные пусты")
+
+            # Конвертация
             result = ""
+
             if mode == "base64_encode":
-                result = base64.b64encode(input_data.encode('utf-8')).decode('utf-8')
+                if is_file:
+                    result = base64.b64encode(input_data).decode('ascii')
+                else:
+                    result = base64.b64encode(input_data.encode('utf-8')).decode('ascii')
+
             elif mode == "base64_decode":
-                result = base64.b64decode(input_data).decode('utf-8')
+                if is_file:
+                    result = base64.b64decode(input_data).decode('utf-8', errors='ignore')
+                else:
+                    result = base64.b64decode(input_data).decode('utf-8', errors='ignore')
+
+            elif mode == "base32_encode":
+                if is_file:
+                    result = base64.b32encode(input_data).decode('ascii')
+                else:
+                    result = base64.b32encode(input_data.encode('utf-8')).decode('ascii')
+
+            elif mode == "base32_decode":
+                result = base64.b32decode(input_data).decode('utf-8', errors='ignore')
+
+            elif mode == "base85_encode":
+                if is_file:
+                    result = base64.b85encode(input_data).decode('ascii')
+                else:
+                    result = base64.b85encode(input_data.encode('utf-8')).decode('ascii')
+
+            elif mode == "base85_decode":
+                result = base64.b85decode(input_data).decode('utf-8', errors='ignore')
+
             elif mode == "hex_encode":
-                result = input_data.encode('utf-8').hex()
+                if is_file:
+                    result = input_data.hex()
+                else:
+                    result = input_data.encode('utf-8').hex()
+
             elif mode == "hex_decode":
-                result = bytes.fromhex(input_data).decode('utf-8')
+                result = bytes.fromhex(input_data.replace(' ', '')).decode('utf-8', errors='ignore')
+
             elif mode == "url_encode":
-                result = urllib.parse.quote(input_data)
+                import urllib.parse
+                result = urllib.parse.quote(input_data if not is_file else input_data.decode('utf-8', errors='ignore'))
+
             elif mode == "url_decode":
+                import urllib.parse
                 result = urllib.parse.unquote(input_data)
 
-            self.enc_output.insert("1.0", result)
-            self.app.show_toast("✅ Конвертация успешна")
-        except Exception as e:
-            self.enc_output.insert("1.0", f"Ошибка: {e}\nПроверьте формат входных данных.")
+            elif mode == "html_encode":
+                import html
+                result = html.escape(input_data if not is_file else input_data.decode('utf-8', errors='ignore'))
 
-        self.enc_output.config(state='disabled')
+            elif mode == "html_decode":
+                import html
+                result = html.unescape(input_data)
+
+            elif mode == "unicode_encode":
+                text = input_data if not is_file else input_data.decode('utf-8', errors='ignore')
+                result = text.encode('unicode_escape').decode('ascii')
+
+            elif mode == "unicode_decode":
+                result = input_data.encode('ascii').decode('unicode_escape')
+
+            self.enc_output.insert("1.0", result)
+            self.enc_output.config(state='disabled')
+
+            # Статистика
+            input_size = len(input_data) if isinstance(input_data, bytes) else len(input_data.encode('utf-8'))
+            output_size = len(result.encode('utf-8'))
+            ratio = (output_size / input_size * 100) if input_size > 0 else 0
+
+            self.enc_stats_label.config(
+                text=f"📊 Вход: {input_size} байт | Выход: {output_size} байт | Изменение: {ratio:.1f}%"
+            )
+
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Конвертация успешна")
+
+        except Exception as e:
+            self.enc_output.insert("1.0", f"❌ Ошибка: {str(e)}\nПроверьте формат входных данных.")
+            self.enc_output.config(state='disabled')
 
     def copy_encoding_result(self):
+        """Копирует результат в буфер обмена"""
         data = self.enc_output.get("1.0", tk.END).strip()
         if data:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(data)
-            self.app.show_toast("✅ Результат скопирован")
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(data)
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Результат скопирован")
 
-    # ───────────────────────────────────────────────
-    # 5. ИНСТРУМЕНТ: ИЗВЛЕКАТЕЛЬ МЕТАДАННЫХ (ПРОФЕССИОНАЛЬНЫЙ)
-    # ───────────────────────────────────────────────
+    def save_encoding_result(self):
+        """Сохраняет результат в файл"""
+        data = self.enc_output.get("1.0", tk.END).strip()
+        if not data:
+            messagebox.showwarning("⚠️ Внимание", "Нет результата для сохранения")
+            return
 
-    # Кэш метаданных для оптимизации повторных запросов
-    _metadata_cache: Dict[str, Tuple[dict, float]] = {}
-    _CACHE_TTL = 300  # 5 минут жизни кэша
+        path = filedialog.asksaveasfilename(
+            title="Сохранить результат",
+            defaultextension=".txt",
+            filetypes=[("Текст", "*.txt"), ("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_save_dir', os.path.expanduser("~"))
+        )
+
+        if path:
+            try:
+                with open(path, 'w', encoding='utf-8') as f:
+                    f.write(data)
+                setattr(self.app, 'last_save_dir', os.path.dirname(path))
+                getattr(self.app, 'show_toast', lambda x: None)(f"✅ Сохранено в {os.path.basename(path)}")
+            except Exception as e:
+                messagebox.showerror("❌ Ошибка", f"Не удалось сохранить: {str(e)}")
+
+    def clear_encoding(self):
+        """Очищает поля кодировщика"""
+        if hasattr(self, 'enc_text_input'):
+            self.enc_text_input.delete("1.0", tk.END)
+        if hasattr(self, 'enc_file_path'):
+            self.enc_file_path.set("")
+        self.enc_output.config(state='normal')
+        self.enc_output.delete("1.0", tk.END)
+        self.enc_output.config(state='disabled')
+        self.enc_stats_label.config(text="")
+
+    # =========================================================================
+    # 5. МЕТАДАННЫЕ (УЛУЧШЕННЫЙ)
+    # =========================================================================
 
     def create_metadata_tool(self):
-        """Профессиональный инструмент извлечения метаданных"""
-        # Основной фрейм с прокруткой
-        meta_canvas = tk.Canvas(self.meta_tool_frame, bg=self.colors["bg"],
-                                highlightthickness=0)  # ИСПРАВЛЕНО: self.meta_tool_frame вместо self.enc_frame
-        meta_scrollbar = ttk.Scrollbar(self.meta_tool_frame, orient="vertical", command=meta_canvas.yview)  # ИСПРАВЛЕНО
-        meta_scrollable = ttk.Frame(meta_canvas, style="Card.TFrame")
-
-        meta_scrollable.bind("<Configure>", lambda e: meta_canvas.configure(scrollregion=meta_canvas.bbox("all")))
-        meta_canvas.create_window((0, 0), window=meta_scrollable, anchor="nw")
-        meta_canvas.configure(yscrollcommand=meta_scrollbar.set)
-
-        meta_canvas.pack(side="left", fill="both", expand=True, padx=10, pady=10)
-        meta_scrollbar.pack(side="right", fill="y")
-
-        # Заголовок
-        header_frame = ttk.Frame(meta_scrollable, style="Card.TFrame")
-        header_frame.pack(fill=tk.X, pady=(0, 15))
-        ttk.Label(
-            header_frame,
-            text="🔍 Извлечение метаданных",
-            font=("Segoe UI", 16, "bold"),
-            style="Title.TLabel"
-        ).pack(anchor="w")
-        ttk.Label(
-            header_frame,
-            text="Анализ EXIF, IPTC, XMP, ID3 и других метаданных для цифровой криминалистики",
-            style="Secondary.TLabel"
-        ).pack(anchor="w", pady=(5, 0))
-
-        # Панель выбора файла
-        select_frame = ttk.LabelFrame(meta_scrollable, text="📁 Выбор файла", padding=12, style="Card.TLabelframe")
-        select_frame.pack(fill=tk.X, pady=(0, 15))
+        """Создаёт улучшенный инструмент извлечения метаданных"""
+        # Выбор файла
+        select_frame = ttk.LabelFrame(self.meta_frame, text="📁 Выбор файла", padding=10)
+        select_frame.pack(fill=tk.X, padx=10, pady=10)
 
         self.meta_file_path = tk.StringVar()
-        path_entry = ttk.Entry(select_frame, textvariable=self.meta_file_path, state='readonly', style="TEntry")
+        path_entry = ttk.Entry(select_frame, textvariable=self.meta_file_path, state='readonly')
         path_entry.pack(fill=tk.X, pady=(0, 10))
 
-        btn_row = ttk.Frame(select_frame, style="Card.TFrame")
+        btn_row = ttk.Frame(select_frame)
         btn_row.pack(fill=tk.X)
-        ttk.Button(btn_row, text="📂 Обзор...", command=self.select_meta_file, style="Accent.TButton").pack(side=tk.LEFT,
-                                                                                                           padx=(0, 5))
-        ttk.Button(btn_row, text="🗑️ Очистить", command=self.clear_meta_selection, style="TButton").pack(side=tk.LEFT,
-                                                                                                         padx=(0, 5))
-        ttk.Button(btn_row, text="🔄 Перезагрузить", command=self.refresh_metadata, style="TButton").pack(side=tk.LEFT)
 
-        # Панель управления
-        control_frame = ttk.LabelFrame(meta_scrollable, text="⚙️ Управление", padding=12, style="Card.TLabelframe")
-        control_frame.pack(fill=tk.X, pady=(0, 15))
+        ttk.Button(btn_row, text="📂 Обзор...", command=self.select_meta_file).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_row, text="🗑️ Очистить", command=self.clear_meta_selection).pack(side=tk.LEFT, padx=(0, 5))
 
-        ctrl_row = ttk.Frame(control_frame, style="Card.TFrame")
-        ctrl_row.pack(fill=tk.X)
-        self.extract_btn = ttk.Button(ctrl_row, text="🔍 Извлечь метаданные", command=self.extract_metadata,
-                                      style="Accent.TButton", state="disabled")
-        self.extract_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.copy_btn = ttk.Button(ctrl_row, text="📋 Копировать", command=self.copy_metadata, style="TButton",
-                                   state="disabled")
-        self.copy_btn.pack(side=tk.LEFT, padx=(0, 5))
-        self.export_btn = ttk.Button(ctrl_row, text="📤 Экспорт", command=self.export_metadata, style="TButton",
-                                     state="disabled")
-        self.export_btn.pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(ctrl_row, text="🗑️ Очистить результат", command=self.clear_metadata_result, style="TButton").pack(
-            side=tk.LEFT)
+        # Поддерживаемые форматы
+        formats_frame = ttk.Frame(select_frame)
+        formats_frame.pack(fill=tk.X, pady=(10, 0))
 
-        # Панель поиска/фильтра
-        filter_frame = ttk.LabelFrame(meta_scrollable, text="🔎 Поиск и фильтрация", padding=12,
-                                      style="Card.TLabelframe")
-        filter_frame.pack(fill=tk.X, pady=(0, 15))
+        ttk.Label(formats_frame,
+                  text="📋 Поддерживаемые форматы: Изображения, PDF, Office (DOCX, XLSX, PPTX), Аудио, Видео",
+                  style="Secondary.TLabel", wraplength=600).pack(anchor=tk.W)
 
-        self.meta_filter_var = tk.StringVar()
-        filter_entry = ttk.Entry(filter_frame, textvariable=self.meta_filter_var, style="TEntry")
-        filter_entry.pack(fill=tk.X, pady=(0, 10))
-        filter_entry.bind("<KeyRelease>", lambda e: self.filter_metadata_view())
+        # Результаты
+        result_frame = ttk.LabelFrame(self.meta_frame, text="📊 Результаты", padding=10)
+        result_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        filter_row = ttk.Frame(filter_frame, style="Card.TFrame")
-        filter_row.pack(fill=tk.X)
-        ttk.Label(filter_row, text="Фильтр полей:", style="Secondary.TLabel").pack(side=tk.LEFT)
-        self.show_empty_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(filter_row, text="Показывать пустые поля", variable=self.show_empty_var,
-                        command=self.filter_metadata_view, style="TCheckbutton").pack(side=tk.LEFT, padx=(20, 0))
+        columns = ("Ключ", "Значение", "Тип")
+        self.meta_tree = ttk.Treeview(result_frame, columns=columns, show="tree headings", height=15)
 
-        # Результаты - Treeview с группировкой
-        result_frame = ttk.LabelFrame(meta_scrollable, text="📊 Результаты", padding=12, style="Card.TLabelframe")
-        result_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 15))
-
-        # Treeview с поддержкой группировки
-        columns = ("Ключ", "Значение", "Тип", "Размер")
-        self.meta_tree = ttk.Treeview(result_frame, columns=columns, show="tree headings", height=15, style="Treeview")
         self.meta_tree.heading("Ключ", text="Ключ")
         self.meta_tree.heading("Значение", text="Значение")
         self.meta_tree.heading("Тип", text="Тип")
-        self.meta_tree.heading("Размер", text="Размер")
-        self.meta_tree.column("Ключ", width=200, anchor=tk.W)
-        self.meta_tree.column("Значение", width=300, anchor=tk.W)
-        self.meta_tree.column("Тип", width=100, anchor=tk.CENTER)
-        self.meta_tree.column("Размер", width=80, anchor=tk.CENTER)
 
-        # Скроллбары для Treeview
+        self.meta_tree.column("Ключ", width=250, anchor=tk.W)
+        self.meta_tree.column("Значение", width=400, anchor=tk.W)
+        self.meta_tree.column("Тип", width=100, anchor=tk.CENTER)
+
         tree_scroll_y = ttk.Scrollbar(result_frame, orient="vertical", command=self.meta_tree.yview)
-        tree_scroll_x = ttk.Scrollbar(result_frame, orient="horizontal", command=self.meta_tree.xview)
-        self.meta_tree.configure(yscrollcommand=tree_scroll_y.set, xscrollcommand=tree_scroll_x.set)
+        self.meta_tree.configure(yscrollcommand=tree_scroll_y.set)
 
         self.meta_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         tree_scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
-        tree_scroll_x.pack(side=tk.BOTTOM, fill=tk.X)
+
+        # Кнопки
+        btn_frame = ttk.Frame(self.meta_frame)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Button(btn_frame, text="🔍 Извлечь метаданные", style="Accent.TButton",
+                   command=self.extract_metadata).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать", command=self.copy_metadata).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📤 Экспорт", command=self.export_metadata).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="🗑️ Очистить результат", command=self.clear_metadata_result).pack(side=tk.LEFT,
+                                                                                                     padx=5)
 
         # Статусная строка
-        self.meta_status = ttk.Label(meta_scrollable, text="✅ Готов к работе", style="Secondary.TLabel")
-        self.meta_status.pack(fill=tk.X, pady=(0, 10))
-
-        # Привязка контекстного меню
-        self.meta_tree.bind("<Button-3>", self.show_meta_context_menu)
+        self.meta_status_label = ttk.Label(self.meta_frame, text="✅ Готов к работе", style="Secondary.TLabel")
+        self.meta_status_label.pack(fill=tk.X, padx=10, pady=(0, 10))
 
         # Кэш для текущих данных
-        self.current_metadata: dict = {}
-        self.current_file_hash: str = ""
+        self.current_metadata = {}
+        self.current_file_hash = ""
 
     def select_meta_file(self):
-        """Выбор файла для анализа метаданных"""
+        """Выбирает файл для анализа метаданных"""
         filetypes = [
-            ("Все поддерживаемые", "*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.wav *.pdf"),
+            ("Все поддерживаемые", "*.png *.jpg *.jpeg *.bmp *.tiff *.tif *.wav *.mp3 *.pdf *.docx *.xlsx"),
             ("Изображения", "*.png *.jpg *.jpeg *.bmp *.tiff *.tif"),
-            ("Аудио WAV", "*.wav"),
+            ("Аудио", "*.wav *.mp3 *.flac"),
             ("PDF документы", "*.pdf"),
+            ("Office документы", "*.docx *.xlsx *.pptx"),
             ("Все файлы", "*.*")
         ]
+
         path = filedialog.askopenfilename(
             title="Выберите файл для анализа метаданных",
             filetypes=filetypes,
-            initialdir=self.app.last_open_dir
+            initialdir=getattr(self.app, 'last_open_dir', os.path.expanduser("~"))
         )
+
         if path:
             self.meta_file_path.set(path)
-            self.app.last_open_dir = os.path.dirname(path)
-            self.extract_btn.config(state="normal")
-            self.clear_metadata_result()
-            # Предварительный анализ
+            setattr(self.app, 'last_open_dir', os.path.dirname(path))
             self._preload_file_info(path)
 
     def _preload_file_info(self, path: str):
@@ -10681,24 +11781,33 @@ class IBToolsTab:
         try:
             ext = os.path.splitext(path)[1].lower()
             size = os.path.getsize(path)
-            info = f"📄 {os.path.basename(path)} • {Utils.format_size(size)}"
-            if ext in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff']:
-                with Image.open(path) as img:
-                    info += f" • {img.width}x{img.height} • {img.mode}"
+
+            info = f"📄 {os.path.basename(path)} • {self._format_size(size)}"
+
+            if ext in ['.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif']:
+                try:
+                    with Image.open(path) as img:
+                        info += f" • {img.width}x{img.height} • {img.mode}"
+                except:
+                    pass
             elif ext == '.wav':
-                with wave.open(path, 'rb') as wav:
-                    dur = wav.getnframes() / wav.getframerate()
-                    info += f" • {wav.getnchannels()}ch • {dur:.1f}с"
-            self.meta_status.config(text=info)
-        except Exception:
-            pass
+                try:
+                    import wave
+                    with wave.open(path, 'rb') as wav:
+                        dur = wav.getnframes() / wav.getframerate()
+                        info += f" • {wav.getnchannels()}ch • {dur:.1f}с"
+                except:
+                    pass
+
+            self.meta_status_label.config(text=info)
+        except Exception as e:
+            self.meta_status_label.config(text=f"⚠️ Ошибка предпросмотра: {str(e)}")
 
     def clear_meta_selection(self):
-        """Очистка выбора файла"""
+        """Очищает выбор файла"""
         self.meta_file_path.set("")
-        self.extract_btn.config(state="disabled")
         self.clear_metadata_result()
-        self.meta_status.config(text="✅ Готов к работе")
+        self.meta_status_label.config(text="✅ Готов к работе")
 
     def _get_file_hash(self, path: str) -> str:
         """Быстрый хеш для кэширования (первые 8KB + размер + mtime)"""
@@ -10711,58 +11820,36 @@ class IBToolsTab:
         except:
             return ""
 
-    def _check_cache(self, file_hash: str) -> Optional[dict]:
-        """Проверка кэша метаданных"""
-        if file_hash in IBToolsTab._metadata_cache:
-            data, timestamp = IBToolsTab._metadata_cache[file_hash]
-            if time.time() - timestamp < IBToolsTab._CACHE_TTL:
-                return data
-            else:
-                del IBToolsTab._metadata_cache[file_hash]
-        return None
-
-    def _save_cache(self, file_hash: str, data: dict):
-        """Сохранение в кэш"""
-        IBToolsTab._metadata_cache[file_hash] = (data, time.time())
-        # Очистка старого кэша
-        now = time.time()
-        to_delete = [k for k, (_, ts) in IBToolsTab._metadata_cache.items() if now - ts > IBToolsTab._CACHE_TTL]
-        for k in to_delete:
-            del IBToolsTab._metadata_cache[k]
+    def _format_size(self, size: int) -> str:
+        """Форматирует размер файла"""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size < 1024.0:
+                return f"{size:.2f} {unit}"
+            size /= 1024.0
+        return f"{size:.2f} PB"
 
     def extract_metadata(self):
-        """Основной метод извлечения метаданных (асинхронный)"""
+        """Основной метод извлечения метаданных"""
         path = self.meta_file_path.get()
+
         if not path or not os.path.exists(path):
             messagebox.showwarning("⚠️ Ошибка", "Файл не выбран или не существует")
             return
 
-        # Проверка кэша
-        file_hash = self._get_file_hash(path)
-        cached = self._check_cache(file_hash)
-        if cached:
-            self._display_metadata(cached, path, from_cache=True)
-            return
-
-        # Блокировка UI и запуск в фоне
-        self.extract_btn.config(state="disabled")
-        self.meta_status.config(text="⏳ Извлечение метаданных...")
+        # Блокировка UI
+        self.meta_status_label.config(text="⏳ Извлечение метаданных...")
         self.meta_tree.delete(*self.meta_tree.get_children())
 
-        def task():
-            try:
-                result = self._extract_metadata_core(path)
-                self._save_cache(file_hash, result)
-                self.root.after(0, lambda: self._display_metadata(result, path, from_cache=False))
-            except Exception as e:
-                self.root.after(0, lambda: self._show_metadata_error(str(e)))
-            finally:
-                self.root.after(0, lambda: self.extract_btn.config(state="normal"))
-
-        threading.Thread(target=task, daemon=True).start()
+        try:
+            result = self._extract_metadata_core(path)
+            self._display_metadata(result, path)
+            self.meta_status_label.config(text=f"✅ Извлечено {len(result)} полей • {os.path.basename(path)}")
+        except Exception as e:
+            self.meta_status_label.config(text=f"❌ Ошибка: {str(e)}")
+            messagebox.showerror("❌ Ошибка анализа", f"Не удалось извлечь метаданные:\n{str(e)}")
 
     def _extract_metadata_core(self, path: str) -> dict:
-        """Ядро извлечения метаданных - оптимизированное"""
+        """Ядро извлечения метаданных"""
         result = {
             "file": {},
             "image": {},
@@ -10771,6 +11858,7 @@ class IBToolsTab:
             "xmp": {},
             "audio": {},
             "pdf": {},
+            "office": {},
             "gps": {},
             "warnings": []
         }
@@ -10784,7 +11872,7 @@ class IBToolsTab:
                 "name": os.path.basename(path),
                 "path": path,
                 "size": stat.st_size,
-                "size_formatted": Utils.format_size(stat.st_size),
+                "size_formatted": self._format_size(stat.st_size),
                 "created": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_ctime)),
                 "modified": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(stat.st_mtime)),
                 "extension": ext
@@ -10810,6 +11898,7 @@ class IBToolsTab:
                         if exif:
                             for tag_id, value in exif.items():
                                 tag_name = Image.ExifTags.TAGS.get(tag_id, f"Unknown_{tag_id}")
+
                                 # Обработка сложных типов
                                 if isinstance(value, bytes):
                                     try:
@@ -10818,7 +11907,9 @@ class IBToolsTab:
                                         value = f"<bytes:{len(value)}>"
                                 elif isinstance(value, tuple):
                                     value = " × ".join(str(v) for v in value)
+
                                 result["exif"][tag_name] = value
+
                                 # GPS данные
                                 if tag_id == 0x8825 and isinstance(value, dict):
                                     self._parse_gps_data(value, result["gps"])
@@ -10832,17 +11923,17 @@ class IBToolsTab:
             except Exception as e:
                 result["warnings"].append(f"Ошибка анализа изображения: {e}")
 
+        # Аудио WAV
         elif ext == '.wav':
             try:
+                import wave
                 with wave.open(path, 'rb') as wav:
-                    # Словарь для расшифровки типов сжатия WAV
                     compression_types = {
                         'NONE': 'Без сжатия (PCM)',
                         'ULAW': 'μ-law (ITU-T G.711)',
                         'ALAW': 'A-law (ITU-T G.711)',
                         'IMA4': 'IMA ADPCM',
-                        'MSADPCM': 'Microsoft ADPCM',
-                        'GSM610': 'GSM 6.10'
+                        'MSADPCM': 'Microsoft ADPCM'
                     }
 
                     comptype = wav.getcomptype()
@@ -10863,83 +11954,117 @@ class IBToolsTab:
             except Exception as e:
                 result["warnings"].append(f"Ошибка анализа аудио: {e}")
 
-        # PDF (базовый анализ без внешних зависимостей)
+        # PDF (базовый анализ)
         elif ext == '.pdf':
             try:
                 with open(path, 'rb') as f:
                     header = f.read(1024).decode('latin-1', errors='ignore')
-                    # Поиск %%EOF и базовых метаданных
-                    if '/Title' in header:
-                        import re
-                        title_match = re.search(r'/Title\s*\(([^)]+)\)', header)
-                        if title_match:
-                            result["pdf"]["Title"] = title_match.group(1)
-                    if '/Author' in header:
-                        author_match = re.search(r'/Author\s*\(([^)]+)\)', header)
-                        if author_match:
-                            result["pdf"]["Author"] = author_match.group(1)
-                    if '/Creator' in header:
-                        creator_match = re.search(r'/Creator\s*\(([^)]+)\)', header)
-                        if creator_match:
-                            result["pdf"]["Creator"] = creator_match.group(1)
-                    if '/Producer' in header:
-                        producer_match = re.search(r'/Producer\s*\(([^)]+)\)', header)
-                        if producer_match:
-                            result["pdf"]["Producer"] = producer_match.group(1)
-                    if '/CreationDate' in header:
-                        date_match = re.search(r'/CreationDate\s*\(([^)]+)\)', header)
-                        if date_match:
-                            result["pdf"]["CreationDate"] = date_match.group(1)
+
+                    import re
+                    patterns = {
+                        'Title': r'/Title\s*\(([^)]+)\)',
+                        'Author': r'/Author\s*\(([^)]+)\)',
+                        'Creator': r'/Creator\s*\(([^)]+)\)',
+                        'Producer': r'/Producer\s*\(([^)]+)\)',
+                        'CreationDate': r'/CreationDate\s*\(([^)]+)\)'
+                    }
+
+                    for key, pattern in patterns.items():
+                        match = re.search(pattern, header)
+                        if match:
+                            result["pdf"][key] = match.group(1)
+
             except Exception as e:
                 result["warnings"].append(f"Ошибка анализа PDF: {e}")
+
+        # Office документы (DOCX, XLSX, PPTX)
+        elif ext in ['.docx', '.xlsx', '.pptx']:
+            try:
+                import zipfile
+                import xml.etree.ElementTree as ET
+
+                with zipfile.ZipFile(path, 'r') as zip_ref:
+                    if 'docProps/core.xml' in zip_ref.namelist():
+                        core_xml = zip_ref.read('docProps/core.xml')
+                        root = ET.fromstring(core_xml)
+
+                        ns = {
+                            'dc': 'http://purl.org/dc/elements/1.1/',
+                            'cp': 'http://schemas.openxmlformats.org/package/2006/metadata/core-properties',
+                            'dcterms': 'http://purl.org/dc/terms/'
+                        }
+
+                        for elem in root.iter():
+                            tag = elem.tag.split('}')[-1] if '}' in elem.tag else elem.tag
+                            if elem.text and elem.text.strip():
+                                result["office"][tag] = elem.text.strip()
+
+            except Exception as e:
+                result["warnings"].append(f"Ошибка анализа Office: {e}")
 
         return result
 
     def _parse_gps_data(self, gps_info: dict, target: dict):
         """Парсинг GPS данных из EXIF"""
         try:
-            # Упрощенный парсинг - для полного нужен pyexiv2 или piexif
-            if 1 in gps_info and 2 in gps_info:  # LatRef и Latitude
+            # LatRef и Latitude
+            if 1 in gps_info and 2 in gps_info:
                 lat_ref = gps_info[1]
                 lat_val = gps_info[2]
+
                 if isinstance(lat_val, tuple) and len(lat_val) == 3:
                     deg, minute, sec = lat_val
-                    if isinstance(deg, tuple): deg = deg[0] / deg[1] if deg[1] else 0
-                    if isinstance(minute, tuple): minute = minute[0] / minute[1] if minute[1] else 0
-                    if isinstance(sec, tuple): sec = sec[0] / sec[1] if sec[1] else 0
+
+                    if isinstance(deg, tuple):
+                        deg = deg[0] / deg[1] if deg[1] else 0
+                    if isinstance(minute, tuple):
+                        minute = minute[0] / minute[1] if minute[1] else 0
+                    if isinstance(sec, tuple):
+                        sec = sec[0] / sec[1] if sec[1] else 0
+
                     latitude = deg + minute / 60 + sec / 3600
-                    if lat_ref == 'S': latitude = -latitude
+                    if lat_ref == 'S':
+                        latitude = -latitude
+
                     target["latitude"] = round(latitude, 6)
 
-            if 3 in gps_info and 4 in gps_info:  # LonRef и Longitude
+            # LonRef и Longitude
+            if 3 in gps_info and 4 in gps_info:
                 lon_ref = gps_info[3]
                 lon_val = gps_info[4]
+
                 if isinstance(lon_val, tuple) and len(lon_val) == 3:
                     deg, minute, sec = lon_val
-                    if isinstance(deg, tuple): deg = deg[0] / deg[1] if deg[1] else 0
-                    if isinstance(minute, tuple): minute = minute[0] / minute[1] if minute[1] else 0
-                    if isinstance(sec, tuple): sec = sec[0] / sec[1] if sec[1] else 0
+
+                    if isinstance(deg, tuple):
+                        deg = deg[0] / deg[1] if deg[1] else 0
+                    if isinstance(minute, tuple):
+                        minute = minute[0] / minute[1] if minute[1] else 0
+                    if isinstance(sec, tuple):
+                        sec = sec[0] / sec[1] if sec[1] else 0
+
                     longitude = deg + minute / 60 + sec / 3600
-                    if lon_ref == 'W': longitude = -longitude
+                    if lon_ref == 'W':
+                        longitude = -longitude
+
                     target["longitude"] = round(longitude, 6)
 
-            if 5 in gps_info:  # AltitudeRef
-                target["altitude_ref"] = "Above sea level" if gps_info[5] == 0 else "Below sea level"
-            if 6 in gps_info:  # Altitude
+            # Altitude
+            if 6 in gps_info:
                 alt = gps_info[6]
                 if isinstance(alt, tuple):
                     alt = alt[0] / alt[1] if alt[1] else 0
                 target["altitude_m"] = round(alt, 2)
 
         except Exception:
-            pass  # Игнорируем ошибки парсинга GPS
+            pass
 
-    def _display_metadata(self, data: dict, file_path: str, from_cache: bool = False):
-        """Отображение метаданных в Treeview с группировкой"""
+    def _display_metadata(self, data: dict, file_path: str):
+        """Отображение метаданных в Treeview"""
         self.current_metadata = data
         self.current_file_hash = self._get_file_hash(file_path)
 
-        # Очистка и подготовка
+        # Очистка
         self.meta_tree.delete(*self.meta_tree.get_children())
 
         # Группы метаданных
@@ -10951,6 +12076,7 @@ class IBToolsTab:
             ("📄 XMP", data.get("xmp", {})),
             ("🎵 Аудио", data.get("audio", {})),
             ("📕 PDF", data.get("pdf", {})),
+            ("📊 Office", data.get("office", {})),
             ("🌍 GPS", data.get("gps", {})),
         ]
 
@@ -10959,103 +12085,63 @@ class IBToolsTab:
             if group_data:
                 parent = self.meta_tree.insert("", "end", text=group_name, values=("", "", ""), open=True,
                                                tags=("group",))
+
                 for key, value in sorted(group_data.items()):
                     val_str = self._format_metadata_value(value)
                     val_type = type(value).__name__
-                    val_size = f"{len(str(value))}" if isinstance(value, (str, bytes)) else "-"
-                    self.meta_tree.insert(parent, "end", values=(key, val_str, val_type, val_size), tags=("item",))
+
+                    self.meta_tree.insert(parent, "end", values=(key, val_str, val_type), tags=("item",))
 
         # Предупреждения
         if data.get("warnings"):
             warn_parent = self.meta_tree.insert("", "end", text="⚠️ Предупреждения", values=("", "", ""), open=True,
                                                 tags=("warning_group",))
+
             for warn in data["warnings"]:
-                self.meta_tree.insert(warn_parent, "end", values=(warn, "", "error", ""), tags=("warning",))
-
-        # Статус
-        cache_note = " (из кэша)" if from_cache else ""
-        total_items = sum(1 for _ in self.meta_tree.get_children())
-        self.meta_status.config(text=f"✅ Извлечено {total_items} полей{cache_note} • {os.path.basename(file_path)}")
-
-        # Активация кнопок
-        self.copy_btn.config(state="normal")
-        self.export_btn.config(state="normal")
+                self.meta_tree.insert(warn_parent, "end", values=(warn, "", "error"), tags=("warning",))
 
         # Применение стилей
-        self.meta_tree.tag_configure("group", foreground=self.colors["accent"], font=("Segoe UI", 10, "bold"))
-        self.meta_tree.tag_configure("warning_group", foreground=self.colors["warning"], font=("Segoe UI", 10, "bold"))
-        self.meta_tree.tag_configure("item", foreground=self.colors["text"])
-        self.meta_tree.tag_configure("warning", foreground=self.colors["error"], font=("Segoe UI", 9, "italic"))
-
-        # Авто-фильтрация если есть текст
-        if self.meta_filter_var.get():
-            self.filter_metadata_view()
+        self.meta_tree.tag_configure("group", foreground=self.colors.get("accent", "#58A6FF"),
+                                     font=("Segoe UI", 10, "bold"))
+        self.meta_tree.tag_configure("warning_group", foreground=self.colors.get("warning", "#FFA500"),
+                                     font=("Segoe UI", 10, "bold"))
+        self.meta_tree.tag_configure("item", foreground=self.colors.get("text", "#FFFFFF"))
+        self.meta_tree.tag_configure("warning", foreground=self.colors.get("error", "#FF4444"),
+                                     font=("Segoe UI", 9, "italic"))
 
     def _format_metadata_value(self, value) -> str:
         """Форматирование значения метаданных для отображения"""
         if value is None:
             return "-"
+
         if isinstance(value, bool):
             return "✓" if value else "✗"
+
         if isinstance(value, (int, float)):
             return f"{value:,}" if isinstance(value, int) else f"{value:.3f}"
+
         if isinstance(value, bytes):
             try:
                 decoded = value.decode('utf-8', errors='ignore').strip()
                 return decoded if len(decoded) <= 100 else decoded[:97] + "..."
             except:
                 return f"<binary:{len(value)}B>"
+
         if isinstance(value, (tuple, list)):
             if len(value) <= 3:
                 return " × ".join(str(v) for v in value)
             return f"[{len(value)} items]"
+
         if isinstance(value, dict):
             return f"{{{len(value)} fields}}"
+
         text = str(value)
         return text if len(text) <= 150 else text[:147] + "..."
-
-    def filter_metadata_view(self):
-        """Фильтрация отображаемых метаданных"""
-        filter_text = self.meta_filter_var.get().lower()
-        show_empty = self.show_empty_var.get()
-
-        # Рекурсивная функция для фильтрации
-        def filter_node(node_id):
-            children = self.meta_tree.get_children(node_id)
-            has_visible = False
-
-            for child in children:
-                values = self.meta_tree.item(child, "values")
-                key = values[0].lower() if values else ""
-                value = values[1].lower() if len(values) > 1 else ""
-
-                # Проверка фильтра
-                matches = not filter_text or filter_text in key or filter_text in value
-                # Проверка пустых значений
-                has_content = show_empty or (values[1] and values[1] not in ["-", "", "None"])
-
-                if matches and has_content:
-                    self.meta_tree.detach(child)
-                    self.meta_tree.move(child, node_id, "end")
-                    has_visible = True
-                    # Рекурсивно для вложенных
-                    if self.meta_tree.get_children(child):
-                        filter_node(child)
-                else:
-                    self.meta_tree.detach(child)
-
-            # Скрыть/показать родительскую группу
-            if node_id and not has_visible and self.meta_tree.item(node_id, "tags") and "group" in self.meta_tree.item(
-                    node_id, "tags"):
-                self.meta_tree.detach(node_id)
-
-        # Запуск фильтрации с корня
-        for root_item in self.meta_tree.get_children():
-            filter_node(root_item)
 
     def copy_metadata(self):
         """Копирование метаданных в буфер обмена"""
         if not self.current_metadata:
+            messagebox.showwarning("⚠️ Нет данных", "Сначала извлеките метаданные")
             return
 
         # Формирование текста
@@ -11081,6 +12167,7 @@ class IBToolsTab:
             ("📄 XMP", self.current_metadata.get("xmp", {})),
             ("🎵 Audio", self.current_metadata.get("audio", {})),
             ("📕 PDF", self.current_metadata.get("pdf", {})),
+            ("📊 Office", self.current_metadata.get("office", {})),
             ("🌍 GPS", self.current_metadata.get("gps", {})),
         ]
 
@@ -11093,9 +12180,10 @@ class IBToolsTab:
                 lines.append(f"  • {w}")
 
         text = "\n".join(lines)
-        self.root.clipboard_clear()
-        self.root.clipboard_append(text)
-        self.app.show_toast("✅ Метаданные скопированы")
+
+        self.parent.clipboard_clear()
+        self.parent.clipboard_append(text)
+        getattr(self.app, 'show_toast', lambda x: None)("✅ Метаданные скопированы")
 
     def export_metadata(self):
         """Экспорт метаданных в файл"""
@@ -11103,43 +12191,48 @@ class IBToolsTab:
             messagebox.showwarning("⚠️ Нет данных", "Сначала извлеките метаданные")
             return
 
-        # Диалог сохранения
         filetypes = [
             ("JSON", "*.json"),
             ("CSV", "*.csv"),
             ("Текст", "*.txt"),
             ("Все файлы", "*.*")
         ]
+
         path = filedialog.asksaveasfilename(
             title="Экспорт метаданных",
             defaultextension=".json",
             filetypes=filetypes,
-            initialdir=self.app.last_save_dir,
-            initialfile=f"metadata_{os.path.splitext(os.path.basename(self.meta_file_path.get()))[0]}"
+            initialdir=getattr(self.app, 'last_save_dir', os.path.expanduser("~"))
         )
+
         if not path:
             return
 
         try:
             ext = os.path.splitext(path)[1].lower()
+
             if ext == '.json':
                 with open(path, 'w', encoding='utf-8') as f:
                     json.dump(self.current_metadata, f, indent=2, ensure_ascii=False, default=str)
+
             elif ext == '.csv':
                 import csv
                 with open(path, 'w', newline='', encoding='utf-8-sig') as f:
                     writer = csv.writer(f)
                     writer.writerow(["Группа", "Ключ", "Значение", "Тип"])
-                    for group_name in ["file", "image", "exif", "iptc", "xmp", "audio", "pdf", "gps"]:
+
+                    for group_name in ["file", "image", "exif", "iptc", "xmp", "audio", "pdf", "office", "gps"]:
                         group_data = self.current_metadata.get(group_name, {})
                         for key, value in group_data.items():
                             writer.writerow([group_name, key, self._format_metadata_value(value), type(value).__name__])
+
             else:  # txt
                 with open(path, 'w', encoding='utf-8') as f:
                     f.write(f"Metadata Export • {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
                     f.write(f"File: {self.current_metadata.get('file', {}).get('name', 'Unknown')}\n")
-                    f.write("=" * 60 + "\n\n")
-                    for group_name in ["file", "image", "exif", "iptc", "xmp", "audio", "pdf", "gps"]:
+                    f.write("=" * 60 + "\n")
+
+                    for group_name in ["file", "image", "exif", "iptc", "xmp", "audio", "pdf", "office", "gps"]:
                         group_data = self.current_metadata.get(group_name, {})
                         if group_data:
                             f.write(f"### {group_name.upper()} ###\n")
@@ -11147,9 +12240,11 @@ class IBToolsTab:
                                 f.write(f"{key}: {self._format_metadata_value(value)}\n")
                             f.write("\n")
 
-            self.app.last_save_dir = os.path.dirname(path)
-            self.app.show_toast(f"✅ Экспортировано в {os.path.basename(path)}")
-            self.log_manager.add_entry("metadata_export", "success", {"file": path, "format": ext})
+            setattr(self.app, 'last_save_dir', os.path.dirname(path))
+            getattr(self.app, 'show_toast', lambda x: None)(f"✅ Экспортировано в {os.path.basename(path)}")
+
+            if hasattr(self, 'log_manager') and self.log_manager:
+                self.log_manager.add_entry("metadata_export", "success", {"file": path, "format": ext})
 
         except Exception as e:
             messagebox.showerror("❌ Ошибка экспорта", f"Не удалось сохранить файл:\n{e}")
@@ -11158,79 +12253,1563 @@ class IBToolsTab:
         """Очистка результатов"""
         self.meta_tree.delete(*self.meta_tree.get_children())
         self.current_metadata = {}
-        self.copy_btn.config(state="disabled")
-        self.export_btn.config(state="disabled")
-        self.meta_status.config(text="✅ Готов к работе")
+        self.meta_status_label.config(text="✅ Готов к работе")
 
-    def refresh_metadata(self):
-        """Перезагрузка метаданных с очисткой кэша"""
-        file_hash = self._get_file_hash(self.meta_file_path.get())
-        if file_hash in IBToolsTab._metadata_cache:
-            del IBToolsTab._metadata_cache[file_hash]
-        self.extract_metadata()
+    # =========================================================================
+    # 6. ГЕНЕРАТОР UUID/GUID
+    # =========================================================================
+    def create_uuid_tool(self):
+        """Создаёт генератор UUID/GUID"""
+        # Настройки генерации
+        settings_frame = ttk.LabelFrame(self.uuid_frame, text="⚙️ Настройки генерации", padding=10)
+        settings_frame.pack(fill=tk.X, padx=10, pady=10)
 
-    def show_meta_context_menu(self, event):
-        """Контекстное меню для Treeview метаданных"""
-        item = self.meta_tree.identify_row(event.y)
-        if not item:
-            return
+        # Тип UUID
+        type_frame = ttk.Frame(settings_frame)
+        type_frame.pack(fill=tk.X, pady=5)
 
-        menu = tk.Menu(self.root, tearoff=0)
-        values = self.meta_tree.item(item, "values")
-        key = values[0] if values else ""
-        value = values[1] if len(values) > 1 else ""
+        ttk.Label(type_frame, text="Версия UUID:").pack(side=tk.LEFT, padx=(0, 10))
+        self.uuid_version = tk.StringVar(value="4")
 
-        if key and value:
-            menu.add_command(label=f"📋 Копировать значение", command=lambda: self._copy_tree_value(value))
-            menu.add_command(label=f"🔑 Копировать ключ", command=lambda: self._copy_tree_value(key))
-            menu.add_separator()
-            menu.add_command(label="🔍 Найти похожие", command=lambda: self.meta_filter_var.set(key))
+        for v in ["1", "3", "4", "5"]:
+            ttk.Radiobutton(type_frame, text=f"v{v}", variable=self.uuid_version,
+                            value=v).pack(side=tk.LEFT, padx=5)
 
-        menu.add_separator()
-        menu.add_command(label="📊 Копировать всю группу", command=lambda: self._copy_tree_group(item))
-        menu.add_command(label="🗂 Развернуть/Свернуть",
-                         command=lambda: self.meta_tree.item(item, open=not self.meta_tree.item(item, "open")))
+        # Для v3 и v5
+        self.uuid_ns_frame = ttk.Frame(settings_frame)
+        ttk.Label(self.uuid_ns_frame, text="Namespace:").pack(side=tk.LEFT, padx=(0, 5))
+        self.uuid_namespace = tk.StringVar(value="DNS")
+        ttk.Combobox(self.uuid_ns_frame, textvariable=self.uuid_namespace,
+                     values=["DNS", "URL", "OID", "X500"], width=10).pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(self.uuid_ns_frame, text="Name:").pack(side=tk.LEFT, padx=(10, 5))
+        self.uuid_name = tk.StringVar(value="example.com")
+        ttk.Entry(self.uuid_ns_frame, textvariable=self.uuid_name, width=30).pack(side=tk.LEFT)
+
+        # Количество
+        count_frame = ttk.Frame(settings_frame)
+        count_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(count_frame, text="Количество:").pack(side=tk.LEFT, padx=(0, 10))
+        self.uuid_count = tk.IntVar(value=1)
+        ttk.Spinbox(count_frame, from_=1, to=100, textvariable=self.uuid_count,
+                    width=5).pack(side=tk.LEFT, padx=5)
+
+        # Формат вывода
+        format_frame = ttk.Frame(settings_frame)
+        format_frame.pack(fill=tk.X, pady=5)
+
+        self.uuid_braces = tk.BooleanVar(value=True)
+        self.uuid_urn = tk.BooleanVar(value=False)
+        self.uuid_upper = tk.BooleanVar(value=False)
+
+        ttk.Checkbutton(format_frame, text="Фигурные скобки {}", variable=self.uuid_braces).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(format_frame, text="URN формат", variable=self.uuid_urn).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(format_frame, text="Верхний регистр", variable=self.uuid_upper).pack(side=tk.LEFT, padx=5)
+
+        # Результат
+        res_frame = ttk.LabelFrame(self.uuid_frame, text="🔑 Сгенерированные UUID", padding=10)
+        res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.uuid_output = scrolledtext.ScrolledText(res_frame, height=10,
+                                                     font=("Consolas", 10),
+                                                     bg=self.colors["card"],
+                                                     fg=self.colors["text"])
+        self.uuid_output.pack(fill=tk.BOTH, expand=True)
+
+        # Кнопки
+        btn_frame = ttk.Frame(self.uuid_frame)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Button(btn_frame, text="🎲 Сгенерировать", style="Accent.TButton",
+                   command=self.generate_uuid).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать", command=self.copy_uuid).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="💾 Сохранить", command=self.save_uuid).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="🗑️ Очистить", command=lambda: self.uuid_output.delete("1.0", tk.END)).pack(
+            side=tk.LEFT, padx=5)
+
+    def generate_uuid(self):
+        """Генерирует UUID"""
+        import uuid
+
+        self.uuid_output.delete("1.0", tk.END)
+        count = self.uuid_count.get()
+        version = self.uuid_version.get()
+        uuids = []
 
         try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
+            for _ in range(count):
+                if version == "1":
+                    u = uuid.uuid1()
+                elif version == "3":
+                    ns = self._get_namespace()
+                    u = uuid.uuid3(ns, self.uuid_name.get())
+                elif version == "4":
+                    u = uuid.uuid4()
+                elif version == "5":
+                    ns = self._get_namespace()
+                    u = uuid.uuid5(ns, self.uuid_name.get())
+                else:
+                    u = uuid.uuid4()
 
-    def _copy_tree_value(self, text: str):
-        """Копирование значения из Treeview"""
-        if text and text not in ["", "-"]:
-            self.root.clipboard_clear()
-            self.root.clipboard_append(text)
-            self.app.show_toast("✅ Скопировано")
+                # Форматирование
+                uuid_str = str(u)
+                if not self.uuid_braces.get():
+                    uuid_str = uuid_str.replace("{", "").replace("}", "")
+                if self.uuid_urn.get():
+                    uuid_str = f"urn:uuid:{uuid_str}"
+                if self.uuid_upper.get():
+                    uuid_str = uuid_str.upper()
 
-    def _copy_tree_group(self, item_id: str):
-        """Копирование всей группы метаданных"""
-        lines = []
-        group_name = self.meta_tree.item(item_id, "text")
-        lines.append(f"### {group_name} ###")
+                uuids.append(uuid_str)
+                self.uuid_output.insert(tk.END, uuid_str + "\n")
 
-        def collect_children(parent_id, indent=0):
-            for child in self.meta_tree.get_children(parent_id):
-                values = self.meta_tree.item(child, "values")
-                if values and values[0]:
-                    prefix = "  " * indent
-                    lines.append(f"{prefix}{values[0]}: {values[1]}")
-                collect_children(child, indent + 1)
+            getattr(self.app, 'show_toast', lambda x: None)(f"✅ Сгенерировано {count} UUID")
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка", f"Не удалось сгенерировать UUID: {str(e)}")
 
-        collect_children(item_id)
+    def _get_namespace(self):
+        """Получает namespace для UUID v3/v5"""
+        import uuid
+        namespaces = {
+            "DNS": uuid.NAMESPACE_DNS,
+            "URL": uuid.NAMESPACE_URL,
+            "OID": uuid.NAMESPACE_OID,
+            "X500": uuid.NAMESPACE_X500
+        }
+        return namespaces.get(self.uuid_namespace.get(), uuid.NAMESPACE_DNS)
 
-        if len(lines) > 1:
-            text = "\n".join(lines)
-            self.root.clipboard_clear()
-            self.root.clipboard_append(text)
-            self.app.show_toast(f"✅ Группа '{group_name}' скопирована")
+    def copy_uuid(self):
+        """Копирует UUID в буфер обмена"""
+        data = self.uuid_output.get("1.0", tk.END).strip()
+        if data:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(data)
+            getattr(self.app, 'show_toast', lambda x: None)("✅ UUID скопированы")
 
-    def _show_metadata_error(self, message: str):
-        """Отображение ошибки с детальным логом"""
-        self.meta_status.config(text=f"❌ Ошибка: {message[:50]}...")
-        messagebox.showerror("❌ Ошибка анализа",
-                             f"Не удалось извлечь метаданные:\n\n{message}\n\nВозможные причины:\n• Файл повреждён\n• Неподдерживаемый формат\n• Ограничения доступа")
-        self.log_manager.add_entry("metadata_error", "error", {"file": self.meta_file_path.get(), "error": message})
+    def save_uuid(self):
+        """Сохраняет UUID в файл"""
+        data = self.uuid_output.get("1.0", tk.END).strip()
+        if not data:
+            messagebox.showwarning("⚠️ Внимание", "Нет UUID для сохранения")
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Сохранить UUID",
+            defaultextension=".txt",
+            filetypes=[("Текст", "*.txt"), ("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_save_dir', os.path.expanduser("~"))
+        )
+
+        if path:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(data)
+            setattr(self.app, 'last_save_dir', os.path.dirname(path))
+            getattr(self.app, 'show_toast', lambda x: None)(f"✅ Сохранено в {os.path.basename(path)}")
+
+    # =========================================================================
+    # 7. АНАЛИЗ ЭНТРОПИИ
+    # =========================================================================
+    def create_entropy_tool(self):
+        """Создаёт инструмент анализа энтропии"""
+        # Выбор файла
+        select_frame = ttk.LabelFrame(self.entropy_frame, text="📂 Выбор файла", padding=10)
+        select_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.entropy_file_path = tk.StringVar()
+        path_entry = ttk.Entry(select_frame, textvariable=self.entropy_file_path, state='readonly')
+        path_entry.pack(fill=tk.X, pady=(0, 10))
+
+        btn_row = ttk.Frame(select_frame)
+        btn_row.pack(fill=tk.X)
+        ttk.Button(btn_row, text="📂 Обзор...", command=self.select_entropy_file).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_row, text="🗑️ Очистить", command=lambda: self.entropy_file_path.set("")).pack(side=tk.LEFT)
+
+        # Параметры анализа
+        params_frame = ttk.LabelFrame(self.entropy_frame, text="⚙️ Параметры", padding=10)
+        params_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.entropy_block_size = tk.IntVar(value=1024)
+        ttk.Label(params_frame, text="Размер блока (байт):").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Spinbox(params_frame, from_=256, to=65536, textvariable=self.entropy_block_size,
+                    width=10, increment=256).pack(side=tk.LEFT, padx=5)
+
+        # Результаты
+        res_frame = ttk.LabelFrame(self.entropy_frame, text="📊 Результаты анализа", padding=10)
+        res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Общая энтропия
+        summary_frame = ttk.Frame(res_frame)
+        summary_frame.pack(fill=tk.X, pady=(0, 10))
+
+        self.entropy_total_label = ttk.Label(summary_frame, text="Общая энтропия: -",
+                                             font=("Segoe UI", 12, "bold"))
+        self.entropy_total_label.pack(anchor=tk.W, pady=5)
+
+        self.entropy_class_label = ttk.Label(summary_frame, text="Классификация: -")
+        self.entropy_class_label.pack(anchor=tk.W)
+
+        # График энтропии
+        self.entropy_canvas = tk.Canvas(res_frame, height=200, bg=self.colors["card"])
+        self.entropy_canvas.pack(fill=tk.X, pady=10)
+
+        # Таблица по блокам
+        columns = ("Смещение", "Энтропия", "Оценка")
+        self.entropy_tree = ttk.Treeview(res_frame, columns=columns, show="headings", height=8)
+
+        for col in columns:
+            self.entropy_tree.heading(col, text=col)
+
+        self.entropy_tree.column("Смещение", width=150, anchor=tk.W)
+        self.entropy_tree.column("Энтропия", width=150, anchor=tk.CENTER)
+        self.entropy_tree.column("Оценка", width=200, anchor=tk.W)
+
+        scroll_y = ttk.Scrollbar(res_frame, orient="vertical", command=self.entropy_tree.yview)
+        self.entropy_tree.configure(yscrollcommand=scroll_y.set)
+
+        self.entropy_tree.pack(fill=tk.BOTH, expand=True, pady=(10, 0))
+        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Кнопки
+        btn_frame = ttk.Frame(self.entropy_frame)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Button(btn_frame, text="🔍 Анализировать", style="Accent.TButton",
+                   command=self.analyze_entropy).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать отчёт", command=self.copy_entropy_report).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="💾 Сохранить", command=self.save_entropy_report).pack(side=tk.LEFT, padx=5)
+
+    def select_entropy_file(self):
+        """Выбирает файл для анализа энтропии"""
+        path = filedialog.askopenfilename(
+            title="Выберите файл",
+            filetypes=[("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_open_dir', os.path.expanduser("~"))
+        )
+        if path:
+            self.entropy_file_path.set(path)
+            setattr(self.app, 'last_open_dir', os.path.dirname(path))
+
+    def analyze_entropy(self):
+        """Анализирует энтропию файла"""
+        path = self.entropy_file_path.get()
+        if not path or not os.path.exists(path):
+            messagebox.showwarning("⚠️ Ошибка", "Файл не выбран или не существует")
+            return
+
+        try:
+            block_size = self.entropy_block_size.get()
+
+            with open(path, 'rb') as f:
+                data = f.read()
+
+            file_size = len(data)
+
+            # Расчёт общей энтропии
+            total_entropy = self._calculate_entropy(data)
+
+            # Классификация
+            if total_entropy < 3.0:
+                classification = "🟢 Низкая энтропия (текст, код)"
+                color = "#44cc44"
+            elif total_entropy < 6.0:
+                classification = "🟡 Средняя энтропия (смешанные данные)"
+                color = "#ffcc00"
+            elif total_entropy < 7.5:
+                classification = "🟠 Высокая энтропия (сжатые данные)"
+                color = "#ff8800"
+            else:
+                classification = "🔴 Очень высокая энтропия (шифрование/случайные данные)"
+                color = "#ff4444"
+
+            self.entropy_total_label.config(text=f"Общая энтропия: {total_entropy:.4f} бит/байт")
+            self.entropy_class_label.config(text=f"Классификация: {classification}", foreground=color)
+
+            # Расчёт энтропии по блокам
+            self.entropy_tree.delete(*self.entropy_tree.get_children())
+            entropies = []
+            offsets = []
+
+            for i in range(0, file_size, block_size):
+                block = data[i:i + block_size]
+                if block:
+                    entropy = self._calculate_entropy(block)
+                    entropies.append(entropy)
+                    offsets.append(i)
+
+                    # Оценка блока
+                    if entropy < 3.0:
+                        eval_text = "Низкая (структурированные данные)"
+                    elif entropy < 6.0:
+                        eval_text = "Средняя (смешанные данные)"
+                    elif entropy < 7.5:
+                        eval_text = "Высокая (возможно сжатие)"
+                    else:
+                        eval_text = "Очень высокая (возможно шифрование)"
+
+                    self.entropy_tree.insert("", tk.END, values=(
+                        f"0x{i:08X}",
+                        f"{entropy:.4f}",
+                        eval_text
+                    ))
+
+            # Отрисовка графика
+            self._draw_entropy_graph(offsets, entropies, total_entropy)
+
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Анализ завершён")
+
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка", f"Не удалось проанализировать файл: {str(e)}")
+
+    def _calculate_entropy(self, data: bytes) -> float:
+        """Рассчитывает энтропию Шеннона"""
+        if not data:
+            return 0.0
+
+        from collections import Counter
+        import math
+
+        counter = Counter(data)
+        length = len(data)
+
+        entropy = 0.0
+        for count in counter.values():
+            if count > 0:
+                p = count / length
+                entropy -= p * math.log2(p)
+
+        return entropy
+
+    def _draw_entropy_graph(self, offsets: list, entropies: list, total_entropy: float):
+        """Отрисовывает график энтропии"""
+        self.entropy_canvas.delete("all")
+
+        if not entropies:
+            return
+
+        width = self.entropy_canvas.winfo_width()
+        height = self.entropy_canvas.winfo_height()
+
+        # Рисуем оси
+        self.entropy_canvas.create_line(50, height - 30, width - 10, height - 30, fill=self.colors["text"])
+        self.entropy_canvas.create_line(50, 10, 50, height - 30, fill=self.colors["text"])
+
+        # Подписи осей
+        self.entropy_canvas.create_text(width // 2, height - 10, text="Смещение (блоки)",
+                                        fill=self.colors["text"])
+        self.entropy_canvas.create_text(15, height // 2, text="Энтропия", angle=90,
+                                        fill=self.colors["text"])
+
+        # Масштабирование
+        max_entropy = 8.0
+        graph_width = width - 60
+        graph_height = height - 50
+
+        # Рисуем линию энтропии
+        points = []
+        for i, entropy in enumerate(entropies):
+            x = 50 + (i / max(len(entropies) - 1, 1)) * graph_width
+            y = height - 30 - (entropy / max_entropy) * graph_height
+            points.append((x, y))
+
+        if len(points) > 1:
+            for i in range(len(points) - 1):
+                x1, y1 = points[i]
+                x2, y2 = points[i + 1]
+                self.entropy_canvas.create_line(x1, y1, x2, y2, fill="#58A6FF", width=2)
+
+        # Линия общей энтропии
+        y_avg = height - 30 - (total_entropy / max_entropy) * graph_height
+        self.entropy_canvas.create_line(50, y_avg, width - 10, y_avg,
+                                        dash=(4, 4), fill="#ffcc00")
+        self.entropy_canvas.create_text(width - 5, y_avg - 5, text=f"avg: {total_entropy:.2f}",
+                                        fill="#ffcc00", anchor=tk.NE)
+
+    def copy_entropy_report(self):
+        """Копирует отчёт в буфер обмена"""
+        report = f"Entropy Analysis Report\n"
+        report += f"File: {self.entropy_file_path.get()}\n"
+        report += f"{self.entropy_total_label.cget('text')}\n"
+        report += f"{self.entropy_class_label.cget('text')}\n\n"
+
+        for item in self.entropy_tree.get_children():
+            values = self.entropy_tree.item(item, 'values')
+            report += f"{values[0]}: {values[1]} - {values[2]}\n"
+
+        self.parent.clipboard_clear()
+        self.parent.clipboard_append(report)
+        getattr(self.app, 'show_toast', lambda x: None)("✅ Отчёт скопирован")
+
+    def save_entropy_report(self):
+        """Сохраняет отчёт в файл"""
+        path = filedialog.asksaveasfilename(
+            title="Сохранить отчёт",
+            defaultextension=".txt",
+            filetypes=[("Текст", "*.txt"), ("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_save_dir', os.path.expanduser("~"))
+        )
+
+        if path:
+            report = f"{self.entropy_total_label.cget('text')}\n"
+            report += f"{self.entropy_class_label.cget('text')}\n"
+
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(report)
+
+            setattr(self.app, 'last_save_dir', os.path.dirname(path))
+            getattr(self.app, 'show_toast', lambda x: None)(f"✅ Сохранено в {os.path.basename(path)}")
+
+    # =========================================================================
+    # 8. ИЗВЛЕЧЕНИЕ СТРОК
+    # =========================================================================
+    def create_strings_tool(self):
+        """Создаёт инструмент извлечения строк"""
+        # Выбор файла
+        select_frame = ttk.LabelFrame(self.strings_frame, text="📂 Выбор файла", padding=10)
+        select_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.strings_file_path = tk.StringVar()
+        path_entry = ttk.Entry(select_frame, textvariable=self.strings_file_path, state='readonly')
+        path_entry.pack(fill=tk.X, pady=(0, 10))
+
+        btn_row = ttk.Frame(select_frame)
+        btn_row.pack(fill=tk.X)
+        ttk.Button(btn_row, text="📂 Обзор...", command=self.select_strings_file).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_row, text="🗑️ Очистить", command=lambda: self.strings_file_path.set("")).pack(side=tk.LEFT)
+
+        # Параметры
+        params_frame = ttk.LabelFrame(self.strings_frame, text="⚙️ Параметры поиска", padding=10)
+        params_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        # Минимальная длина
+        len_frame = ttk.Frame(params_frame)
+        len_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(len_frame, text="Мин. длина:").pack(side=tk.LEFT, padx=(0, 10))
+        self.strings_min_len = tk.IntVar(value=4)
+        ttk.Spinbox(len_frame, from_=2, to=100, textvariable=self.strings_min_len,
+                    width=5).pack(side=tk.LEFT, padx=5)
+
+        # Кодировки
+        enc_frame = ttk.Frame(params_frame)
+        enc_frame.pack(fill=tk.X, pady=5)
+
+        self.strings_ascii = tk.BooleanVar(value=True)
+        self.strings_utf16 = tk.BooleanVar(value=True)
+        self.strings_utf8 = tk.BooleanVar(value=False)
+
+        ttk.Checkbutton(enc_frame, text="ASCII", variable=self.strings_ascii).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(enc_frame, text="UTF-16 LE", variable=self.strings_utf16).pack(side=tk.LEFT, padx=5)
+        ttk.Checkbutton(enc_frame, text="UTF-8", variable=self.strings_utf8).pack(side=tk.LEFT, padx=5)
+
+        # Фильтр
+        filter_frame = ttk.Frame(params_frame)
+        filter_frame.pack(fill=tk.X, pady=5)
+
+        ttk.Label(filter_frame, text="Фильтр (regex):").pack(side=tk.LEFT, padx=(0, 5))
+        self.strings_filter = tk.StringVar()
+        ttk.Entry(filter_frame, textvariable=self.strings_filter, width=40).pack(side=tk.LEFT)
+
+        # Результаты
+        res_frame = ttk.LabelFrame(self.strings_frame, text="📋 Найденные строки", padding=10)
+        res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        columns = ("Смещение", "Строка", "Длина")
+        self.strings_tree = ttk.Treeview(res_frame, columns=columns, show="headings", height=15)
+
+        for col in columns:
+            self.strings_tree.heading(col, text=col)
+
+        self.strings_tree.column("Смещение", width=120, anchor=tk.W)
+        self.strings_tree.column("Строка", width=400, anchor=tk.W)
+        self.strings_tree.column("Длина", width=80, anchor=tk.CENTER)
+
+        scroll_y = ttk.Scrollbar(res_frame, orient="vertical", command=self.strings_tree.yview)
+        self.strings_tree.configure(yscrollcommand=scroll_y.set)
+
+        self.strings_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Кнопки
+        btn_frame = ttk.Frame(self.strings_frame)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Button(btn_frame, text="🔍 Извлечь строки", style="Accent.TButton",
+                   command=self.extract_strings).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать выбранное", command=self.copy_strings_selected).pack(side=tk.LEFT,
+                                                                                                      padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать всё", command=self.copy_all_strings).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="💾 Сохранить", command=self.save_strings).pack(side=tk.LEFT, padx=5)
+
+    def select_strings_file(self):
+        """Выбирает файл для извлечения строк"""
+        path = filedialog.askopenfilename(
+            title="Выберите файл",
+            filetypes=[("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_open_dir', os.path.expanduser("~"))
+        )
+        if path:
+            self.strings_file_path.set(path)
+            setattr(self.app, 'last_open_dir', os.path.dirname(path))
+
+    def extract_strings(self):
+        """Извлекает строки из файла"""
+        path = self.strings_file_path.get()
+        if not path or not os.path.exists(path):
+            messagebox.showwarning("⚠️ Ошибка", "Файл не выбран или не существует")
+            return
+
+        try:
+            self.strings_tree.delete(*self.strings_tree.get_children())
+
+            with open(path, 'rb') as f:
+                data = f.read()
+
+            min_len = self.strings_min_len.get()
+            strings_found = []
+
+            # ASCII
+            if self.strings_ascii.get():
+                strings_found.extend(self._extract_ascii_strings(data, min_len))
+
+            # UTF-16 LE
+            if self.strings_utf16.get():
+                strings_found.extend(self._extract_utf16_strings(data, min_len))
+
+            # UTF-8
+            if self.strings_utf8.get():
+                strings_found.extend(self._extract_utf8_strings(data, min_len))
+
+            # Сортировка по смещению
+            strings_found.sort(key=lambda x: x[0])
+
+            # Фильтрация regex
+            filter_pattern = self.strings_filter.get().strip()
+            if filter_pattern:
+                import re
+                try:
+                    pattern = re.compile(filter_pattern)
+                    strings_found = [s for s in strings_found if pattern.search(s[1])]
+                except re.error as e:
+                    messagebox.showwarning("⚠️ Ошибка regex", f"Неверный шаблон: {str(e)}")
+                    return
+
+            # Вставка в таблицу
+            for offset, string in strings_found:
+                self.strings_tree.insert("", tk.END, values=(
+                    f"0x{offset:08X}",
+                    string[:100],  # Обрезаем длинные строки
+                    len(string)
+                ))
+
+            getattr(self.app, 'show_toast', lambda x: None)(f"✅ Найдено {len(strings_found)} строк")
+
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка", f"Не удалось извлечь строки: {str(e)}")
+
+    def _extract_ascii_strings(self, data: bytes, min_len: int) -> list:
+        """Извлекает ASCII строки"""
+        strings = []
+        current_string = ""
+        start_offset = 0
+
+        for i, byte in enumerate(data):
+            if 32 <= byte <= 126:  # Печатаемые ASCII символы
+                if not current_string:
+                    start_offset = i
+                current_string += chr(byte)
+            else:
+                if len(current_string) >= min_len:
+                    strings.append((start_offset, current_string))
+                current_string = ""
+
+        if len(current_string) >= min_len:
+            strings.append((start_offset, current_string))
+
+        return strings
+
+    def _extract_utf16_strings(self, data: bytes, min_len: int) -> list:
+        """Извлекает UTF-16 LE строки"""
+        strings = []
+        i = 0
+
+        while i < len(data) - 1:
+            if data[i + 1] == 0 and 32 <= data[i] <= 126:
+                start_offset = i
+                current_string = ""
+
+                while i < len(data) - 1:
+                    if data[i + 1] == 0 and 32 <= data[i] <= 126:
+                        current_string += chr(data[i])
+                        i += 2
+                    else:
+                        break
+
+                if len(current_string) >= min_len:
+                    strings.append((start_offset, current_string))
+            else:
+                i += 2
+
+        return strings
+
+    def _extract_utf8_strings(self, data: bytes, min_len: int) -> list:
+        """Извлекает UTF-8 строки"""
+        strings = []
+        i = 0
+
+        while i < len(data):
+            try:
+                if data[i] < 128 and 32 <= data[i] <= 126:
+                    start_offset = i
+                    current_string = ""
+
+                    while i < len(data):
+                        if data[i] < 128 and 32 <= data[i] <= 126:
+                            current_string += chr(data[i])
+                            i += 1
+                        else:
+                            break
+
+                    if len(current_string) >= min_len:
+                        strings.append((start_offset, current_string))
+                else:
+                    i += 1
+            except:
+                i += 1
+
+        return strings
+
+    def copy_strings_selected(self):
+        """Копирует выбранную строку"""
+        selection = self.strings_tree.selection()
+        if not selection:
+            messagebox.showwarning("⚠️ Внимание", "Выберите строку для копирования")
+            return
+
+        item = self.strings_tree.item(selection[0])
+        values = item['values']
+        if len(values) >= 2:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(values[1])
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Строка скопирована")
+
+    def copy_all_strings(self):
+        """Копирует все строки"""
+        text = ""
+        for item in self.strings_tree.get_children():
+            values = self.strings_tree.item(item, 'values')
+            if len(values) >= 2:
+                text += f"{values[0]}: {values[1]}\n"
+
+        if text:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(text)
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Все строки скопированы")
+
+    def save_strings(self):
+        """Сохраняет строки в файл"""
+        text = ""
+        for item in self.strings_tree.get_children():
+            values = self.strings_tree.item(item, 'values')
+            if len(values) >= 2:
+                text += f"{values[0]}: {values[1]}\n"
+
+        if not text:
+            messagebox.showwarning("⚠️ Внимание", "Нет строк для сохранения")
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Сохранить строки",
+            defaultextension=".txt",
+            filetypes=[("Текст", "*.txt"), ("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_save_dir', os.path.expanduser("~"))
+        )
+
+        if path:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(text)
+            setattr(self.app, 'last_save_dir', os.path.dirname(path))
+            getattr(self.app, 'show_toast', lambda x: None)(f"✅ Сохранено в {os.path.basename(path)}")
+
+    # =========================================================================
+    # 9. СТЕГАНОАНАЛИЗ
+    # =========================================================================
+    def create_steganalysis_tool(self):
+        """Создаёт инструмент стеганоанализа"""
+        # Выбор файла
+        select_frame = ttk.LabelFrame(self.steg_frame, text="📂 Выбор изображения", padding=10)
+        select_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.steg_file_path = tk.StringVar()
+        path_entry = ttk.Entry(select_frame, textvariable=self.steg_file_path, state='readonly')
+        path_entry.pack(fill=tk.X, pady=(0, 10))
+
+        btn_row = ttk.Frame(select_frame)
+        btn_row.pack(fill=tk.X)
+        ttk.Button(btn_row, text="📂 Обзор...", command=self.select_steg_file).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_row, text="🗑️ Очистить", command=lambda: self.steg_file_path.set("")).pack(side=tk.LEFT)
+
+        # Методы анализа
+        methods_frame = ttk.LabelFrame(self.steg_frame, text="🔍 Методы анализа", padding=10)
+        methods_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.steg_chi_square = tk.BooleanVar(value=True)
+        self.steg_rsz = tk.BooleanVar(value=True)
+        self.steg_visual = tk.BooleanVar(value=True)
+        self.steg_histogram = tk.BooleanVar(value=True)
+
+        ttk.Checkbutton(methods_frame, text="Chi-Square анализ", variable=self.steg_chi_square).pack(side=tk.LEFT,
+                                                                                                     padx=10)
+        ttk.Checkbutton(methods_frame, text="RS-анализ", variable=self.steg_rsz).pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(methods_frame, text="Визуальный анализ", variable=self.steg_visual).pack(side=tk.LEFT, padx=10)
+        ttk.Checkbutton(methods_frame, text="Гистограмма", variable=self.steg_histogram).pack(side=tk.LEFT, padx=10)
+
+        # Результаты
+        res_frame = ttk.LabelFrame(self.steg_frame, text="📊 Результаты анализа", padding=10)
+        res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.steg_result_text = scrolledtext.ScrolledText(res_frame, height=15,
+                                                          font=("Consolas", 10),
+                                                          bg=self.colors["card"],
+                                                          fg=self.colors["text"])
+        self.steg_result_text.pack(fill=tk.BOTH, expand=True)
+
+        # Кнопки
+        btn_frame = ttk.Frame(self.steg_frame)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Button(btn_frame, text="🔍 Начать анализ", style="Accent.TButton",
+                   command=self.analyze_stego).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать отчёт", command=self.copy_steg_report).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="💾 Сохранить", command=self.save_steg_report).pack(side=tk.LEFT, padx=5)
+
+    def select_steg_file(self):
+        """Выбирает изображение для анализа"""
+        path = filedialog.askopenfilename(
+            title="Выберите изображение",
+            filetypes=[("Изображения", "*.png *.jpg *.jpeg *.bmp *.tiff"), ("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_open_dir', os.path.expanduser("~"))
+        )
+        if path:
+            self.steg_file_path.set(path)
+            setattr(self.app, 'last_open_dir', os.path.dirname(path))
+
+    def analyze_stego(self):
+        """Выполняет стеганоанализ"""
+        path = self.steg_file_path.get()
+        if not path or not os.path.exists(path):
+            messagebox.showwarning("⚠️ Ошибка", "Файл не выбран или не существует")
+            return
+
+        try:
+            from PIL import Image
+            import numpy as np
+
+            img = Image.open(path)
+            img_array = np.array(img)
+
+            self.steg_result_text.delete("1.0", tk.END)
+            report = "=" * 60 + "\n"
+            report += "🔍 ОТЧЁТ СТЕГАНОАНАЛИЗА\n"
+            report += "=" * 60 + "\n\n"
+            report += f"📁 Файл: {os.path.basename(path)}\n"
+            report += f"📏 Размер: {img.width}x{img.height}\n"
+            report += f"🎨 Режим: {img.mode}\n\n"
+
+            # Chi-Square анализ
+            if self.steg_chi_square.get():
+                report += "-" * 60 + "\n"
+                report += "📊 CHI-SQUARE АНАЛИЗ\n"
+                report += "-" * 60 + "\n"
+
+                chi_square_stat, p_value = self._chi_square_analysis(img_array)
+                report += f"Chi-square статистика: {chi_square_stat:.4f}\n"
+                report += f"P-value: {p_value:.6f}\n"
+
+                if p_value < 0.05:
+                    report += "⚠️ ВЫВОД: Возможное наличие скрытых данных!\n"
+                else:
+                    report += "✅ ВЫВОД: Скрытые данные не обнаружены\n"
+                report += "\n"
+
+            # RS-анализ
+            if self.steg_rsz.get():
+                report += "-" * 60 + "\n"
+                report += "📊 RS-АНАЛИЗ\n"
+                report += "-" * 60 + "\n"
+
+                rs_result = self._rs_analysis(img_array)
+                report += f"R+M: {rs_result['rpm']:.4f}\n"
+                report += f"R-M: {rs_result['rmm']:.4f}\n"
+                report += f"S+M: {rs_result['spm']:.4f}\n"
+                report += f"S-M: {rs_result['smm']:.4f}\n"
+
+                if abs(rs_result['rpm'] - rs_result['rmm']) > 0.05:
+                    report += "⚠️ ВЫВОД: Возможное наличие LSB-стеганографии!\n"
+                else:
+                    report += "✅ ВЫВОД: LSB-стеганография не обнаружена\n"
+                report += "\n"
+
+            # Визуальный анализ
+            if self.steg_visual.get():
+                report += "-" * 60 + "\n"
+                report += "📊 ВИЗУАЛЬНЫЙ АНАЛИЗ МЛАДШИХ БИТОВ\n"
+                report += "-" * 60 + "\n"
+
+                lsb_entropy = self._analyze_lsb_planes(img_array)
+                report += f"Энтропия LSB плоскости: {lsb_entropy:.4f}\n"
+
+                if lsb_entropy > 0.95:
+                    report += "⚠️ ВЫВОД: LSB плоскость выглядит случайной (возможно шифрование/стеганография)\n"
+                else:
+                    report += "✅ ВЫВОД: LSB плоскость имеет структуру\n"
+                report += "\n"
+
+            self.steg_result_text.insert("1.0", report)
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Анализ завершён")
+
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка", f"Не удалось выполнить анализ: {str(e)}")
+
+    def _chi_square_analysis(self, img_array: np.ndarray) -> tuple:
+        """Chi-square анализ"""
+        import scipy.stats as stats
+
+        if len(img_array.shape) == 3:
+            img_array = img_array[:, :, 0]  # Берём один канал
+
+        # Группируем значения по парам (0,1), (2,3), ...
+        pairs = img_array // 2
+        observed = np.bincount(pairs.flatten(), minlength=128)
+
+        # Ожидаемое распределение (равномерное)
+        total = observed.sum()
+        expected = np.full(128, total / 128)
+
+        # Chi-square статистика
+        chi2_stat, p_value = stats.chisquare(observed, expected)
+
+        return chi2_stat, p_value
+
+    def _rs_analysis(self, img_array: np.ndarray) -> dict:
+        """RS-анализ"""
+        if len(img_array.shape) == 3:
+            img_array = img_array[:, :, 0]
+
+        # Упрощённая версия RS-анализа
+        h, w = img_array.shape
+
+        rpm = rmm = spm = smm = 0
+        total = 0
+
+        for i in range(0, h - 1, 2):
+            for j in range(0, w - 1, 2):
+                block = img_array[i:i + 2, j:j + 2]
+
+                # Регулярные группы
+                if np.all(block % 2 == 0) or np.all(block % 2 == 1):
+                    rpm += 1
+                # Сингулярные группы
+                else:
+                    spm += 1
+
+                total += 1
+
+        if total > 0:
+            rpm /= total
+            spm /= total
+
+        return {
+            'rpm': rpm,
+            'rmm': 1 - rpm,
+            'spm': spm,
+            'smm': 1 - spm
+        }
+
+    def _analyze_lsb_planes(self, img_array: np.ndarray) -> float:
+        """Анализирует энтропию LSB плоскости"""
+        import math
+        from collections import Counter
+
+        lsb_plane = img_array & 1
+
+        counter = Counter(lsb_plane.flatten())
+        total = len(lsb_plane.flatten())
+
+        entropy = 0.0
+        for count in counter.values():
+            if count > 0:
+                p = count / total
+                entropy -= p * math.log2(p)
+
+        # Нормализация (максимальная энтропия для бинарного = 1)
+        return entropy
+
+    def copy_steg_report(self):
+        """Копирует отчёт"""
+        report = self.steg_result_text.get("1.0", tk.END).strip()
+        if report:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(report)
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Отчёт скопирован")
+
+    def save_steg_report(self):
+        """Сохраняет отчёт"""
+        report = self.steg_result_text.get("1.0", tk.END).strip()
+        if not report:
+            messagebox.showwarning("⚠️ Внимание", "Нет отчёта для сохранения")
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Сохранить отчёт",
+            defaultextension=".txt",
+            filetypes=[("Текст", "*.txt"), ("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_save_dir', os.path.expanduser("~"))
+        )
+
+        if path:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(report)
+            setattr(self.app, 'last_save_dir', os.path.dirname(path))
+            getattr(self.app, 'show_toast', lambda x: None)(f"✅ Сохранено в {os.path.basename(path)}")
+
+    # =========================================================================
+    # 10. PE-АНАЛИЗАТОР
+    # =========================================================================
+    def create_pe_tool(self):
+        """Создаёт PE-анализатор"""
+        # Выбор файла
+        select_frame = ttk.LabelFrame(self.pe_frame, text="📂 Выбор PE файла", padding=10)
+        select_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.pe_file_path = tk.StringVar()
+        path_entry = ttk.Entry(select_frame, textvariable=self.pe_file_path, state='readonly')
+        path_entry.pack(fill=tk.X, pady=(0, 10))
+
+        btn_row = ttk.Frame(select_frame)
+        btn_row.pack(fill=tk.X)
+        ttk.Button(btn_row, text="📂 Обзор...", command=self.select_pe_file).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_row, text="🗑️ Очистить", command=lambda: self.pe_file_path.set("")).pack(side=tk.LEFT)
+
+        # Результаты
+        res_frame = ttk.LabelFrame(self.pe_frame, text="📊 Результаты анализа", padding=10)
+        res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        self.pe_result_text = scrolledtext.ScrolledText(res_frame, height=20,
+                                                        font=("Consolas", 10),
+                                                        bg=self.colors["card"],
+                                                        fg=self.colors["text"])
+        self.pe_result_text.pack(fill=tk.BOTH, expand=True)
+
+        # Кнопки
+        btn_frame = ttk.Frame(self.pe_frame)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Button(btn_frame, text="🔍 Анализировать", style="Accent.TButton",
+                   command=self.analyze_pe).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать", command=self.copy_pe_report).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="💾 Сохранить", command=self.save_pe_report).pack(side=tk.LEFT, padx=5)
+
+    def select_pe_file(self):
+        """Выбирает PE файл"""
+        path = filedialog.askopenfilename(
+            title="Выберите PE файл",
+            filetypes=[("PE файлы", "*.exe *.dll *.sys *.ocx"), ("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_open_dir', os.path.expanduser("~"))
+        )
+        if path:
+            self.pe_file_path.set(path)
+            setattr(self.app, 'last_open_dir', os.path.dirname(path))
+
+    def analyze_pe(self):
+        """Анализирует PE файл"""
+        path = self.pe_file_path.get()
+        if not path or not os.path.exists(path):
+            messagebox.showwarning("⚠️ Ошибка", "Файл не выбран или не существует")
+            return
+
+        try:
+            self.pe_result_text.delete("1.0", tk.END)
+            report = "=" * 60 + "\n"
+            report += "💾 PE ФАЙЛ - АНАЛИЗ ЗАГОЛОВКА\n"
+            report += "=" * 60 + "\n\n"
+
+            with open(path, 'rb') as f:
+                # DOS заголовок
+                dos_header = f.read(64)
+
+                # Проверка MZ сигнатуры
+                if dos_header[:2] != b'MZ':
+                    report += "❌ ОШИБКА: Неверная сигнатура (не MZ)\n"
+                    self.pe_result_text.insert("1.0", report)
+                    messagebox.showwarning("⚠️ Ошибка", "Файл не является PE файлом")
+                    return
+
+                report += "📋 DOS ЗАГОЛОВОК\n"
+                report += "-" * 60 + "\n"
+                report += f"Сигнатура: MZ (валидно)\n"
+
+                # PE offset
+                pe_offset = struct.unpack('<I', dos_header[60:64])[0]
+                report += f"PE Offset: 0x{pe_offset:08X}\n\n"
+
+                # Переход к PE заголовку
+                f.seek(pe_offset)
+                pe_sig = f.read(4)
+
+                if pe_sig != b'PE\x00\x00':
+                    report += "❌ ОШИБКА: Неверная PE сигнатура\n"
+                    self.pe_result_text.insert("1.0", report)
+                    return
+
+                report += "📋 PE ЗАГОЛОВОК\n"
+                report += "-" * 60 + "\n"
+                report += f"Сигнатура: PE\\0\\0 (валидно)\n"
+
+                # COFF заголовок
+                coff_header = f.read(20)
+                machine = struct.unpack('<H', coff_header[0:2])[0]
+                num_sections = struct.unpack('<H', coff_header[2:4])[0]
+                timestamp = struct.unpack('<I', coff_header[4:8])[0]
+
+                machines = {
+                    0x14c: "IMAGE_FILE_MACHINE_I386 (x86)",
+                    0x8664: "IMAGE_FILE_MACHINE_AMD64 (x64)",
+                    0x1c0: "IMAGE_FILE_MACHINE_ARM",
+                    0xaa64: "IMAGE_FILE_MACHINE_ARM64"
+                }
+
+                report += f"Machine: {machines.get(machine, f'Unknown (0x{machine:04X})')}\n"
+                report += f"Количество секций: {num_sections}\n"
+                report += f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timestamp))}\n\n"
+
+                # Optional header
+                opt_header = f.read(240)
+                magic = struct.unpack('<H', opt_header[0:2])[0]
+
+                magic_types = {
+                    0x10b: "PE32",
+                    0x20b: "PE32+",
+                    0x107: "ROM"
+                }
+
+                report += "📋 OPTIONAL HEADER\n"
+                report += "-" * 60 + "\n"
+                report += f"Magic: {magic_types.get(magic, f'Unknown (0x{magic:04X})')}\n"
+
+                # Секции
+                report += "\n📋 СЕКЦИИ\n"
+                report += "-" * 60 + "\n"
+
+                for i in range(num_sections):
+                    section_header = f.read(40)
+                    name = section_header[0:8].rstrip(b'\x00').decode('ascii', errors='ignore')
+                    virtual_size = struct.unpack('<I', section_header[8:12])[0]
+                    virtual_addr = struct.unpack('<I', section_header[12:16])[0]
+                    raw_size = struct.unpack('<I', section_header[16:20])[0]
+                    raw_addr = struct.unpack('<I', section_header[20:24])[0]
+
+                    report += f"\n{name}:\n"
+                    report += f"  Virtual Size: 0x{virtual_size:08X}\n"
+                    report += f"  Virtual Addr: 0x{virtual_addr:08X}\n"
+                    report += f"  Raw Size: 0x{raw_size:08X}\n"
+                    report += f"  Raw Addr: 0x{raw_addr:08X}\n"
+
+                self.pe_result_text.insert("1.0", report)
+                getattr(self.app, 'show_toast', lambda x: None)("✅ Анализ завершён")
+
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка", f"Не удалось проанализировать файл: {str(e)}")
+
+    def copy_pe_report(self):
+        """Копирует отчёт"""
+        report = self.pe_result_text.get("1.0", tk.END).strip()
+        if report:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(report)
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Отчёт скопирован")
+
+    def save_pe_report(self):
+        """Сохраняет отчёт"""
+        report = self.pe_result_text.get("1.0", tk.END).strip()
+        if not report:
+            messagebox.showwarning("⚠️ Внимание", "Нет отчёта для сохранения")
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Сохранить отчёт",
+            defaultextension=".txt",
+            filetypes=[("Текст", "*.txt"), ("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_save_dir', os.path.expanduser("~"))
+        )
+
+        if path:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(report)
+            setattr(self.app, 'last_save_dir', os.path.dirname(path))
+            getattr(self.app, 'show_toast', lambda x: None)(f"✅ Сохранено в {os.path.basename(path)}")
+
+    # =========================================================================
+    # 11. АРХИВ-АНАЛИЗАТОР
+    # =========================================================================
+    def create_archive_tool(self):
+        """Создаёт архив-анализатор"""
+        # Выбор файла
+        select_frame = ttk.LabelFrame(self.archive_frame, text="📂 Выбор архива", padding=10)
+        select_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.archive_file_path = tk.StringVar()
+        path_entry = ttk.Entry(select_frame, textvariable=self.archive_file_path, state='readonly')
+        path_entry.pack(fill=tk.X, pady=(0, 10))
+
+        btn_row = ttk.Frame(select_frame)
+        btn_row.pack(fill=tk.X)
+        ttk.Button(btn_row, text="📂 Обзор...", command=self.select_archive_file).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(btn_row, text="🗑️ Очистить", command=lambda: self.archive_file_path.set("")).pack(side=tk.LEFT)
+
+        # Результаты
+        res_frame = ttk.LabelFrame(self.archive_frame, text="📦 Содержимое архива", padding=10)
+        res_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        columns = ("Имя файла", "Размер", "Сжатие", "Дата")
+        self.archive_tree = ttk.Treeview(res_frame, columns=columns, show="headings", height=15)
+
+        for col in columns:
+            self.archive_tree.heading(col, text=col)
+
+        self.archive_tree.column("Имя файла", width=300, anchor=tk.W)
+        self.archive_tree.column("Размер", width=100, anchor=tk.CENTER)
+        self.archive_tree.column("Сжатие", width=100, anchor=tk.CENTER)
+        self.archive_tree.column("Дата", width=150, anchor=tk.W)
+
+        scroll_y = ttk.Scrollbar(res_frame, orient="vertical", command=self.archive_tree.yview)
+        self.archive_tree.configure(yscrollcommand=scroll_y.set)
+
+        self.archive_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Кнопки
+        btn_frame = ttk.Frame(self.archive_frame)
+        btn_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Button(btn_frame, text="🔍 Анализировать", style="Accent.TButton",
+                   command=self.analyze_archive).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="📋 Копировать список", command=self.copy_archive_list).pack(side=tk.LEFT, padx=5)
+        ttk.Button(btn_frame, text="💾 Сохранить список", command=self.save_archive_list).pack(side=tk.LEFT, padx=5)
+
+    def select_archive_file(self):
+        """Выбирает архив"""
+        path = filedialog.askopenfilename(
+            title="Выберите архив",
+            filetypes=[("Архивы", "*.zip *.rar *.7z *.tar *.gz *.bz2"), ("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_open_dir', os.path.expanduser("~"))
+        )
+        if path:
+            self.archive_file_path.set(path)
+            setattr(self.app, 'last_open_dir', os.path.dirname(path))
+
+    def analyze_archive(self):
+        """Анализирует архив"""
+        path = self.archive_file_path.get()
+        if not path or not os.path.exists(path):
+            messagebox.showwarning("⚠️ Ошибка", "Файл не выбран или не существует")
+            return
+
+        try:
+            self.archive_tree.delete(*self.archive_tree.get_children())
+
+            ext = os.path.splitext(path)[1].lower()
+
+            if ext == '.zip':
+                self._analyze_zip(path)
+            elif ext in ['.tar', '.gz', '.bz2']:
+                self._analyze_tar(path)
+            else:
+                messagebox.showinfo("ℹ️ Информация", f"Формат {ext} пока не поддерживается")
+                return
+
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Анализ завершён")
+
+        except Exception as e:
+            messagebox.showerror("❌ Ошибка", f"Не удалось проанализировать архив: {str(e)}")
+
+    def _analyze_zip(self, path: str):
+        """Анализирует ZIP архив"""
+        import zipfile
+
+        with zipfile.ZipFile(path, 'r') as zf:
+            for info in zf.infolist():
+                size = info.file_size
+                compressed = info.compress_size
+                ratio = (1 - compressed / size * 100) if size > 0 else 0
+
+                date = f"{info.date_time[0]}-{info.date_time[1]}-{info.date_time[2]} {info.date_time[3]}:{info.date_time[4]}"
+
+                self.archive_tree.insert("", tk.END, values=(
+                    info.filename,
+                    f"{size:,} B",
+                    f"{ratio:.1f}%" if ratio > 0 else "0%",
+                    date
+                ))
+
+    def _analyze_tar(self, path: str):
+        """Анализирует TAR архив"""
+        import tarfile
+
+        with tarfile.open(path, 'r:*') as tf:
+            for member in tf.getmembers():
+                size = member.size
+                date = time.strftime('%Y-%m-%d %H:%M', time.localtime(member.mtime))
+
+                self.archive_tree.insert("", tk.END, values=(
+                    member.name,
+                    f"{size:,} B",
+                    "-",
+                    date
+                ))
+
+    def copy_archive_list(self):
+        """Копирует список файлов"""
+        text = ""
+        for item in self.archive_tree.get_children():
+            values = self.archive_tree.item(item, 'values')
+            text += f"{values[0]}\t{values[1]}\t{values[2]}\t{values[3]}\n"
+
+        if text:
+            self.parent.clipboard_clear()
+            self.parent.clipboard_append(text)
+            getattr(self.app, 'show_toast', lambda x: None)("✅ Список скопирован")
+
+    def save_archive_list(self):
+        """Сохраняет список файлов"""
+        text = ""
+        for item in self.archive_tree.get_children():
+            values = self.archive_tree.item(item, 'values')
+            text += f"{values[0]}\t{values[1]}\t{values[2]}\t{values[3]}\n"
+
+        if not text:
+            messagebox.showwarning("⚠️ Внимание", "Нет данных для сохранения")
+            return
+
+        path = filedialog.asksaveasfilename(
+            title="Сохранить список",
+            defaultextension=".txt",
+            filetypes=[("Текст", "*.txt"), ("Все файлы", "*.*")],
+            initialdir=getattr(self.app, 'last_save_dir', os.path.expanduser("~"))
+        )
+
+        if path:
+            with open(path, 'w', encoding='utf-8') as f:
+                f.write(text)
+            setattr(self.app, 'last_save_dir', os.path.dirname(path))
+            getattr(self.app, 'show_toast', lambda x: None)(f"✅ Сохранено в {os.path.basename(path)}")
+
+    # =========================================================================
+    # 12. КОНВЕРТЕР ВРЕМЕНИ UNIX
+    # =========================================================================
+    def create_time_tool(self):
+        """Создаёт конвертер времени Unix"""
+        # Текущее время
+        current_frame = ttk.LabelFrame(self.time_frame, text="⏱️ Текущее время", padding=10)
+        current_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        self.time_current_label = ttk.Label(current_frame, text="", font=("Consolas", 14))
+        self.time_current_label.pack(fill=tk.X, pady=5)
+
+        ttk.Button(current_frame, text="🔄 Обновить", command=self.update_current_time).pack(pady=5)
+
+        # Конвертация
+        convert_frame = ttk.LabelFrame(self.time_frame, text="🔄 Конвертация", padding=10)
+        convert_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        # Unix timestamp -> DateTime
+        ttk.Label(convert_frame, text="Unix Timestamp:").pack(anchor=tk.W, pady=(0, 5))
+        self.time_unix_input = tk.StringVar()
+        unix_entry = ttk.Entry(convert_frame, textvariable=self.time_unix_input, width=30)
+        unix_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(convert_frame, text="→ Преобразовать в DateTime",
+                   command=self.unix_to_datetime).pack(fill=tk.X, pady=(0, 10))
+
+        self.time_datetime_result = ttk.Label(convert_frame, text="", font=("Consolas", 11))
+        self.time_datetime_result.pack(anchor=tk.W, pady=(0, 10))
+
+        ttk.Separator(convert_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+
+        # DateTime -> Unix timestamp
+        ttk.Label(convert_frame, text="DateTime (YYYY-MM-DD HH:MM:SS):").pack(anchor=tk.W, pady=(0, 5))
+        self.time_datetime_input = tk.StringVar()
+        datetime_entry = ttk.Entry(convert_frame, textvariable=self.time_datetime_input, width=30)
+        datetime_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(convert_frame, text="→ Преобразовать в Unix",
+                   command=self.datetime_to_unix).pack(fill=tk.X, pady=(0, 10))
+
+        self.time_unix_result = ttk.Label(convert_frame, text="", font=("Consolas", 11))
+        self.time_unix_result.pack(anchor=tk.W)
+
+        # Часовой пояс
+        tz_frame = ttk.Frame(self.time_frame)
+        tz_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(tz_frame, text="Часовой пояс:").pack(side=tk.LEFT, padx=(0, 5))
+        self.time_timezone = tk.StringVar(value="UTC")
+
+        timezones = ["UTC", "Europe/Moscow", "Europe/London", "America/New_York", "Asia/Tokyo"]
+        ttk.Combobox(tz_frame, textvariable=self.time_timezone, values=timezones,
+                     width=20).pack(side=tk.LEFT)
+
+    def update_current_time(self):
+        """Обновляет текущее время"""
+        now = datetime.now()
+        unix_time = int(now.timestamp())
+        self.time_current_label.config(
+            text=f"DateTime: {now.strftime('%Y-%m-%d %H:%M:%S')}\nUnix Timestamp: {unix_time}"
+        )
+
+    def unix_to_datetime(self):
+        """Конвертирует Unix timestamp в DateTime"""
+        try:
+            unix_ts = int(self.time_unix_input.get().strip())
+            dt = datetime.fromtimestamp(unix_ts)
+            self.time_datetime_result.config(
+                text=f"Result: {dt.strftime('%Y-%m-%d %H:%M:%S')} ({dt.strftime('%A, %B %d, %Y')})"
+            )
+        except ValueError:
+            messagebox.showerror("❌ Ошибка", "Неверный формат Unix timestamp")
+
+    def datetime_to_unix(self):
+        """Конвертирует DateTime в Unix timestamp"""
+        try:
+            dt_str = self.time_datetime_input.get().strip()
+            dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+            unix_ts = int(dt.timestamp())
+            self.time_unix_result.config(text=f"Result: {unix_ts}")
+        except ValueError:
+            messagebox.showerror("❌ Ошибка", "Неверный формат DateTime. Используйте: YYYY-MM-DD HH:MM:SS")
+
+    # =========================================================================
+    # 13. IP/DOMAIN ИНСТРУМЕНТЫ
+    # =========================================================================
+    def create_ip_tool(self):
+        """Создаёт IP/Domain инструменты"""
+        # Валидация IP
+        validate_frame = ttk.LabelFrame(self.ip_frame, text="🔍 Валидация IP адреса", padding=10)
+        validate_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(validate_frame, text="IP адрес:").pack(anchor=tk.W, pady=(0, 5))
+        self.ip_input = tk.StringVar()
+        ip_entry = ttk.Entry(validate_frame, textvariable=self.ip_input, width=40)
+        ip_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(validate_frame, text="🔍 Проверить",
+                   command=self.validate_ip).pack(pady=(0, 10))
+
+        self.ip_result_label = ttk.Label(validate_frame, text="", font=("Segoe UI", 10))
+        self.ip_result_label.pack(anchor=tk.W, fill=tk.X)
+
+        # Конвертация форматов
+        convert_frame = ttk.LabelFrame(self.ip_frame, text="🔄 Конвертация форматов", padding=10)
+        convert_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(convert_frame, text="IPv4:").pack(anchor=tk.W, pady=(0, 5))
+        self.ip_v4_input = tk.StringVar()
+        v4_entry = ttk.Entry(convert_frame, textvariable=self.ip_v4_input, width=40)
+        v4_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(convert_frame, text="→ Конвертировать",
+                   command=self.convert_ip_formats).pack(pady=(0, 10))
+
+        self.ip_converted_label = ttk.Label(convert_frame, text="", font=("Consolas", 10))
+        self.ip_converted_label.pack(anchor=tk.W, fill=tk.X)
+
+        # Domain tools
+        domain_frame = ttk.LabelFrame(self.ip_frame, text="🌐 Domain инструменты", padding=10)
+        domain_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(domain_frame, text="Domain:").pack(anchor=tk.W, pady=(0, 5))
+        self.domain_input = tk.StringVar()
+        domain_entry = ttk.Entry(domain_frame, textvariable=self.domain_input, width=40)
+        domain_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(domain_frame, text="🔍 Проверить валидность",
+                   command=self.validate_domain).pack(pady=(0, 10))
+
+        self.domain_result_label = ttk.Label(domain_frame, text="", font=("Segoe UI", 10))
+        self.domain_result_label.pack(anchor=tk.W, fill=tk.X)
+
+    def validate_ip(self):
+        """Валидирует IP адрес"""
+        ip = self.ip_input.get().strip()
+
+        import re
+        ipv4_pattern = r'^(\d{1,3}\.){3}\d{1,3}$'
+        ipv6_pattern = r'^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$'
+
+        result = ""
+
+        if re.match(ipv4_pattern, ip):
+            octets = ip.split('.')
+            if all(0 <= int(o) <= 255 for o in octets):
+                result = "✅ Валидный IPv4 адрес\n"
+
+                # Класс адреса
+                first_octet = int(octets[0])
+                if first_octet < 128:
+                    result += "Класс: A (Unicast)\n"
+                elif first_octet < 192:
+                    result += "Класс: B (Unicast)\n"
+                elif first_octet < 224:
+                    result += "Класс: C (Unicast)\n"
+                elif first_octet < 240:
+                    result += "Класс: D (Multicast)\n"
+                else:
+                    result += "Класс: E (Reserved)\n"
+
+                # Приватный или публичный
+                if (octets[0] == '10' or
+                        (octets[0] == '172' and 16 <= int(octets[1]) <= 31) or
+                        (octets[0] == '192' and octets[1] == '168')):
+                    result += "Тип: Приватный (RFC 1918)"
+                else:
+                    result += "Тип: Публичный"
+            else:
+                result = "❌ Невалидный IPv4 адрес (octets out of range)"
+
+        elif re.match(ipv6_pattern, ip):
+            result = "✅ Валидный IPv6 адрес"
+        else:
+            result = "❌ Невалидный IP адрес"
+
+        self.ip_result_label.config(text=result)
+
+    def convert_ip_formats(self):
+        """Конвертирует IP между форматами"""
+        ip = self.ip_v4_input.get().strip()
+
+        try:
+            octets = ip.split('.')
+            if len(octets) != 4:
+                raise ValueError("Неверный формат")
+
+            # Decimal
+            decimal = (int(octets[0]) << 24) + (int(octets[1]) << 16) + (int(octets[2]) << 8) + int(octets[3])
+
+            # Hex
+            hex_ip = '.'.join(f'{int(o):02X}' for o in octets)
+
+            # Binary
+            binary_ip = '.'.join(f'{int(o):08b}' for o in octets)
+
+            result = (f"Decimal: {decimal}\n"
+                      f"Hex: {hex_ip}\n"
+                      f"Binary: {binary_ip}")
+
+            self.ip_converted_label.config(text=result)
+
+        except Exception as e:
+            self.ip_converted_label.config(text=f"❌ Ошибка: {str(e)}")
+
+    def validate_domain(self):
+        """Валидирует domain имя"""
+        domain = self.domain_input.get().strip()
+
+        import re
+        domain_pattern = r'^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'
+
+        if re.match(domain_pattern, domain):
+            result = f"✅ Валидный domain: {domain}\n"
+            result += f"Длина: {len(domain)} символов\n"
+
+            parts = domain.split('.')
+            result += f"Количество уровней: {len(parts)}\n"
+            result += f"TLD: {parts[-1]}"
+        else:
+            result = "❌ Невалидный domain"
+
+        self.domain_result_label.config(text=result)
+
+    # =========================================================================
+    # 14. ПАНЕЛЬ ИСТОРИИ
+    # =========================================================================
+    def create_history_panel(self):
+        """Создаёт панель истории операций"""
+        history_frame = ttk.LabelFrame(self.history_frame, text="📚 История операций", padding=10)
+        history_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Фильтр
+        filter_frame = ttk.Frame(history_frame)
+        filter_frame.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(filter_frame, text="🔍 Фильтр:").pack(side=tk.LEFT, padx=(0, 5))
+        self.history_filter = tk.StringVar()
+        filter_entry = ttk.Entry(filter_frame, textvariable=self.history_filter, width=30)
+        filter_entry.pack(side=tk.LEFT, padx=(0, 10))
+
+        ttk.Button(filter_frame, text="Применить", command=self.filter_history).pack(side=tk.LEFT, padx=5)
+        ttk.Button(filter_frame, text="🗑️ Очистить историю", command=self.clear_history_panel).pack(side=tk.RIGHT)
+
+        # Таблица истории
+        columns = ("Время", "Операция", "Статус", "Детали")
+        self.history_tree = ttk.Treeview(history_frame, columns=columns, show="headings", height=10)
+
+        for col in columns:
+            self.history_tree.heading(col, text=col)
+
+        self.history_tree.column("Время", width=150, anchor=tk.W)
+        self.history_tree.column("Операция", width=150, anchor=tk.W)
+        self.history_tree.column("Статус", width=100, anchor=tk.CENTER)
+        self.history_tree.column("Детали", width=300, anchor=tk.W)
+
+        scroll_y = ttk.Scrollbar(history_frame, orient="vertical", command=self.history_tree.yview)
+        self.history_tree.configure(yscrollcommand=scroll_y.set)
+
+        self.history_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Загрузка истории
+        self.load_history_panel()
+
+    def load_history_panel(self):
+        """Загружает историю из log_manager"""
+        self.history_tree.delete(*self.history_tree.get_children())
+
+        if hasattr(self, 'log_manager') and self.log_manager:
+            entries = self.log_manager.get_entries(100)
+
+            for entry in reversed(entries):
+                status_icon = "✅" if entry.get('status') == 'success' else "❌"
+
+                self.history_tree.insert("", tk.END, values=(
+                    entry.get('formatted_time', ''),
+                    entry.get('operation_type', ''),
+                    f"{status_icon} {entry.get('status', '')}",
+                    str(entry.get('details', {}))[:100]
+                ))
+
+    def filter_history(self):
+        """Фильтрует историю"""
+        filter_text = self.history_filter.get().lower()
+
+        for item in self.history_tree.get_children():
+            values = self.history_tree.item(item, 'values')
+            text = ' '.join(str(v).lower() for v in values)
+
+            if filter_text in text:
+                self.history_tree.reattach(item, '', 'end')
+            else:
+                self.history_tree.detach(item)
+
+    def clear_history_panel(self):
+        """Очищает историю"""
+        if messagebox.askyesno("⚠️ Подтверждение", "Очистить всю историю операций?"):
+            if hasattr(self, 'log_manager') and self.log_manager:
+                # Очищаем лог
+                if hasattr(self.log_manager, 'log'):
+                    self.log_manager.log.clear()
+
+                self.history_tree.delete(*self.history_tree.get_children())
+                getattr(self.app, 'show_toast', lambda x: None)("✅ История очищена")
 
     @property
     def root(self):
@@ -11238,7 +13817,335 @@ class IBToolsTab:
 
 
 # ───────────────────────────────────────────────
-# 📜 КЛАСС ЛИЦЕНЗИОННОГО СОГЛАШЕНИЯ
+# 📍 ФУНКЦИЯ АВТОМАТИЧЕСКОГО ОПРЕДЕЛЕНИЯ ЛОКАЦИИ
+# ───────────────────────────────────────────────
+
+
+def get_system_location():
+    """
+    Определяет местоположение пользователя на основе системных настроек.
+    Работает полностью офлайн. Не требует интернета.
+    Возвращает строку с названием города/региона.
+    """
+    try:
+        # 1. Попытка определить город по часовому поясу (наиболее точно для РФ)
+        tz_name = time.tzname[0] if time.tzname else ""
+        timezone_offset = -time.timezone // 3600  # Смещение в часах
+
+        # Словарь соответствия часовых поясов и городов (основные для РФ)
+        # Время Moscow = UTC+3
+        tz_to_city = {
+            'MSK': 'Москва', 'FET': 'Москва', 'EET': 'Калининград',
+            'SAMT': 'Самара', 'YEKT': 'Екатеринбург', 'OMST': 'Омск',
+            'KRAT': 'Красноярск', 'IRKT': 'Иркутск', 'YAKT': 'Якутск',
+            'VLAT': 'Владивосток', 'MAGT': 'Магадан', 'PETT': 'Петропавловск-Камчатский',
+            'UTC+3': 'Москва', 'UTC+4': 'Самара', 'UTC+5': 'Екатеринбург',
+            'UTC+6': 'Омск', 'UTC+7': 'Красноярск', 'UTC+8': 'Иркутск',
+            'UTC+9': 'Якутск', 'UTC+10': 'Владивосток', 'UTC+11': 'Магадан',
+            'UTC+12': 'Петропавловск-Камчатский'
+        }
+
+        # Проверка по имени.timezone
+        for key, city in tz_to_city.items():
+            if key in tz_name:
+                return city
+
+        # 2. Попытка определить по локали (язык/регион)
+        try:
+            loc = locale.getdefaultlocale()[0]
+            if loc:
+                lang, country = loc.split('_') if '_' in loc else (loc, '')
+                country_map = {
+                    'RU': 'Россия', 'BY': 'Беларусь', 'KZ': 'Казахстан',
+                    'UA': 'Украина', 'US': 'USA', 'DE': 'Germany',
+                    'FR': 'France', 'ES': 'Spain', 'IT': 'Italy'
+                }
+                if country in country_map:
+                    # Если город не найден по TZ, возвращаем страну
+                    return f"{country_map[country]} (по настройкам системы)"
+        except:
+            pass
+
+        # 3. Резервный вариант по платформе
+        try:
+            # Иногда hostname содержит подсказки, но это редко
+            node = platform.node()
+            if node and len(node) > 3:
+                # Не используем hostname напрямую из соображений приватности,
+                # но можем отметить, что система определена
+                pass
+        except:
+            pass
+
+        # 4. Если ничего не найдено
+        return "Не указано (авто)"
+
+    except Exception as e:
+        # В случае любой ошибки возвращаем нейтральное значение, чтобы не ломать приложение
+        return "Не указано (ошибка определения)"
+
+
+# ───────────────────────────────────────────────
+# 🌐 ГИБРИДНАЯ СИСТЕМА ОПРЕДЕЛЕНИЯ ЛОКАЦИИ
+# (ОНЛАЙН + ОФЛАЙН)
+# ───────────────────────────────────────────────
+# ───────────────────────────────────────────────
+# 🔍 ПРОВЕРКА ПОДКЛЮЧЕНИЯ К ИНТЕРНЕТУ
+# ───────────────────────────────────────────────
+def check_internet_connection(timeout: int = 3) -> bool:
+    """
+    Проверяет наличие подключения к интернету.
+    Использует несколько DNS-серверов для надёжности.
+    Работает без внешних зависимостей.
+    """
+    dns_servers = [
+        ("8.8.8.8", 53),  # Google DNS
+        ("1.1.1.1", 53),  # Cloudflare DNS
+        ("77.88.8.8", 53),  # Yandex DNS
+    ]
+
+    for host, port in dns_servers:
+        try:
+            socket.setdefaulttimeout(timeout)
+            socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect((host, port))
+            return True
+        except:
+            continue
+
+    return False
+
+
+# ───────────────────────────────────────────────
+# 🌍 ОНЛАЙН-ОПРЕДЕЛЕНИЕ ГОРОДА (IP-ГЕОЛОКАЦИЯ)
+# ───────────────────────────────────────────────
+def get_location_online(timeout: int = 5) -> Optional[Tuple[str, str]]:
+    """
+    Определяет город и страну через IP-геолокацию.
+    Использует бесплатные API без ключей.
+    Возвращает кортеж (город, страна) или None при ошибке.
+
+    Проверенные источники (2026):
+    - ipapi.co (HTTPS, без ключа, 1000 запросов/день)
+    - ip-api.com (HTTP, без ключа, 45 запросов/минуту)
+    - ipwhois.app (HTTPS, без ключа, лимиты)
+    """
+    apis = [
+        {
+            "url": "https://ipapi.co/json/",
+            "city_key": "city",
+            "country_key": "country_name",
+            "protocol": "https"
+        },
+        {
+            "url": "http://ip-api.com/json/",
+            "city_key": "city",
+            "country_key": "country",
+            "protocol": "http"
+        },
+        {
+            "url": "https://ipwhois.app/json/",
+            "city_key": "city",
+            "country_key": "country",
+            "protocol": "https"
+        }
+    ]
+
+    for api in apis:
+        try:
+            request = urllib.request.Request(
+                api["url"],
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            )
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                data = json.loads(response.read().decode("utf-8"))
+
+                city = data.get(api["city_key"], "")
+                country = data.get(api["country_key"], "")
+
+                if city and country:
+                    # Нормализация названий
+                    city = city.strip().title()
+                    country = country.strip()
+                    return (city, country)
+
+        except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError,
+                socket.timeout, Exception):
+            # Пробуем следующий API
+            continue
+
+    return None
+
+
+# ───────────────────────────────────────────────
+# 🕐 ОФЛАЙН-ОПРЕДЕЛЕНИЕ ГОРОДА (ЧАСОВОЙ ПОЯС + ЛОКАЛЬ)
+# ───────────────────────────────────────────────
+def get_location_offline() -> Tuple[str, str]:
+    """
+    Определяет город и страну на основе системных настроек.
+    Работает полностью без интернета.
+    Возвращает кортеж (город, страна).
+    """
+    city = "Не определено"
+    country = "Не определено"
+
+    # ───────────────────────────────────────────
+    # 1. Определение по часовому поясу (наиболее точно для РФ)
+    # ───────────────────────────────────────────
+    try:
+        tz_name = time.tzname[0] if time.tzname else ""
+        timezone_offset = -time.timezone // 3600  # Смещение UTC
+
+        # Расширенная база городов по часовым поясам (РФ + СНГ)
+        tz_to_location = {
+            # UTC+2
+            'EET': ('Калининград', 'Россия'),
+            'FET': ('Калининград', 'Россия'),
+            # UTC+3
+            'MSK': ('Москва', 'Россия'),
+            'MSD': ('Москва', 'Россия'),
+            'UTC+3': ('Москва', 'Россия'),
+            # UTC+4
+            'SAMT': ('Самара', 'Россия'),
+            'UTC+4': ('Самара', 'Россия'),
+            # UTC+5
+            'YEKT': ('Екатеринбург', 'Россия'),
+            'UTC+5': ('Екатеринбург', 'Россия'),
+            # UTC+6
+            'OMST': ('Омск', 'Россия'),
+            'UTC+6': ('Омск', 'Россия'),
+            # UTC+7
+            'KRAT': ('Красноярск', 'Россия'),
+            'UTC+7': ('Красноярск', 'Россия'),
+            # UTC+8
+            'IRKT': ('Иркутск', 'Россия'),
+            'UTC+8': ('Иркутск', 'Россия'),
+            # UTC+9
+            'YAKT': ('Якутск', 'Россия'),
+            'UTC+9': ('Якутск', 'Россия'),
+            # UTC+10
+            'VLAT': ('Владивосток', 'Россия'),
+            'UTC+10': ('Владивосток', 'Россия'),
+            # UTC+11
+            'MAGT': ('Магадан', 'Россия'),
+            'UTC+11': ('Магадан', 'Россия'),
+            # UTC+12
+            'PETT': ('Петропавловск-Камчатский', 'Россия'),
+            'UTC+12': ('Петропавловск-Камчатский', 'Россия'),
+            # СНГ
+            'MSK': ('Минск', 'Беларусь'),
+            'ALMT': ('Алматы', 'Казахстан'),
+            'QYZT': ('Астана', 'Казахстан'),
+        }
+
+        for key, location in tz_to_location.items():
+            if key in tz_name:
+                city, country = location
+                break
+
+    except Exception:
+        pass
+
+    # ───────────────────────────────────────────
+    # 2. Уточнение страны по локали
+    # ───────────────────────────────────────────
+    try:
+        loc = locale.getdefaultlocale()[0]
+        if loc:
+            parts = loc.split('_')
+            if len(parts) == 2:
+                lang_code, country_code = parts
+
+                country_map = {
+                    'RU': 'Россия', 'BY': 'Беларусь', 'KZ': 'Казахстан',
+                    'UA': 'Украина', 'UZ': 'Узбекистан', 'AZ': 'Азербайджан',
+                    'GE': 'Грузия', 'AM': 'Армения', 'MD': 'Молдова',
+                    'US': 'США', 'DE': 'Германия', 'FR': 'Франция',
+                    'ES': 'Испания', 'IT': 'Италия', 'GB': 'Великобритания',
+                    'CN': 'Китай', 'JP': 'Япония', 'BR': 'Бразилия'
+                }
+
+                if country_code in country_map:
+                    country = country_map[country_code]
+
+    except Exception:
+        pass
+
+    # ───────────────────────────────────────────
+    # 3. Резервное определение по платформе
+    # ───────────────────────────────────────────
+    if country == "Не определено":
+        try:
+            platform_system = platform.system()
+            platform_release = platform.release()
+
+            if platform_system == "Windows":
+                country = "Россия (предположительно)"
+            elif platform_system == "Darwin":
+                country = "Не определено (macOS)"
+            elif platform_system == "Linux":
+                country = "Не определено (Linux)"
+
+        except Exception:
+            country = "Не определено"
+
+    return (city, country)
+
+
+# ───────────────────────────────────────────────
+# 🎯 ГИБРИДНОЕ ОПРЕДЕЛЕНИЕ (ОНЛАЙН + ОФЛАЙН)
+# ───────────────────────────────────────────────
+def get_system_location_hybrid() -> Tuple[str, str, str]:
+    """
+    ГИБРИДНОЕ определение локации.
+    1. Проверяет наличие интернета
+    2. Если есть - использует IP-геолокацию (точно до города)
+    3. Если нет - использует системные настройки (офлайн)
+
+    Возвращает кортеж: (город, страна, метод_определения)
+    """
+    # Кэширование результата (чтобы не запрашивать каждый раз)
+    if hasattr(get_system_location_hybrid, '_cached_result'):
+        cache_time, cached = get_system_location_hybrid._cached_result
+        if time.time() - cache_time < 3600:  # Кэш на 1 час
+            return cached
+
+    # ───────────────────────────────────────────
+    # ШАГ 1: Проверка интернета
+    # ───────────────────────────────────────────
+    has_internet = check_internet_connection(timeout=3)
+
+    # ───────────────────────────────────────────
+    # ШАГ 2: Определение локации
+    # ───────────────────────────────────────────
+    if has_internet:
+        # Попытка онлайн-определения
+        online_result = get_location_online(timeout=5)
+
+        if online_result:
+            city, country = online_result
+            method = "🌐 IP-геолокация (онлайн)"
+            result = (city, country, method)
+        else:
+            # Онлайн не сработал, fallback на офлайн
+            city, country = get_location_offline()
+            method = "🖥️ Системные настройки (офлайн-резерв)"
+            result = (city, country, method)
+    else:
+        # Нет интернета - только офлайн
+        city, country = get_location_offline()
+        method = "🖥️ Системные настройки (офлайн)"
+        result = (city, country, method)
+
+    # ───────────────────────────────────────────
+    # ШАГ 3: Кэширование результата
+    # ───────────────────────────────────────────
+    get_system_location_hybrid._cached_result = (time.time(), result)
+
+    return result
+
+
+# ───────────────────────────────────────────────
+# 📜 ОБНОВЛЁННЫЙ КЛАСС ЛИЦЕНЗИОННОГО СОГЛАШЕНИЯ
 # ───────────────────────────────────────────────
 LICENSE_FILE = "license_accepted.txt"
 
@@ -11246,83 +14153,74 @@ LICENSE_FILE = "license_accepted.txt"
 class LicenseAgreementDialog:
     """
     Диалог лицензионного соглашения для некоммерческой версии ØccultoNG Pro
+    Поле местоположения заполняется автоматически (гибридный метод).
     """
-
     LICENSE_TEXT = """
 ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ
 о предоставлении права использования программы для ЭВМ
 «ØccultoNG Pro» (некоммерческая версия)
-
 г. _____________                                                            «___» _________ 20___ г.
-
 1. ОБЩИЕ ПОЛОЖЕНИЯ
-1.1. Настоящее Лицензионное соглашение (далее - «Соглашение») регулирует отношения 
-    между правообладателем программы для ЭВМ «ØccultoNG Pro» (далее - «Программа») 
-    и пользователем (далее - «Лицензиат») относительно использования Программы.
-1.2. Программа распространяется на условиях некоммерческой лицензии. 
-    Использование Программы в коммерческих целях запрещено без приобретения 
-    соответствующей коммерческой лицензии.
-1.3. Акцептом настоящего Соглашения является установка, запуск или иное использование 
-    Программы Лицензиатом.
-
+1.1. Настоящее Лицензионное соглашение (далее - «Соглашение») регулирует отношения
+между правообладателем программы для ЭВМ «ØccultoNG Pro» (далее - «Программа»)
+и пользователем (далее - «Лицензиат») относительно использования Программы.
+1.2. Программа распространяется на условиях некоммерческой лицензии.
+Использование Программы в коммерческих целях запрещено без приобретения
+соответствующей коммерческой лицензии.
+1.3. Акцептом настоящего Соглашения является установка, запуск или иное использование
+Программы Лицензиатом.
 2. ПРЕДМЕТ СОГЛАШЕНИЯ
-2.1. Правообладатель предоставляет Лицензиату простое (неисключительное), 
-    непередаваемое право использования Программы на территории всех стран мира.
+2.1. Правообладатель предоставляет Лицензиату простое (неисключительное),
+непередаваемое право использования Программы на территории всех стран мира.
 2.2. Разрешённые способы использования:
-    • Воспроизведение Программы путём загрузки в память ЭВМ;
-    • Запись в память ЭВМ (в том числе в ПЗУ);
-    • Запуск и функционирование Программы для личных, образовательных, 
-      исследовательских и иных некоммерческих целей;
-    • Модификация исходного кода для собственных нужд (при условии соблюдения 
-      лицензии MIT для используемых компонентов).
+• Воспроизведение Программы путём загрузки в память ЭВМ;
+• Запись в память ЭВМ (в том числе в ПЗУ);
+• Запуск и функционирование Программы для личных, образовательных,
+исследовательских и иных некоммерческих целей;
+• Модификация исходного кода для собственных нужд (при условии соблюдения
+лицензии MIT для используемых компонентов).
 2.3. Запрещается:
-    • Использование Программы в коммерческой деятельности, включая оказание 
-      платных услуг на основе функционала Программы;
-    • Распространение модифицированных версий Программы под тем же названием 
-      без явного указания на изменения;
-    • Удаление или изменение уведомлений об авторских правах;
-    • Обратная разработка (декомпиляция, дизассемблирование) с целью 
-      создания конкурирующих продуктов.
-
+• Использование Программы в коммерческой деятельности, включая оказание
+платных услуг на основе функционала Программы;
+• Распространение модифицированных версий Программы под тем же названием
+без явного указания на изменения;
+• Удаление или изменение уведомлений об авторских правах;
+• Обратная разработка (декомпиляция, дизассемблирование) с целью
+создания конкурирующих продуктов.
 3. ИНТЕЛЛЕКТУАЛЬНАЯ СОБСТВЕННОСТЬ
-3.1. Все права на Программу, включая исходный код, документацию и сопутствующие 
-    материалы, принадлежат правообладателю и охраняются законодательством об 
-    интеллектуальной собственности.
-3.2. Лицензиат не приобретает прав собственности на Программу, а получает 
-    ограниченные права использования в соответствии с настоящим Соглашением.
-
+3.1. Все права на Программу, включая исходный код, документацию и сопутствующие
+материалы, принадлежат правообладателю и охраняются законодательством об
+интеллектуальной собственности.
+3.2. Лицензиат не приобретает прав собственности на Программу, а получает
+ограниченные права использования в соответствии с настоящим Соглашением.
 4. ОТВЕТСТВЕННОСТЬ И ГАРАНТИИ
-4.1. Программа предоставляется «как есть» (AS IS). Правообладатель не несёт 
-    ответственности за любые прямые или косвенные убытки, возникшие в результате 
-    использования или невозможности использования Программы.
-4.2. Правообладатель не гарантирует, что Программа будет соответствовать 
-    ожиданиям Лицензиата, работать без ошибок или быть совместимой со всем 
-    оборудованием и программным обеспечением.
-4.3. Лицензиат самостоятельно несёт ответственность за результаты использования 
-    Программы, включая целостность и сохранность своих данных.
-
+4.1. Программа предоставляется «как есть» (AS IS). Правообладатель не несёт
+ответственности за любые прямые или косвенные убытки, возникшие в результате
+использования или невозможности использования Программы.
+4.2. Правообладатель не гарантирует, что Программа будет соответствовать
+ожиданиям Лицензиата, работать без ошибок или быть совместимой со всем
+оборудованием и программным обеспечением.
+4.3. Лицензиат самостоятельно несёт ответственность за результаты использования
+Программы, включая целостность и сохранность своих данных.
 5. СРОК ДЕЙСТВИЯ И ПРЕКРАЩЕНИЕ
 5.1. Соглашение вступает в силу с момента акцепта и действует бессрочно.
 5.2. Соглашение может быть прекращено:
-    • По инициативе Лицензиата - путём удаления Программы с устройств;
-    • По инициативе Правообладателя - в случае нарушения Лицензиатом условий 
-      настоящего Соглашения.
-5.3. При прекращении Соглашения Лицензиат обязан прекратить использование 
-    Программы и удалить все её копии.
-
+• По инициативе Лицензиата - путём удаления Программы с устройств;
+• По инициативе Правообладателя - в случае нарушения Лицензиатом условий
+настоящего Соглашения.
+5.3. При прекращении Соглашения Лицензиат обязан прекратить использование
+Программы и удалить все её копии.
 6. ЗАКЛЮЧИТЕЛЬНЫЕ ПОЛОЖЕНИЯ
 6.1. Настоящее Соглашение регулируется законодательством Российской Федерации.
-6.2. Все споры и разногласия разрешаются путём переговоров, а при недостижении 
-    согласия - в судебном порядке по месту нахождения Правообладателя.
-6.3. Правообладатель оставляет за собой право вносить изменения в настоящее 
-    Соглашение. Новая версия вступает в силу с момента её публикации.
-
+6.2. Все споры и разногласия разрешаются путём переговоров, а при недостижении
+согласия - в судебном порядке по месту нахождения Правообладателя.
+6.3. Правообладатель оставляет за собой право вносить изменения в настоящее
+Соглашение. Новая версия вступает в силу с момента её публикации.
 7. КОНТАКТНАЯ ИНФОРМАЦИЯ
-По вопросам приобретения коммерческой лицензии, технической поддержки и 
+По вопросам приобретения коммерческой лицензии, технической поддержки и
 внесения предложений обращайтесь:
 📧 Email: tudubambam@ya.ru
 🌐 Сайт: www.occulto.pro
-
 ─────────────────────────────────────────────────────────────────────────
 НАЖИМАЯ КНОПКУ «ПРИНЯТЬ», ВЫ ПОДТВЕРЖДАЕТЕ, ЧТО:
 • Ознакомились с условиями настоящего Соглашения;
@@ -11340,7 +14238,7 @@ class LicenseAgreementDialog:
         # Создаем модальное окно
         self.dialog = tk.Toplevel(root)
         self.dialog.title("📜 Лицензионное соглашение - ØccultoNG Pro")
-        self.dialog.geometry("700x650")
+        self.dialog.geometry("700x680")
         self.dialog.minsize(600, 550)
         self.dialog.resizable(True, True)
         self.dialog.configure(bg=self.colors["bg"])
@@ -11366,7 +14264,7 @@ class LicenseAgreementDialog:
         """Центрирует окно на экране"""
         self.dialog.update_idletasks()
         width = 700
-        height = 650
+        height = 680
         x = (self.dialog.winfo_screenwidth() // 2) - (width // 2)
         y = (self.dialog.winfo_screenheight() // 2) - (height // 2)
         self.dialog.geometry(f"{width}x{height}+{x}+{y}")
@@ -11380,7 +14278,6 @@ class LicenseAgreementDialog:
         # Заголовок
         header_frame = ttk.Frame(main_frame, style="Card.TFrame")
         header_frame.pack(fill=tk.X, pady=(0, 15))
-
         ttk.Label(
             header_frame,
             text="📜 ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ",
@@ -11388,7 +14285,6 @@ class LicenseAgreementDialog:
             foreground=self.colors["accent"],
             style="Title.TLabel"
         ).pack(anchor="w")
-
         ttk.Label(
             header_frame,
             text="ØccultoNG Pro • Некоммерческая версия",
@@ -11422,39 +14318,55 @@ class LicenseAgreementDialog:
         )
         license_label.pack(padx=10, pady=10, anchor="w")
 
-        # Поле для города и дата
+        # ───────────────────────────────────────
+        # ПОЛЕ ДЛЯ ГОРОДА И ДАТА (АВТОМАТИЧЕСКОЕ ЗАПОЛНЕНИЕ)
+        # ───────────────────────────────────────
         location_frame = ttk.Frame(main_frame, style="Card.TFrame")
         location_frame.pack(fill=tk.X, pady=(0, 15))
 
-        ttk.Label(location_frame, text="Место заключения:", style="TLabel").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Label(location_frame, text="📍 Местоположение:", style="TLabel").pack(side=tk.LEFT, padx=(0, 5))
 
-        self.city_var = tk.StringVar()
-        city_entry = ttk.Entry(  # ИСПРАВЛЕНО: обычный Entry вместо PlaceholderEntry
+        # Получаем локацию гибридным методом
+        city, country, method = get_system_location_hybrid()
+        location_text = f"{city}, {country}"
+        self.city_var = tk.StringVar(value=location_text)
+
+        city_entry = ttk.Entry(
             location_frame,
             textvariable=self.city_var,
-            width=25,
-            style="TEntry"
+            width=35,
+            style="TEntry",
+            state="readonly"  # Запрет ручного редактирования
         )
-        city_entry.pack(side=tk.LEFT, padx=(0, 20))
+        city_entry.pack(side=tk.LEFT, padx=(0, 10))
+
+        # Индикатор метода определения (цветной)
+        method_color = self.colors["success"] if "онлайн" in method.lower() else self.colors["warning"]
+        ttk.Label(
+            location_frame,
+            text=f"ℹ️ {method}",
+            style="Secondary.TLabel",
+            foreground=method_color,
+            font=("Segoe UI", 8)
+        ).pack(side=tk.LEFT)
 
         # Автоматическая дата
         current_date = time.strftime("«%d» %B %Y г.")
-        if "January" in current_date or "February" in current_date:
-            months_ru = {
-                'January': 'января', 'February': 'февраля', 'March': 'марта',
-                'April': 'апреля', 'May': 'мая', 'June': 'июня',
-                'July': 'июля', 'August': 'августа', 'September': 'сентября',
-                'October': 'октября', 'November': 'ноября', 'December': 'декабря'
-            }
-            for en, ru in months_ru.items():
-                current_date = current_date.replace(en, ru)
+        months_ru = {
+            'January': 'января', 'February': 'февраля', 'March': 'марта',
+            'April': 'апреля', 'May': 'мая', 'June': 'июня',
+            'July': 'июля', 'August': 'августа', 'September': 'сентября',
+            'October': 'октября', 'November': 'ноября', 'December': 'декабря'
+        }
+        for en, ru in months_ru.items():
+            current_date = current_date.replace(en, ru)
 
         ttk.Label(
             location_frame,
-            text=f"Дата: {current_date}",
+            text=f"📅 Дата: {current_date}",
             style="Secondary.TLabel",
             foreground=self.colors["text_secondary"]
-        ).pack(side=tk.LEFT)
+        ).pack(side=tk.RIGHT)
 
         # Разделитель
         ttk.Separator(main_frame, orient="horizontal").pack(fill=tk.X, pady=(10, 15))
@@ -11489,19 +14401,15 @@ class LicenseAgreementDialog:
 
     def on_accept(self):
         """Обработчик нажатия кнопки «Принять»"""
-        # Сохраняем факт принятия соглашения
         try:
             with open(LICENSE_FILE, 'w', encoding='utf-8') as f:
-                # Форматируем дату в читаемый вид
                 accepted_date = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
-
                 f.write(f"accepted:{accepted_date}\n")
                 f.write(f"city:{self.city_var.get() or 'Не указан'}\n")
                 f.write(f"version:{VERSION}\n")
-                f.write(f"timestamp:{time.time()}\n")  # Опционально: сохраняем и timestamp для программной проверки
+                f.write(f"timestamp:{time.time()}\n")
         except Exception as e:
             print(f"Ошибка сохранения лицензии: {e}")
-            # Не критично, если не удалось сохранить
 
         self.accepted = True
         self.dialog.destroy()
@@ -13867,483 +16775,737 @@ class SteganographyUltimatePro:
         self.display_help_text(help_text)
 
     def show_help_ib_tools(self):
-        """Показывает подробную документацию по инструментам ИБ"""
+        """Показывает подробную документацию по инструментам ИБ (Версия 2.0 Pro)"""
         help_text = f"""
-    🛡️ ИНСТРУМЕНТЫ ИНФОРМАЦИОННОЙ БЕЗОПАСНОСТИ
+    🛡️ ИНСТРУМЕНТЫ ИНФОРМАЦИОННОЙ БЕЗОПАСНОСТИ PRO
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    ОБЗОР ВКЛАДКИ
+    📋 ОБЗОР ВКЛАДКИ
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Вкладка "🛡️ Инструменты ИБ" содержит набор профессиональных утилит для
-    специалистов по информационной безопасности, цифровой криминалистики и
-    анализа данных. Все инструменты работают офлайн, без передачи данных
-    в интернет.
+    Вкладка "🛡️ Инструменты ИБ Pro" содержит профессиональный набор из 13 утилит
+    для специалистов по информационной безопасности, цифровой криминалистики,
+    анализа вредоносного ПО и расследования инцидентов.
 
-    📋 ДОСТУПНЫЕ ИНСТРУМЕНТЫ:
-    1. 🔐 Хеш-суммы - калькулятор криптографических хешей
-    2. 🔑 Генератор паролей - создание криптостойких паролей
-    3. 🕵️ Валидатор сигнатур - проверка подлинности файлов
-    4. 🔣 Кодировщик - конвертер кодировок данных
-    5. 🔍 Метаданные - извлечение и анализ метаданных файлов
+    ✨ КЛЮЧЕВЫЕ ОСОБЕННОСТИ:
+    • Все инструменты работают ОФФЛАЙН - данные не покидают ваш компьютер
+    • Поддержка пакетной обработки для массового анализа
+    • Экспорт результатов в JSON/CSV/TXT для отчётности
+    • Кэширование результатов для ускорения повторных операций
+    • Интуитивный интерфейс с группировкой по категориям
+
+    🗂️ ГРУППЫ ИНСТРУМЕНТОВ:
+    ┌────────────────────────────────────────────────────────────┐
+    │ 🔐 Криптография          │ 🔬 Анализ файлов               │
+    │ • Хеш-калькулятор        │ • Валидатор сигнатур          │
+    │ • Генератор паролей      │ • Анализ энтропии             │
+    │ • Генератор UUID/GUID    │ • Извлечение строк            │
+    │                          │ • PE-анализатор               │
+    │                          │ • Архив-анализатор            │
+    ├────────────────────────────────────────────────────────────┤
+    │ 🔄 Данные и кодирование  │ 🌐 Сетевые инструменты        │
+    │ • Кодировщик             │ • IP/Domain валидатор         │
+    │ • Метаданные             │ • Стеганоанализ               │
+    │ • Конвертер времени      │                               │
+    └────────────────────────────────────────────────────────────┘
 
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    1. 🔐 ХЕШ-СУММЫ (HASH CALCULATOR)
+    🔐 ГРУППА 1: КРИПТОГРАФИЯ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    1.1 🔐 ХЕШ-КАЛЬКУЛЯТОР (HASH CALCULATOR)
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     НАЗНАЧЕНИЕ:
-    • Расчет криптографических хешей для файлов и текста
+    • Расчёт криптографических хешей для файлов и текста
     • Проверка целостности данных (контрольные суммы)
     • Верификация скачанных файлов по опубликованным хешам
-    • Подготовка данных для цифровых подписей
+    • Подготовка данных для цифровых подписей и блокчейна
 
-    ПОДДЕРЖИВАЕМЫЕ АЛГОРИТМЫ:
-    🟢 MD5 (128 бит) - для быстрой проверки целостности
-      • Скорость: очень высокая
-      • Стойкость: низкая (не для криптографии!)
-      • Применение: проверка скачанных файлов, контрольные суммы
-
-    🟢 SHA-1 (160 бит) - устаревший, но широко используемый
-      • Скорость: высокая
-      • Стойкость: средняя (коллизии возможны)
-      • Применение: совместимость со старыми системами
-
-    🟢 SHA-256 (256 бит) - РЕКОМЕНДУЕМЫЙ СТАНДАРТ
-      • Скорость: высокая
-      • Стойкость: очень высокая (NIST одобрен)
-      • Применение: цифровые подписи, проверка ПО, блокчейн
-
-    🟢 SHA-512 (512 бит) - максимальная защита
-      • Скорость: средняя
-      • Стойкость: экстремально высокая
-      • Применение: критически важные данные, долгосрочное хранение
+    ПОДДЕРЖИВАЕМЫЕ АЛГОРИТМЫ (11 шт.):
+    ┌─────────────┬─────────┬──────────────┬─────────────────────────┐
+    │ Алгоритм    │ Размер  │ Стойкость    │ Применение              │
+    ├─────────────┼─────────┼──────────────┼─────────────────────────┤
+    │ MD5         │ 128 бит │ ⚠️ Низкая   │ Быстрая проверка        │
+    │ SHA-1       │ 160 бит │ ⚠️ Средняя  │ Совместимость           │
+    │ SHA-224     │ 224 бит │ ✅ Высокая  │ Цифровые подписи        │
+    │ SHA-256     │ 256 бит │ ✅✅ Очень  │ РЕКОМЕНДУЕМЫЙ СТАНДАРТ │
+    │ SHA-384     │ 384 бит │ ✅✅ Очень  │ Критические данные      │
+    │ SHA-512     │ 512 бит │ ✅✅✅ Макс │ Долгосрочное хранение  │
+    │ SHA3-256    │ 256 бит │ ✅✅ Очень  │ Новые стандарты         │
+    │ SHA3-512    │ 512 бит │ ✅✅✅ Макс │ Будущие стандарты       │
+    │ BLAKE2b     │ 512 бит │ ✅✅ Очень  │ Высокая скорость        │
+    │ BLAKE2s     │ 256 бит │ ✅✅ Очень  │ Мобильные устройства    │
+    │ RIPEMD-160  │ 160 бит │ ✅ Высокая  │ Блокчейн-системы        │
+    └─────────────┴─────────┴──────────────┴─────────────────────────┘
 
     КАК ИСПОЛЬЗОВАТЬ:
-    1️⃣ Хеширование файла:
-      • Нажмите "📂 Обзор" и выберите файл
-      • Хеш-суммы рассчитаются автоматически
-      • Нажмите "📋 Копировать" рядом с нужным алгоритмом
-      • Или "📋 Копировать все" для экспорта всех хешей
+    1️⃣ Хеширование файлов:
+       • Нажмите "📂 Добавить файлы" или "📁 Добавить папку"
+       • Выберите нужные алгоритмы (по умолчанию: MD5, SHA-256, SHA-512)
+       • Нажмите "🚀 Рассчитать хеши"
+       • Результаты отобразятся в таблице с возможностью копирования
 
     2️⃣ Хеширование текста:
-      • Введите или вставьте текст в поле (Ctrl+V)
-      • Хеш-суммы обновляются автоматически при изменении
-      • Используйте кнопки "📋 Вставить" / "🗑️ Очистить" на панели
+       • Введите текст в поле или вставьте из буфера (Ctrl+V)
+       • Хеш-суммы рассчитаются автоматически при изменении
+       • Используйте "⚖️ Сравнение с эталоном" для верификации
 
-    3️⃣ Копирование результатов:
-      • Клик по строке хеша → копирование в буфер
-      • Кнопка "📋 Копировать все" → все алгоритмы в формате:
-        MD5: abc123...
-        SHA256: def456...
+    3️⃣ Работа с результатами:
+       • 📋 Копировать выбранное - один хеш в буфер
+       • 📋 Копировать всё - все алгоритмы в формате списка
+       • 📤 Экспорт - сохранение в JSON/CSV/TXT
+       • 📚 История - просмотр последних 1000 операций
 
-    ПРАКТИЧЕСКИЕ ПРИМЕРЫ:
-    ✅ Проверка скачанного ПО:
-      1. Скачайте файл и его SHA-256 хеш с официального сайта
-      2. Откройте файл в калькуляторе хешей
-      3. Сравните полученный хеш с опубликованным
-      4. Если совпадает - файл не повреждён и не подменён
+    🎯 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Верификация ПО:
+       1. Скачайте файл и SHA-256 хеш с официального сайта
+       2. Рассчитайте хеш локально
+       3. Сравните через поле "Сравнение с эталоном"
+       4. Статус "✅ СОВПАДЕНИЕ" подтверждает целостность
 
-    ✅ Документирование доказательств:
-      1. Создайте хеш файла-доказательства (SHA-256)
-      2. Запишите хеш в протокол с датой и подписью
-      3. Любое изменение файла изменит хеш - это будет заметно
+    ✅ Криминалистический анализ:
+       1. Создайте хеш файла-доказательства (SHA-256 + SHA-512)
+       2. Зафиксируйте хеш в протоколе с датой и подписью
+       3. Любое изменение файла изменит хеш - это будет доказательством
 
-    ✅ Подготовка к шифрованию:
-      1. Рассчитайте хеш исходных данных
-      2. Зашифруйте данные
-      3. После расшифровки сверьте хеш - целостность подтверждена
+    ✅ Пакетная проверка:
+       1. Добавьте папку с файлами для анализа
+       2. Программа рекурсивно обработает все файлы
+       3. Экспортируйте отчёт для аудита
 
-    ⚠️ ВАЖНО:
+    ⚠️ КРИТИЧЕСКИЕ ПРЕДУПРЕЖДЕНИЯ:
     • MD5 и SHA-1 НЕ подходят для криптографической защиты!
-    • Всегда используйте SHA-256 или SHA-512 для безопасности
-    • Хеш файла зависит от КАЖДОГО бита - даже пробел изменит результат
-    • Сохраняйте хеши в надёжном месте отдельно от файлов
+    • Хеш зависит от КАЖДОГО бита - даже пробел изменит результат
+    • Сохраняйте хеши отдельно от файлов для безопасности
 
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    2. 🔑 ГЕНЕРАТОР ПАРОЛЕЙ (PASSWORD GENERATOR)
+    1.2 🔑 ГЕНЕРАТОР ПАРОЛЕЙ (PASSWORD GENERATOR)
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     НАЗНАЧЕНИЕ:
     • Создание криптостойких случайных паролей
     • Генерация ключей для шифрования и аутентификации
-    • Подготовка одноразовых паролей для тестирования
+    • Создание passphrase для мнемонического запоминания
+    • Оценка стойкости существующих паролей
 
-    ПАРАМЕТРЫ ГЕНЕРАЦИИ:
-    📏 Длина пароля: 8–64 символа (ползунок)
-      • Рекомендуется: минимум 16 символов для важных аккаунтов
-      • Для ключей шифрования: 32+ символа
+    ТИПЫ ГЕНЕРАЦИИ:
+    ┌─────────────────┬────────────────────────────────────────┐
+    │ Тип             │ Описание                               │
+    ├─────────────────┼────────────────────────────────────────┤
+    │ 🎲 Случайный    │ Полный контроль над набором символов  │
+    │ 🔤 Passphrase   │ Словосочетания для лёгкого запоминания│
+    │ 🔢 PIN-код      │ Цифровые коды для устройств           │
+    │ 🎨 XKCD-стиль   │ Запоминаемые фразы с элементами       │
+    └─────────────────┴────────────────────────────────────────┘
 
-    🔤 Набор символов (чекбоксы):
-      ☑ A-Z - заглавные латинские буквы (26 символов)
-      ☑ a-z - строчные латинские буквы (26 символов)
-      ☑ 0-9 - цифры (10 символов)
-      ☑ !@# - специальные символы (~32 символа)
-      ☑ Доп. символы - пользовательский набор
+    ПАРАМЕТРЫ СЛУЧАЙНОГО ПАРОЛЯ:
+    📏 Длина: 8–128 символов (рекомендуется 16+)
+    🔤 Наборы символов:
+       ☑ A-Z (26 заглавных)
+       ☑ a-z (26 строчных)
+       ☑ 0-9 (10 цифр)
+       ☑ !@#$%^&* (32 спецсимвола)
+       ☑ Пользовательские символы
 
     ⚙️ Дополнительные опции:
-      ☐ ❌ Без похожих (l,1,I,O,0) - исключает визуально похожие символы
-        • Полезно для паролей, которые будут вводиться вручную
-        • Уменьшает алфавит, но повышает удобство
+       ☐ ❌ Без похожих (l,1,I,O,0) - для ручного ввода
 
-    🔐 ИНДИКАТОР ЭНТРОПИИ:
+    ПАРАМЕТРЫ PASSPHRASE:
+    • Количество слов: 3–10 (рекомендуется 4–6)
+    • Язык: русский / английский / смешанный
+    • Разделитель: -, _, ., пробел или любой символ
+
+    🔐 ИНДИКАТОР СТОЙКОСТИ:
     После генерации отображается:
-    • Энтропия в битах - мера случайности пароля
-    • Размер алфавита - количество возможных символов
-    • Цветовая индикация:
-      🟢 >60 бит - очень стойкий (рекомендуется)
-      🟡 40-60 бит - приемлемый для обычных задач
-      🔴 <40 бит - слабый, не рекомендуется
+    ┌────────────────┬─────────────┬────────────────────────┐
+    │ Энтропия       │ Оценка      │ Рекомендация           │
+    ├────────────────┼─────────────┼────────────────────────┤
+    │ < 40 бит       │ 🔴 Слабый  │ Не использовать         │
+    │ 40–60 бит      │ 🟡 Средний │ Для второстепенных     │
+    │ 60–80 бит      │ 🟢 Хороший │ Для важных аккаунтов   │
+    │ > 80 бит       │ ✅✅ Отличный│ Для шифрования/ключей │
+    └────────────────┴─────────────┴────────────────────────┘
 
-    ПРИМЕРЫ РАСЧЁТА ЭНТРОПИИ:
-    • Пароль из 16 символов, алфавит 94 знака:
-      Энтропия = 16 × log₂(94) ≈ 16 × 6.55 ≈ 105 бит ✅
-    • Пароль из 8 символов, только цифры:
-      Энтропия = 8 × log₂(10) ≈ 8 × 3.32 ≈ 27 бит ❌
+    🧮 РАСЧЁТ ЭНТРОПИИ:
+    Энтропия = длина × log₂(размер_алфавита)
 
-    КАК ИСПОЛЬЗОВАТЬ:
-    1️⃣ Настройка параметров:
-      • Установите длину пароля (рекомендуется 16+)
-      • Выберите нужные наборы символов
-      • При необходимости исключите похожие символы
+    Примеры:
+    • 16 символов, алфавит 94 знака:
+      16 × log₂(94) ≈ 16 × 6.55 ≈ 105 бит ✅
+    • 8 цифр (только 0-9):
+      8 × log₂(10) ≈ 8 × 3.32 ≈ 27 бит ❌
 
-    2️⃣ Генерация:
-      • Нажмите "🎲 Сгенерировать"
-      • Пароль появится в поле результата
-      • Оцените энтропию - при необходимости увеличьте длину
+    🎯 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Пароль для менеджера паролей:
+       • Тип: Случайный, длина: 32, все наборы
+       • Энтропия: ~200 бит - максимальная защита
 
-    3️⃣ Копирование:
-      • Нажмите "📋 Копировать" или Ctrl+C
-      • Пароль скопирован в буфер обмена
+    ✅ Ключ для AES-256:
+       • Тип: Случайный, длина: 64, только hex-символы
+       • Результат: 256-битный ключ в hex-формате
 
-    🔐 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
-    ✅ Создание пароля для менеджера паролей:
-      • Длина: 32 символа
-      • Все наборы символов включены
-      • Энтропия: ~200 бит - максимальная защита
+    ✅ Запоминаемый пароль:
+       • Тип: Passphrase, 5 слов, русский язык, разделитель "-"
+       • Пример: "гора-река-звезда-ключ-мечта"
+       • Энтропия: ~65 бит - хороший баланс
 
-    ✅ Генерация ключа для шифрования:
-      • Длина: 64 символа
-      • Только hex-символы (0-9, a-f) через "Доп. символы"
-      • Используйте для AES-256 ключей
-
-    ✅ Пароль для временного доступа:
-      • Длина: 12 символов
-      • Без похожих символов (удобство ввода)
-      • Энтропия ~70 бит - достаточно для разового использования
-
-    ⚠️ КРИТИЧЕСКИЕ ПРАВИЛА БЕЗОПАСНОСТИ:
+    ⚠️ КРИТИЧЕСКИЕ ПРАВИЛА:
     • Никогда не используйте сгенерированные пароли повторно!
-    • Не сохраняйте пароли в открытом виде - используйте менеджер паролей
-    • Не передавайте пароли по незащищённым каналам
-    • Для каждого сервиса - уникальный пароль
-    • Регулярно меняйте пароли для критически важных аккаунтов
-
-    🔐 СОВЕТ: Используйте комбинацию:
-      • Менеджер паролей (KeePass, Bitwarden) для хранения
-      • Этот генератор для создания новых паролей
-      • Двухфакторную аутентификацию везде, где возможно
+    • Не сохраняйте пароли в открытом виде
+    • Используйте менеджер паролей (KeePass, Bitwarden)
+    • Включайте двухфакторную аутентификацию
 
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    3. 🕵️ ВАЛИДАТОР СИГНАТУР (FILE SIGNATURE VALIDATOR)
+    1.3 🆔 ГЕНЕРАТОР UUID/GUID
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     НАЗНАЧЕНИЕ:
-    • Проверка соответствия расширения файла его реальному содержимому
+    • Создание уникальных идентификаторов по стандарту RFC 4122
+    • Генерация ID для баз данных, сессий, транзакций
+    • Поддержка всех версий UUID (1, 3, 4, 5)
+
+    ВЕРСИИ UUID:
+    ┌───────┬────────────────────────────────────────────┐
+    │ Версия│ Описание                                   │
+    ├───────┼────────────────────────────────────────────┤
+    │ v1    │ На основе времени + MAC-адреса            │
+    │ v3    │ На основе MD5 + namespace + name          │
+    │ v4    │ Криптографически случайный (РЕКОМЕНДУЕТСЯ)│
+    │ v5    │ На основе SHA-1 + namespace + name        │
+    └───────┴────────────────────────────────────────────┘
+
+    НАСТРОЙКИ:
+    • Namespace для v3/v5: DNS, URL, OID, X500
+    • Name: произвольная строка для детерминированной генерации
+    • Количество: 1–100 UUID за одну операцию
+    • Формат вывода: с/без '{"{}"}', URN, верхний/нижний регистр
+
+    ПРИМЕРЫ ВЫВОДА:
+    • Стандарт: 550e8400-e29b-41d4-a716-446655440000
+    • Без скобок: 550e8400e29b41d4a716446655440000
+    • URN: urn:uuid:550e8400-e29b-41d4-a716-446655440000
+    • Верхний регистр: 550E8400-E29B-41D4-A716-446655440000
+
+    🎯 ПРИМЕНЕНИЕ:
+    ✅ Уникальные ID в БД: UUID v4 для первичных ключей
+    ✅ Идентификаторы сессий: UUID v4 для токенов
+    ✅ Детерминированные ID: UUID v5 для хеширования имён
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    🔬 ГРУППА 2: АНАЛИЗ ФАЙЛОВ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    2.1 🕵️ ВАЛИДАТОР СИГНАТУР (FILE SIGNATURE VALIDATOR)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Проверка соответствия расширения файла реальному содержимому
     • Выявление маскировки исполняемых файлов (.exe → .jpg)
-    • Обнаружение подмены типов файлов в расследованиях
-    • Предотвращение запуска вредоносного ПО
+    • Обнаружение внедрённых файлов (carving)
+    • Проверка целостности структуры файла
 
-    ЧТО ТАКОЕ СИГНАТУРА ФАЙЛА?
-    Сигнатура (magic bytes) - уникальная последовательность байтов
-    в начале файла, определяющая его настоящий формат.
+    БАЗА СИГНАТУР: 100+ форматов
+    • Изображения: PNG, JPEG, GIF, BMP, WebP, RAW-форматы
+    • Документы: PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, RTF, ODF
+    • Архивы: ZIP, RAR, 7z, GZ, BZ2, XZ, TAR, ISO, DMG
+    • Исполняемые: EXE, DLL, ELF, Mach-O, Java class/jar
+    • Аудио/Видео: WAV, MP3, FLAC, MP4, MKV, AVI, WebM
+    • Базы данных: SQLite, MDB, MySQL, FileMaker
+    • Шифрованные: GPG, PGP, VeraCrypt, BitLocker
 
-    ПРИМЕРЫ СИГНАТУР:
-    📁 PNG:     89 50 4E 47 0D 0A 1A 0A
-    📁 JPEG:    FF D8 FF
-    📁 PDF:     25 50 44 46 (%PDF)
-    📁 ZIP:     50 4B 03 04 (PK..)
-    📁 EXE:     4D 5A (MZ)
-    📁 WAV:     52 49 46 46 .... 57 41 56 45 (RIFF....WAVE)
+    КАК РАБОТАЕТ:
+    1️⃣ Чтение заголовка (первые 512 байт)
+    2️⃣ Сравнение с базой магических байтов
+    3️⃣ Определение типа, MIME, расширения
+    4️⃣ Сравнение с расширением имени файла
+    5️⃣ Формирование отчёта со статусом
 
-    КАК РАБОТАЕТ ПРОВЕРКА:
-    1️⃣ Чтение заголовка:
-      • Программа читает первые 16 байт файла
-      • Сравнивает с базой известных сигнатур
+    🔍 ГЛУБОКИЙ АНАЛИЗ (CARVING):
+    При включённой опции программа ищет:
+    • Внедрённые файлы внутри контейнера
+    • Скрытые исполняемые в изображениях
+    • Дополнительные сигнатуры после основной
 
-    2️⃣ Определение типа:
-      • Если сигнатура найдена - определяется настоящий тип
-      • Сравнивается с расширением имени файла
+    🏗️ ПРОВЕРКА СТРУКТУРЫ:
+    • Минимальный размер для формата
+    • Наличие конечных маркеров (JPEG, ZIP)
+    • Целостность заголовков
 
-    3️⃣ Вердикт:
-      ✅ СОВПАДЕНИЕ - расширение соответствует сигнатуре
-      ❌ НЕСОВПАДЕНИЕ - возможна подмена! Будьте осторожны
+    🎯 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Расследование фишинга:
+       • Файл "отчёт.jpg" имеет сигнатуру MZ → это EXE!
+       • Вывод: не открывать, отправить в песочницу
 
-    КАК ИСПОЛЬЗОВАТЬ:
-    1️⃣ Выбор файла:
-      • Нажмите "📂 Выбрать файл"
-      • Или перетащите файл в окно программы
-
-    2️⃣ Анализ:
-      • Нажмите "🚀 Проверить"
-      • В поле результата отобразится:
-        • Имя файла и его расширение
-        • Сигнатура в HEX-формате
-        • Определённый тип файла
-        • Статус совпадения
-
-    3️⃣ Интерпретация:
-      🟢 "✅ СТАТУС: СОВПАДЕНИЕ" - файл безопасен
-      🔴 "❌ СТАТУС: НЕСОВПАДЕНИЕ" - файл подозрителен!
-
-    🔍 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
-    ✅ Расследование инцидента:
-      • Получен файл "отчёт.jpg" от неизвестного отправителя
-      • Валидатор показывает: сигнатура MZ → это EXE-файл!
-      • Вывод: попытка фишинга, файл не открывать
-
-    ✅ Аудит загруженных файлов:
-      • Массовая проверка файлов из email-вложений
-      • Выявление файлов с подменёнными расширениями
-      • Автоматическая изоляция подозрительных объектов
+    ✅ Аудит вложений email:
+       • Массовая проверка файлов на подмену расширений
+       • Автоматическая изоляция подозрительных объектов
 
     ✅ Верификация архивов:
-      • Файл "документ.zip" имеет сигнатуру RAR
-      • Возможно, файл повреждён или переименован
-      • Требуется дополнительная проверка
+       • "документ.zip" имеет сигнатуру RAR
+       • Возможно повреждение или переименование
 
     ⚠️ ОГРАНИЧЕНИЯ:
-    • Проверяются только первые 16 байт - некоторые форматы
-      могут иметь одинаковые сигнатуры
-    • Файлы без сигнатур (текстовые) всегда показывают "Неизвестно"
-    • Некоторые форматы (MP4, AVI) имеют вариативные заголовки
-
-    🔐 СОВЕТЫ:
-    • Всегда проверяйте файлы из ненадёжных источников
-    • Не доверяйте только расширению - смотрите на сигнатуру
-    • При несовпадении - не открывайте файл, проведите антивирусную проверку
-    • Сохраняйте оригинал файла для дальнейшего анализа
+    • Проверяются только первые байты - полиморфные файлы
+    • Текстовые файлы не имеют уникальных сигнатур
+    • Некоторые форматы имеют вариативные заголовки
 
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    4. 🔣 КОДИРОВЩИК (ENCODING CONVERTER)
+    2.2 📊 АНАЛИЗ ЭНТРОПИИ (ENTROPY ANALYZER)
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     НАЗНАЧЕНИЕ:
-    • Конвертация данных между различными кодировками
-    • Подготовка данных для передачи в текстовых протоколах
-    • Декодирование данных из логов, сетевого трафика, дампов
+    • Обнаружение зашифрованных или сжатых данных в файлах
+    • Выявление стеганографических контейнеров
+    • Анализ случайности данных для криминалистики
 
-    ПОДДЕРЖИВАЕМЫЕ ПРЕОБРАЗОВАНИЯ:
-    🔄 Base64:
-      • Кодирование: текст/бинар → Base64-строка
-      • Декодирование: Base64 → исходные данные
-      • Применение: передача бинарных данных в JSON, email, URL
+    ТЕОРИЯ:
+    Энтропия Шеннона измеряет степень неопределённости/случайности:
+    • Низкая (< 3.0 бит/байт): текст, код, структурированные данные
+    • Средняя (3.0–6.0): смешанные данные, сжатие
+    • Высокая (6.0–7.5): сильное сжатие, возможно шифрование
+    • Очень высокая (> 7.5): шифрование, случайные данные
 
-    🔄 Hex (шестнадцатеричный):
-      • Кодирование: байты → HEX-строка (41 42 43)
-      • Декодирование: HEX → байты
-      • Применение: анализ дампов памяти, сетевых пакетов
+    НАСТРОЙКИ:
+    • Размер блока: 256–65536 байт (по умолчанию 1024)
+    • Меньший блок = детальнее, но медленнее
 
-    🔄 URL-кодирование:
-      • Кодирование: спецсимволы → %XX (пробел → %20)
-      • Декодирование: %XX → исходные символы
-      • Применение: работа с URL, HTTP-параметрами, формами
+    РЕЗУЛЬТАТЫ:
+    📊 Общая энтропия файла в бит/байт
+    🎨 Графическое отображение энтропии по блокам
+    📋 Таблица с оценкой каждого блока
+    🔍 Цветовая индикация: 🟢🟡🟠🔴
 
-    КАК ИСПОЛЬЗОВАТЬ:
-    1️⃣ Ввод данных:
-      • Введите или вставьте данные в верхнее поле
-      • Используйте кнопку "📋 Вставить" или Ctrl+V
+    🎯 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Обнаружение шифрования:
+       • Файл "image.png" имеет энтропию 7.9 бит/байт
+       • Вывод: вероятно, зашифрован или содержит стеганографию
 
-    2️⃣ Выбор операции:
-      • Выберите радиокнопку нужного преобразования:
-        • "Base64 →" - кодирование в Base64
-        • "→ Base64" - декодирование из Base64
-        • Аналогично для Hex и URL
+    ✅ Анализ вредоносного ПО:
+       • Секция .rsrc имеет аномально высокую энтропию
+       • Возможное наличие зашифрованного пейлоада
 
-    3️⃣ Конвертация:
-      • Нажмите "🔄 Конвертировать"
-      • Результат появится в нижнем поле
-
-    4️⃣ Копирование:
-      • Нажмите "📋 Копировать" для копирования результата
-
-    🔍 ПРАКТИЧЕСКИЕ ПРИМЕРЫ:
-    ✅ Декодирование Base64 из лога:
-      • В логе найдена строка: "U2VjcmV0IERhdGE="
-      • Вставьте в поле, выберите "→ Base64"
-      • Результат: "Secret Data"
-
-    ✅ Подготовка данных для API:
-      • Нужно передать бинарные данные в JSON
-      • Закодируйте файл в Base64
-      • Вставьте Base64-строку в JSON-запрос
-
-    ✅ Анализ URL-параметров:
-      • URL содержит: "search=%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82"
-      • Выберите "→ URL" для декодирования
-      • Результат: "search=привет"
-
-    ✅ Работа с HEX-дампами:
-      • Получен HEX-дамп: "48 65 6C 6C 6F"
-      • Выберите "→ Hex" для декодирования
-      • Результат: "Hello"
-
-    ⚠️ ВАЖНО:
-    • Base64 - это НЕ шифрование! Данные легко декодируются
-    • URL-кодирование не защищает данные, только позволяет
-      передавать спецсимволы в URL
-    • При декодировании невалидных данных появится ошибка
-    • Проверяйте кодировку исходных данных (UTF-8, ASCII и т.д.)
-
-    🔐 СОВЕТ: Для защиты данных используйте вкладку "🔐 Шифрование",
-    а кодировщик - только для преобразования формата данных.
+    ✅ Проверка стеганографии:
+       • LSB-плоскость изображения имеет энтропию ~1.0
+       • Если энтропия LSB близка к 1.0 - возможно скрытие данных
 
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    5. 🔍 МЕТАДАННЫЕ (METADATA EXTRACTOR)
+    2.3 🔤 ИЗВЛЕЧЕНИЕ СТРОК (STRING EXTRACTOR)
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     НАЗНАЧЕНИЕ:
-    • Извлечение скрытой информации из файлов (EXIF, IPTC, XMP)
-    • Анализ цифрового следа для криминалистики
-    • Проверка подлинности документов и изображений
-    • Выявление геолокации, авторства, истории редактирования
+    • Поиск читаемого текста в бинарных файлах
+    • Анализ дампов памяти, сетевого трафика, исполняемых файлов
+    • Поиск URL, путей, ключей, паролей в raw-данных
+
+    ПАРАМЕТРЫ ПОИСКА:
+    📏 Минимальная длина: 2–100 символов (по умолчанию 4)
+    🔤 Кодировки:
+       ☑ ASCII (0x20–0x7E) - базовый латинский текст
+       ☑ UTF-16 LE - Windows-строки, PE-файлы
+       ☑ UTF-8 - современный мультиязычный текст
+
+    🔍 Фильтр regex:
+       • Поддержка регулярных выражений Python
+       • Примеры: https?://\\S+, [A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z|a-z]{2,}
+
+    РЕЗУЛЬТАТЫ:
+    ┌─────────────┬─────────────┬────────────┐
+    │ Смещение    │ Строка      │ Длина      │
+    ├─────────────┼─────────────┼────────────┤
+    │ 0x00001A40  │ C:\\Windows │ 11         │
+    │ 0x00002F10  │ admin       │ 5          │
+    └─────────────┴─────────────┴────────────┘
+
+    🎯 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Анализ вредоносного EXE:
+       • Извлечены URL C2-серверов, пути реестра, имена API
+       • Помогает в IOC-составлении
+
+    ✅ Восстановление данных:
+       • Поиск текстов в повреждённых файлах
+       • Извлечение фрагментов документов
+
+    ✅ Сетевой анализ:
+       • Поиск HTTP-заголовков в PCAP-дампах
+       • Выявление передаваемых учётных данных
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    2.4 💾 PE-АНАЛИЗАТОР (PE ANALYZER)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Анализ заголовков исполняемых файлов Windows (EXE, DLL, SYS)
+    • Извлечение информации о компиляции, импортах, секциях
+    • Базовая реверс-инженерия без внешних зависимостей
+
+    АНАЛИЗИРУЕМЫЕ ДАННЫЕ:
+    📋 DOS-заголовок:
+       • Сигнатура MZ, PE offset
+
+    📋 PE-заголовок:
+       • Сигнатура PE\\0\\0, машина (x86/x64/ARM)
+       • Количество секций, timestamp
+
+    📋 COFF-заголовок:
+       • Характеристики, размер опционального заголовка
+
+    📋 Optional Header:
+       • Magic (PE32/PE32+), entry point
+       • Image base, section alignment
+
+    📋 Секции:
+       • Имя (.text, .data, .rsrc, .reloc)
+       • Virtual/Raw size, Virtual/Raw address
+       • Характеристика (execute/read/write)
+
+    🎯 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Быстрый анализ подозрительного EXE:
+       • Проверка timestamp на аномалии
+       • Выявление упаковщиков по секциям
+       • Поиск подозрительных импортов
+
+    ✅ Верификация легитимности:
+       • Сравнение характеристик с известными образцами
+       • Проверка цифровых подписей (базовая)
+
+    ✅ Обучение реверс-инженерии:
+       • Визуализация структуры PE-файла
+       • Понимание компоновки исполняемых
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    2.5 📦 АРХИВ-АНАЛИЗАТОР (ARCHIVE ANALYZER)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Просмотр содержимого архивов БЕЗ распаковки
+    • Проверка архивов на наличие подозрительных файлов
+    • Анализ структуры и сжатия
 
     ПОДДЕРЖИВАЕМЫЕ ФОРМАТЫ:
-    🖼️ Изображения: PNG, JPG, JPEG, BMP, TIFF, TGA
-      • EXIF: камера, настройки съёмки, GPS-координаты
-      • IPTC: автор, права, описание, ключевые слова
-      • XMP: история редактирования, метаданные Adobe
+    • ZIP - полный список файлов, сжатие, даты
+    • TAR/TAR.GZ/TAR.BZ2 - список с метаданными
+    • 7z, RAR - базовый просмотр (зависит от библиотек)
 
-    🎵 Аудио WAV:
-      • Технические параметры: частота, каналы, длительность
-      • ID3-теги (если присутствуют): исполнитель, альбом, год
+    РЕЗУЛЬТАТЫ:
+    ┌─────────────────┬─────────┬─────────┬────────────┐
+    │ Имя файла       │ Размер  │ Сжатие  │ Дата       │
+    ├─────────────────┼─────────┼─────────┼────────────┤
+    │ document.pdf    │ 1.2 MB  │ 85%     │ 2024-01-15 │
+    │ config.ini      │ 2 KB    │ 10%     │ 2024-01-10 │
+    └─────────────────┴─────────┴─────────┴────────────┘
 
-    📄 PDF-документы:
-      • Автор, заголовок, тема, ключевые слова
-      • Дата создания, модификации, программа-создатель
-      • Встроенные метаданные и свойства
+    🎯 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Безопасный аудит вложений:
+       • Проверка ZIP из email без риска исполнения
+       • Выявление EXE/JScript внутри архивов
 
-    КАК ИСПОЛЬЗОВАТЬ:
-    1️⃣ Выбор файла:
-      • Нажмите "📂 Обзор..." и выберите файл
-      • Поддерживаются форматы: *.png *.jpg *.jpeg *.bmp *.tiff *.wav *.pdf
+    ✅ Анализ вредоносных архивов:
+       • Поиск файлов с подменёнными расширениями
+       • Выявление архивов-бомб (малый размер → огромный контент)
 
-    2️⃣ Извлечение:
-      • Нажмите "🔍 Извлечь метаданные"
-      • Анализ выполняется в фоне без блокировки интерфейса
-      • Результаты сгруппированы по категориям в таблице
+    ✅ Документирование:
+       • Экспорт списка файлов для отчётности
+       • Сравнение с ожидаемым содержимым
 
-    3️⃣ Просмотр результатов:
-      • 📁 Файл: имя, размер, даты создания/изменения
-      • 🖼️ Изображение: размеры, цветовой режим, формат
-      • 📷 EXIF: данные камеры, настройки, GPS (если есть)
-      • 🏷️ IPTC: авторские права, описание, категории
-      • 📄 XMP: расширенные метаданные, история
-      • 🎵 Аудио: параметры звука, длительность
-      • 📕 PDF: автор, заголовок, дата создания
-      • 🌍 GPS: широта, долгота, высота (если извлечены)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    🔄 ГРУППА 3: ДАННЫЕ И КОДИРОВАНИЕ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-    4️⃣ Фильтрация и поиск:
-      • Введите текст в поле "Фильтр полей" для поиска
-      • Чекбокс "Показывать пустые поля" для полного просмотра
+    3.1 🔣 КОДИРОВЩИК (ENCODING CONVERTER)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Конвертация между различными кодировками данных
+    • Подготовка данных для API, логов, сетевого анализа
+    • Декодирование obfuscated-строк
 
-    5️⃣ Экспорт:
-      • "📋 Копировать" - все метаданные в буфер обмена
-      • "📤 Экспорт" - сохранение в JSON/CSV/TXT
+    ПОДДЕРЖИВАЕМЫЕ ПРЕОБРАЗОВАНИЯ (14 шт.):
+    ┌────────────────────┬────────────────────────────┐
+    │ Кодировка          │ Применение                 │
+    ├────────────────────┼────────────────────────────┤
+    │ Base64 ↔           │ JSON, email, URL-передача  │
+    │ Base32 ↔           │ OTP-токены, DNS-имена      │
+    │ Base85/ASCII85 ↔   │ PDF, PostScript            │
+    │ Hex ↔              │ Дампы памяти, сетевые пакеты│
+    │ URL ↔              │ HTTP-параметры, формы      │
+    │ HTML ↔             │ Веб-контент, XSS-анализ    │
+    │ Unicode Escape ↔   │ JavaScript, Python-строки  │
+    └────────────────────┴────────────────────────────┘
 
-    🔍 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
-    ✅ Криминалистический анализ фотографии:
-      • Извлечены GPS-координаты: 55.751244, 37.618423
-      • EXIF показывает: iPhone 12, 14:32, 15.03.2024
-      • Вывод: фото сделано в Москве, в указанное время
+    🎯 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Декодирование из логов:
+       • Base64: "U2VjcmV0" → "Secret"
+       • URL: "%D0%BF%D1%80%D0%B8%D0%B2%D0%B5%D1%82" → "привет"
 
-    ✅ Проверка подлинности документа:
-      • PDF показывает: создан в Adobe Acrobat Pro
-      • Дата модификации: через 2 часа после создания
-      • Автор: отличается от заявленного отправителя
-      • Вывод: документ редактировался, требуется проверка
+    ✅ Подготовка API-запросов:
+       • Бинарные данные → Base64 для JSON-тела
+       • Спецсимволы → URL-encoding для параметров
 
-    ✅ Анализ цифрового следа:
-      • Изображение содержит XMP-историю: 5 версий редактирования
-      • IPTC указывает на коммерческое использование
-      • EXIF стёрт - признак намеренного сокрытия данных
-      • Вывод: файл требует углублённого анализа
-
-    ✅ Выявление геолокации:
-      • GPS-координаты из EXIF: 48.8566° N, 2.3522° E
-      • Конвертация: Париж, Франция
-      • Перекрёстная проверка с другими метаданными
-      • Вывод: подтверждение места съёмки
+    ✅ Анализ вредоносных скриптов:
+       • Декодирование obfuscated JavaScript
+       • Раскрытие скрытых payload-строк
 
     ⚠️ ВАЖНО:
-    • Метаданные могут быть намеренно удалены или подделаны
+    • Кодирование ≠ шифрование! Base64 легко декодируется
+    • Проверяйте исходную кодировку перед декодированием
+    • Некорректные данные вызовут ошибку - используйте try/except
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    3.2 🔍 МЕТАДАННЫЕ (METADATA EXTRACTOR)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Извлечение скрытой информации из файлов
+    • Криминалистический анализ цифрового следа
+    • Проверка подлинности и авторства
+
+    ПОДДЕРЖИВАЕМЫЕ ФОРМАТЫ:
+    🖼️ Изображения (PNG/JPG/BMP/TIFF):
+       • EXIF: камера, настройки, GPS, дата съёмки
+       • IPTC: автор, права, описание, категории
+       • XMP: история редактирования, Adobe-метаданные
+
+    🎵 Аудио (WAV/MP3/FLAC):
+       • Технические: частота, каналы, длительность
+       • ID3-теги: исполнитель, альбом, жанр, год
+
+    📄 Документы (PDF/DOCX/XLSX/PPTX):
+       • Автор, заголовок, тема, ключевые слова
+       • Дата создания/изменения, программа-создатель
+       • История версий, комментарии
+
+    🗂️ Группы метаданных в интерфейсе:
+       📁 Файл - базовая информация (имя, размер, даты)
+       🖼️ Изображение - размеры, режим, формат
+       📷 EXIF - данные камеры, GPS, настройки
+       🏷️ IPTC - авторские права, описание
+       📄 XMP - расширенные метаданные, история
+       🎵 Аудио - параметры звука, длительность
+       📕 PDF/Office - автор, заголовок, программа
+       🌍 GPS - координаты, высота, направление
+
+    🎯 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Криминалистический анализ:
+       • GPS: 55.751244, 37.618423 → Москва, Кремль
+       • EXIF: iPhone 12, 14:32, 15.03.2024
+       • Вывод: подтверждение времени и места
+
+    ✅ Проверка подлинности документа:
+       • PDF создан в Adobe Acrobat Pro
+       • Модифицирован через 2 часа после создания
+       • Автор отличается от отправителя → требует проверки
+
+    ✅ Выявление сокрытия данных:
+       • EXIF стёрт намеренно - признак манипуляции
+       • XMP-история показывает 5 версий редактирования
+       • IPTC указывает на коммерческое использование
+
+    🔧 ФИЛЬТРАЦИЯ И ЭКСПОРТ:
+    • 🔎 Поиск по ключам и значениям
+    • ☑ Показать/скрыть пустые поля
+    • 📋 Копировать в буфер
+    • 📤 Экспорт в JSON/CSV/TXT для отчётности
+
+    ⚠️ ВАЖНО:
+    • Метаданные могут быть удалены или подделаны
     • Отсутствие метаданных ≠ отсутствие информации
-    • GPS-данные извлекаются только если камера их записала
-    • Некоторые программы автоматически удаляют метаданные при сохранении
-
-    🔐 СОВЕТЫ ПО АНАЛИЗУ:
-    • Сравнивайте метаданные с заявленной информацией
-    • Ищите несоответствия в датах, авторах, местоположении
-    • Проверяйте историю редактирования в XMP
-    • Используйте GPS-координаты для верификации алиби
-    • Экспортируйте результаты для отчётности и архива
+    • Некоторые программы автоматически очищают метаданные
 
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    ОБЩИЕ РЕКОМЕНДАЦИИ ПО ИСПОЛЬЗОВАНИЮ
+    3.3 ⏱️ КОНВЕРТЕР ВРЕМЕНИ UNIX
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    🔐 БЕЗОПАСНОСТЬ:
-    • Все инструменты работают офлайн - данные не покидают ваш компьютер
-    • Не используйте сгенерированные пароли повторно
-    • Храните хеши и пароли в надёжном менеджере
-    • Проверяйте файлы из ненадёжных источников перед открытием
+    НАЗНАЧЕНИЕ:
+    • Конвертация между Unix timestamp и human-readable датой
+    • Анализ временных меток в логах, файлах, метаданных
+    • Работа с часовыми поясами
 
-    ⚡ ПРОИЗВОДИТЕЛЬНОСТЬ:
-    • Кэширование метаданных ускоряет повторный анализ
-    • Асинхронная обработка не блокирует интерфейс
-    • Фильтрация результатов экономит время при работе с большими файлами
+    ФУНКЦИОНАЛ:
+    🔄 Unix → DateTime:
+       • Ввод: 1709740800
+       • Вывод: 2024-03-06 12:00:00 UTC (среда, 6 марта 2024)
+
+    🔄 DateTime → Unix:
+       • Ввод: 2024-03-06 12:00:00
+       • Вывод: 1709740800
+
+    🌍 Часовые пояса:
+       • UTC, Europe/Moscow, Europe/London
+       • America/New_York, Asia/Tokyo и др.
+
+    🎯 ПРИМЕНЕНИЕ:
+    ✅ Анализ логов:
+       • Конвертация timestamp из syslog, Apache, Windows Event Log
+       • Синхронизация событий из разных источников
+
+    ✅ Криминалистика:
+       • Проверка временных меток файлов на аномалии
+       • Сравнение времени создания/изменения
+
+    ✅ Отладка:
+       • Быстрая проверка временных расчётов в коде
+       • Конвертация для отладки API с timestamp
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    🌐 ГРУППА 4: СЕТЕВЫЕ ИНСТРУМЕНТЫ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    4.1 🌐 IP/DOMAIN ИНСТРУМЕНТЫ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Валидация IP-адресов и доменных имён
+    • Конвертация между форматами IP
+    • Базовый анализ сетевых индикаторов
+
+    IP-ВАЛИДАЦИЯ:
+    ✅ IPv4:
+       • Проверка формата: xxx.xxx.xxx.xxx
+       • Проверка диапазона октетов: 0–255
+       • Определение класса: A/B/C/D/E
+       • Выявление приватных адресов (RFC 1918)
+
+    ✅ IPv6:
+       • Проверка формата: xxxx:xxxx:...:xxxx
+       • Поддержка сокращённой записи (::)
+
+    🔄 КОНВЕРТАЦИЯ ФОРМАТОВ IPv4:
+    ┌─────────────────┬────────────────────────────┐
+    │ Формат          │ Пример                     │
+    ├─────────────────┼────────────────────────────┤
+    │ Decimal         │ 3232235777                 │
+    │ Hex             │ C0.A8.01.01                │
+    │ Binary          │ 11000000.10101000.00000001 │
+    └─────────────────┴────────────────────────────┘
+
+    DOMAIN-ВАЛИДАЦИЯ:
+    ✅ Проверка формата домена:
+       • Соответствие RFC 1035
+       • Допустимые символы: a-z, 0-9, дефис
+       • Проверка TLD (top-level domain)
+
+    ✅ Анализ структуры:
+       • Количество уровней: example.com (2), sub.example.com (3)
+       • Длина: общее количество символов
+       • Выделение TLD: .com, .ru, .org
+
+    🎯 ПРИМЕНЕНИЕ:
+    ✅ Фильтрация IOC:
+       • Валидация IP из threat intelligence feeds
+       • Отсев некорректных индикаторов
+
+    ✅ Подготовка правил:
+       • Конвертация IP для firewall-правил
+       • Форматирование для SIEM-систем
+
+    ✅ Обучение:
+       • Понимание структуры IP-адресов
+       • Практика с различными форматами
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    4.2 🔎 СТЕГАНОАНАЛИЗ (STEGANALYSIS)
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    НАЗНАЧЕНИЕ:
+    • Обнаружение скрытых данных в изображениях
+    • Выявление стеганографических контейнеров
+    • Базовый анализ LSB-методов
+
+    МЕТОДЫ АНАЛИЗА:
+    📊 Chi-Square анализ:
+       • Статистическая проверка распределения пар значений
+       • P-value < 0.05 → возможное наличие скрытых данных
+       • Эффективен против LSB-стеганографии
+
+    📊 RS-анализ (Regular-Singular):
+       • Анализ регулярных и сингулярных групп пикселей
+       • Разница R+M и R-M > 0.05 → возможна LSB-модификация
+       • Устойчив к простым методам сокрытия
+
+    👁️ Визуальный анализ LSB:
+       • Извлечение младшего бит-плана
+       • Расчёт энтропии LSB-плоскости
+       • Энтропия ~1.0 → случайные данные (возможно шифрование)
+
+    📈 Гистограмма:
+       • Визуализация распределения значений пикселей
+       • Выявление аномалий в частотном распределении
+
+    🎯 ПРАКТИЧЕСКИЕ СЦЕНАРИИ:
+    ✅ Расследование утечек:
+       • Подозрительное изображение с аномальной энтропией LSB
+       • Chi-Square показывает p-value = 0.001
+       • Вывод: вероятно, содержит скрытые данные
+
+    ✅ Проверка артефактов:
+       • Изображение из переписки с неизвестным
+       • RS-анализ показывает асимметрию
+       • Требуется углублённый анализ
+
+    ✅ Обучение стеганографии:
+       • Демонстрация уязвимостей LSB-методов
+       • Понимание принципов обнаружения
+
+    ⚠️ ОГРАНИЧЕНИЯ:
+    • Эффективен преимущественно против LSB-методов
+    • Современные адаптивные методы могут обходить детекцию
+    • Для глубокого анализа требуются специализированные инструменты
+
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    🔐 ОБЩИЕ РЕКОМЕНДАЦИИ ПО БЕЗОПАСНОСТИ
+    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    ✅ РЕКОМЕНДУЕТСЯ:
+    • Работать с копиями файлов, а не оригиналами
+    • Документировать все операции с метаданными и хешами
+    • Использовать SHA-256/SHA-512 для критических данных
+    • Хранить пароли в менеджере, а не в текстовых файлах
+    • Регулярно обновлять базу сигнатур и программу
+
+    ❌ НЕ РЕКОМЕНДУЕТСЯ:
+    • Использовать MD5/SHA-1 для криптографической защиты
+    • Открывать файлы с несовпадающими сигнатурами без проверки
+    • Передавать пароли тем же каналом, что и данные
+    • Игнорировать предупреждения о низкой энтропии паролей
+    • Использовать инструменты в коммерческих целях без лицензии
 
     📊 ДОКУМЕНТИРОВАНИЕ:
     • Экспортируйте результаты в JSON/CSV для отчётности
-    • Сохраняйте хеши оригинальных файлов для верификации
-    • Фиксируйте дату и время анализа в протоколах
-
-    🔄 ОБНОВЛЕНИЕ:
-    • Регулярно обновляйте программу для получения новых сигнатур
-    • Проверяйте совместимость с новыми версиями форматов файлов
-    • Следите за обновлениями криптографических стандартов
+    • Фиксируйте дату, время и хеши исходных файлов
+    • Сохраняйте протоколы анализа для аудита
 
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    ЧАСТО ЗАДАВАЕМЫЕ ВОПРОСЫ
+    ❓ ЧАСТО ЗАДАВАЕМЫЕ ВОПРОСЫ
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     ❓ Почему хеш файла не совпадает с опубликованным?
-      • Файл мог быть изменён при скачивании
-      • Проверьте целостность загрузки (повторите скачивание)
-      • Убедитесь, что сравниваете хеши одного и того же алгоритма
+       • Файл мог быть изменён при скачивании
+       • Проверьте целостность загрузки (повторите скачивание)
+       • Убедитесь, что сравниваете хеши одного алгоритма
+       • Проверьте кодировку (текст с пробелами даёт другой хеш)
 
     ❓ Можно ли восстановить удалённые метаданные?
-      • Нет, если метаданные физически удалены из файла
-      • Но можно найти следы в резервных копиях, кэше, логах
-      • Используйте специализированные инструменты для глубокого анализа
+       • Нет, если метаданные физически удалены из файла
+       • Но можно найти следы в резервных копиях, кэше, логах
+       • Используйте специализированные инструменты для глубокого анализа
 
-    ❓ Почему генератор паролей не предлагает кириллицу?
-      • Латинские символы обеспечивают лучшую совместимость
-      • Кириллица может вызвать проблемы в некоторых системах
-      • При необходимости добавьте кириллицу в "Доп. символы"
+    ❓ Почему генератор не предлагает кириллицу?
+       • Латинские символы обеспечивают лучшую совместимость
+       • Кириллица может вызвать проблемы в некоторых системах
+       • При необходимости добавьте кириллицу в "Доп. символы"
 
     ❓ Как проверить файл, которого нет в базе сигнатур?
-      • Используйте hex-редактор для ручного анализа заголовка
-      • Сравните с документацией формата файла
-      • Отправите запрос на добавление сигнатуры разработчикам
+       • Используйте hex-редактор для ручного анализа заголовка
+       • Сравните с документацией формата файла
+       • Отправьте запрос на добавление сигнатуры разработчикам
+
+    ❓ Почему энтропия высокая, но файл не зашифрован?
+       • Высокая энтропия также у сжатых данных (ZIP, GZIP)
+       • Некоторые форматы (RAW, RAW-фото) имеют высокую энтропию
+       • Проверяйте сигнатуру и контекст файла
 
     ❓ Можно ли использовать эти инструменты в коммерческих целях?
-      • Нет, согласно лицензии 
-        Лицензия: Community (некоммерческая) / Commercial (по запросу).
-        Для коммерческого использования: tudubambam@yandex.ru
-      • При использовании в продуктах укажите авторство
-      • Для корпоративного внедрения свяжитесь с разработчиком
+       • Лицензия: Community (некоммерческая) / Commercial (по запросу)
+       • Для коммерческого использования: tudubambam@yandex.ru
+       • При использовании в продуктах укажите авторство
 
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ
+    🔧 ТЕХНИЧЕСКАЯ ИНФОРМАЦИЯ
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     ИСПОЛЬЗУЕМЫЕ БИБЛИОТЕКИ:
     • hashlib - криптографические хеш-функции (стандартная)
     • secrets - криптографически стойкая генерация случайных чисел
-    • base64, urllib.parse - кодирование (стандартные)
+    • base64, urllib.parse, html - кодирование (стандартные)
     • PIL/Pillow - работа с изображениями и EXIF
     • wave - работа с WAV-аудио
-    • re - регулярные выражения для парсинга PDF
+    • re - регулярные выражения для парсинга
+    • struct - разбор бинарных структур (PE, заголовки)
+    • zipfile, tarfile - работа с архивами
+    • xml.etree.ElementTree - парсинг Office-метаданных
 
     ФОРМАТЫ ЭКСПОРТА:
     • JSON - структурированные данные для программной обработки
@@ -14355,8 +17517,13 @@ class SteganographyUltimatePro:
     • Кэш очищается автоматически при изменении файла
     • Можно принудительно обновить кнопкой "🔄 Перезагрузить"
 
+    ЗАВИСИМОСТИ:
+    • Python 3.8+
+    • Pillow (PIL) для работы с изображениями
+    • Все остальные модули - стандартная библиотека Python
+
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    ПОДДЕРЖКА И ОБРАТНАЯ СВЯЗЬ
+    📞 ПОДДЕРЖКА И ОБРАТНАЯ СВЯЗЬ
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     📧 Email: tudubambam@ya.ru
     🌐 Сайт: www.occulto.pro
@@ -14367,25 +17534,36 @@ class SteganographyUltimatePro:
     • Описание проблемы или запроса
     • Шаги для воспроизведения (если баг)
     • Примеры файлов (если возможно и безопасно)
+    • Логи ошибок (если доступны)
 
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    ЗАКЛЮЧЕНИЕ
+    🎯 ЗАКЛЮЧЕНИЕ
     ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    Вкладка "🛡️ Инструменты ИБ" предоставляет профессиональный набор
-    утилит для решения задач информационной безопасности. Следуя
-    рекомендациям из этого руководства, вы сможете эффективно
-    использовать каждый инструмент в своей работе.
+    Вкладка "🛡️ Инструменты ИБ Pro" предоставляет профессиональный набор
+    из 13 утилит для решения широкого спектра задач информационной
+    безопасности: от криптографии и анализа файлов до сетевой валидации
+    и стеганоанализа.
+
+    ✨ КЛЮЧЕВЫЕ ПРЕИМУЩЕСТВА:
+    • 🛡️ Полная автономность - работа без интернета
+    • ⚡ Высокая производительность - оптимизированные алгоритмы
+    • 🔍 Глубокая аналитика - от хешей до PE-структур
+    • 📊 Профессиональная отчётность - экспорт в JSON/CSV/TXT
+    • 🎨 Удобный интерфейс - интуитивная навигация и группировка
 
     ПОМНИТЕ:
     • Инструменты - это помощники, а не замена экспертизы
-    • Всегда проверяйте результаты критически
-    • Документируйте свои действия для отчётности
+    • Всегда проверяйте результаты критически и перекрёстно
+    • Документируйте свои действия для отчётности и аудита
     • Обновляйте знания о новых угрозах и методах защиты
+    • Соблюдайте законодательство и этические нормы при анализе
 
-    Успешной работы! 🛡️🔐
+    🔐 Безопасность начинается с понимания. Используйте инструменты
+    ответственно и профессионально.
+
+    Успешной работы! 🛡️🔐✅
     """
         self.display_help_text(help_text)
-
     def display_help_text(self, text):
         """Отображает текст помощи"""
         self.help_text.config(state='normal')
