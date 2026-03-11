@@ -8998,7 +8998,6 @@ def _generate_rng(password: str, method: str) -> np.random.Generator:
 # 🧠 КЛАСС СТЕГО-МЕТОДОВ
 # ───────────────────────────────────────────────
 class AdvancedStego:
-    # ---------- Вспомогательные методы для работы с данными и заголовками ----------
     @staticmethod
     def _pack_data_with_header(data: bytes) -> bytes:
         checksum = zlib.crc32(data).to_bytes(HEADER_CHECKSUM_LEN, 'big')
@@ -10219,13 +10218,9 @@ PASSPHRASE_WORDS_EN = [
     'dream', 'goal', 'plan', 'idea', 'thought', 'word', 'sound',
     'light', 'dark', 'color', 'shape', 'size', 'weight', 'speed',
     'power', 'energy', 'life', 'death', 'birth',
-    'start', 'end', 'center', 'edge', 'top', 'bottom', 'left', 'right'
+    'start', 'end', 'center', 'edge', 'top', 'bottom', 'left', 'right', 'occulto', 'MustaNG'
 ]
 
-
-# ============================================================================
-# КЛАСС IBToolsTab - УЛУЧШЕННАЯ ВЕРСИЯ
-# ============================================================================
 
 class IBToolsTab:
     """
@@ -18539,10 +18534,9 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
     def update_thumbnail(self, path: str, target_label: tk.Widget) -> None:
         ext = os.path.splitext(path)[1].lower()
         if ext == ".wav":
-            target_label.configure()
+            target_label.configure(image='')
             target_label.image = None
             return
-
         try:
             with Image.open(path) as img:
                 img.thumbnail((300, 300), Image.Resampling.BOX)
@@ -18551,10 +18545,10 @@ PNG, BMP, TIFF, TGA, JPG, JPEG, WAV"
                     background.paste(img, mask=img.split()[3])
                     img = background
                 tk_img = ImageTk.PhotoImage(img)
-                target_label.configure()
+                target_label.configure(image=tk_img)
                 target_label.image = tk_img
         except Exception as e:
-            target_label.configure()
+            target_label.configure(image='')
             target_label.image = None
 
     def _create_encryption_content(self, parent: ttk.Frame) -> None:
