@@ -13584,10 +13584,10 @@ class IBToolsTab:
             messagebox.showerror("❌ Ошибка", "Неверный формат DateTime. Используйте: YYYY-MM-DD HH:MM:SS")
 
     # =========================================================================
-    # 13. IP/DOMAIN ИНСТРУМЕНТЫ
+    # 13. IP/DOMAIN ИНСТРУМЕНТЫ (УЛУЧШЕННЫЙ)
     # =========================================================================
     def create_ip_tool(self):
-        """Создаёт IP/Domain инструменты"""
+        """Создаёт улучшенные IP/Domain инструменты с расширенными функциями"""
         # Валидация IP
         validate_frame = ttk.LabelFrame(self.ip_frame, text="🔍 Валидация IP адреса", padding=10)
         validate_frame.pack(fill=tk.X, padx=10, pady=10)
@@ -13632,6 +13632,129 @@ class IBToolsTab:
 
         self.domain_result_label = ttk.Label(domain_frame, text="", font=("Segoe UI", 10))
         self.domain_result_label.pack(anchor=tk.W, fill=tk.X)
+
+        # === НОВЫЕ РАЗДЕЛЫ ===
+        
+        # Port Scanner
+        port_scan_frame = ttk.LabelFrame(self.ip_frame, text="🔌 Сканер портов", padding=10)
+        port_scan_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(port_scan_frame, text="Хост/IP:").pack(anchor=tk.W, pady=(0, 5))
+        self.port_scan_host = tk.StringVar()
+        host_entry = ttk.Entry(port_scan_frame, textvariable=self.port_scan_host, width=40)
+        host_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(port_scan_frame, text="Диапазон портов (например, 1-1000 или 22,80,443):").pack(anchor=tk.W, pady=(0, 5))
+        self.port_scan_range = tk.StringVar(value="1-1024")
+        range_entry = ttk.Entry(port_scan_frame, textvariable=self.port_scan_range, width=40)
+        range_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(port_scan_frame, text="Таймаут (сек):").pack(anchor=tk.W, pady=(0, 5))
+        self.port_scan_timeout = tk.StringVar(value="1")
+        timeout_entry = ttk.Entry(port_scan_frame, textvariable=self.port_scan_timeout, width=10)
+        timeout_entry.pack(anchor=tk.W, pady=(0, 10))
+
+        scan_btn_frame = ttk.Frame(port_scan_frame)
+        scan_btn_frame.pack(fill=tk.X, pady=(0, 10))
+        ttk.Button(scan_btn_frame, text="🚀 Запустить сканирование",
+                   command=self.scan_ports).pack(side=tk.LEFT, padx=2)
+        ttk.Button(scan_btn_frame, text="⏹️ Остановить",
+                   command=self.stop_port_scan).pack(side=tk.LEFT, padx=2)
+
+        self.port_scan_progress = ttk.Progressbar(port_scan_frame, mode='indeterminate')
+        self.port_scan_progress.pack(fill=tk.X, pady=(0, 10))
+
+        self.port_scan_result = scrolledtext.ScrolledText(port_scan_frame, height=8, font=("Consolas", 9))
+        self.port_scan_result.pack(fill=tk.BOTH, expand=True)
+
+        # DNS Lookup
+        dns_frame = ttk.LabelFrame(self.ip_frame, text="🔎 DNS Lookup", padding=10)
+        dns_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(dns_frame, text="Домен или IP:").pack(anchor=tk.W, pady=(0, 5))
+        self.dns_lookup_input = tk.StringVar()
+        dns_entry = ttk.Entry(dns_frame, textvariable=self.dns_lookup_input, width=40)
+        dns_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(dns_frame, text="Тип записи:").pack(anchor=tk.W, pady=(0, 5))
+        self.dns_record_type = tk.StringVar(value="A")
+        record_types = ["A", "AAAA", "MX", "NS", "TXT", "SOA", "CNAME", "PTR"]
+        dns_combo = ttk.Combobox(dns_frame, textvariable=self.dns_record_type, values=record_types, width=20)
+        dns_combo.pack(anchor=tk.W, pady=(0, 10))
+
+        ttk.Button(dns_frame, text="🔍 Выполнить DNS запрос",
+                   command=self.dns_lookup).pack(pady=(0, 10))
+
+        self.dns_result_label = scrolledtext.ScrolledText(dns_frame, height=6, font=("Consolas", 9))
+        self.dns_result_label.pack(fill=tk.BOTH, expand=True)
+
+        # SSL/TLS Analyzer
+        ssl_frame = ttk.LabelFrame(self.ip_frame, text="🔒 SSL/TLS Анализатор", padding=10)
+        ssl_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(ssl_frame, text="HTTPS URL или домен:").pack(anchor=tk.W, pady=(0, 5))
+        self.ssl_host_input = tk.StringVar()
+        ssl_entry = ttk.Entry(ssl_frame, textvariable=self.ssl_host_input, width=40)
+        ssl_entry.pack(fill=tk.X, pady=(0, 10))
+        ttk.Label(ssl_frame, text="(например, google.com или https://google.com)", 
+                  style="Secondary.TLabel").pack(anchor=tk.W, pady=(0, 10))
+
+        ttk.Button(ssl_frame, text="🔍 Анализировать SSL сертификат",
+                   command=self.analyze_ssl).pack(pady=(0, 10))
+
+        self.ssl_result_label = scrolledtext.ScrolledText(ssl_frame, height=10, font=("Consolas", 9))
+        self.ssl_result_label.pack(fill=tk.BOTH, expand=True)
+
+        # HTTP Headers
+        http_frame = ttk.LabelFrame(self.ip_frame, text="📡 HTTP Headers Analyzer", padding=10)
+        http_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(http_frame, text="URL:").pack(anchor=tk.W, pady=(0, 5))
+        self.http_url_input = tk.StringVar(value="https://example.com")
+        http_entry = ttk.Entry(http_frame, textvariable=self.http_url_input, width=40)
+        http_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Label(http_frame, text="Метод:").pack(anchor=tk.W, pady=(0, 5))
+        self.http_method = tk.StringVar(value="GET")
+        method_combo = ttk.Combobox(http_frame, textvariable=self.http_method, 
+                                     values=["GET", "HEAD", "OPTIONS"], width=10)
+        method_combo.pack(anchor=tk.W, pady=(0, 10))
+
+        ttk.Button(http_frame, text="📡 Получить заголовки",
+                   command=self.get_http_headers).pack(pady=(0, 10))
+
+        self.http_result_label = scrolledtext.ScrolledText(http_frame, height=8, font=("Consolas", 9))
+        self.http_result_label.pack(fill=tk.BOTH, expand=True)
+
+        # WHOIS Client
+        whois_frame = ttk.LabelFrame(self.ip_frame, text="📋 WHOIS Клиент", padding=10)
+        whois_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(whois_frame, text="Домен или IP:").pack(anchor=tk.W, pady=(0, 5))
+        self.whois_input = tk.StringVar()
+        whois_entry = ttk.Entry(whois_frame, textvariable=self.whois_input, width=40)
+        whois_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(whois_frame, text="📋 WHOIS запрос",
+                   command=self.whois_lookup).pack(pady=(0, 10))
+
+        self.whois_result_label = scrolledtext.ScrolledText(whois_frame, height=10, font=("Consolas", 9))
+        self.whois_result_label.pack(fill=tk.BOTH, expand=True)
+
+        # Subnet Calculator
+        subnet_frame = ttk.LabelFrame(self.ip_frame, text="🧮 Калькулятор подсетей", padding=10)
+        subnet_frame.pack(fill=tk.X, padx=10, pady=10)
+
+        ttk.Label(subnet_frame, text="IP/CIDR (например, 192.168.1.0/24):").pack(anchor=tk.W, pady=(0, 5))
+        self.subnet_input = tk.StringVar()
+        subnet_entry = ttk.Entry(subnet_frame, textvariable=self.subnet_input, width=40)
+        subnet_entry.pack(fill=tk.X, pady=(0, 10))
+
+        ttk.Button(subnet_frame, text="🧮 Рассчитать",
+                   command=self.calculate_subnet).pack(pady=(0, 10))
+
+        self.subnet_result_label = scrolledtext.ScrolledText(subnet_frame, height=8, font=("Consolas", 9))
+        self.subnet_result_label.pack(fill=tk.BOTH, expand=True)
 
     def validate_ip(self):
         """Валидирует IP адрес"""
