@@ -13927,6 +13927,386 @@ class IBToolsTab:
                     self.log_manager.log.clear()
 
                 self.history_tree.delete(*self.history_tree.get_children())
+
+    # =========================================================================
+    # СЕТЕВЫЕ ИНСТРУМЕНТЫ
+    # =========================================================================
+    
+    def scan_ports(self):
+        import socket, threading
+        host = self.port_scan_host.get().strip()
+        port_range = self.port_scan_range.get().strip()
+        timeout = float(self.port_scan_timeout.get().strip() or '1')
+        if not host:
+            self.port_scan_result.delete(1.0, 'end')
+            self.port_scan_result.insert('end', 'Vvedite host\n')
+            return
+        ports = []
+        try:
+            if '-' in port_range:
+                start, end = map(int, port_range.split('-'))
+                ports = list(range(start, end + 1))
+            elif ',' in port_range:
+                ports = [int(p.strip()) for p in port_range.split(',')]
+            else:
+                ports = [int(port_range)]
+        except ValueError:
+            self.port_scan_result.delete(1.0, 'end')
+            self.port_scan_result.insert('end', 'Neverniy format\n')
+            return
+        self.port_scan_result.delete(1.0, 'end')
+        self.port_scan_result.insert('end', f'Scan {host}...\nPorts: {len(ports)}\n\n')
+        self.port_scan_progress.start()
+        self.scan_running = True
+        open_ports = []
+        def scan_port(port):
+            if not self.scan_running: return
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                if sock.connect_ex((host, port)) == 0:
+                    open_ports.append(port)
+                    self.root.after(0, lambda p=port: self.port_scan_result.insert('end', f'Port {p}: OPEN\n'))
+                sock.close()
+            except: pass
+        def run():
+            for p in ports:
+                if not self.scan_running: break
+                t = threading.Thread(target=scan_port, args=(p,))
+                t.start()
+                t.join(timeout+0.5)
+            self.root.after(0, lambda: self.finish_scan(open_ports))
+        threading.Thread(target=run, daemon=True).start()
+    
+    def finish_scan(self, open_ports):
+        self.port_scan_progress.stop()
+        self.port_scan_result.insert('end', f'\nOpen: {open_ports}\n')
+    
+    def stop_port_scan(self):
+        self.scan_running = False
+        self.port_scan_progress.stop()
+        self.port_scan_result.insert('end', 'Stopped\n')
+    
+    def dns_lookup(self):
+        import socket
+        domain = self.dns_lookup_input.get().strip()
+        record_type = self.dns_record_type.get()
+        if not domain:
+            self.dns_result_label.delete(1.0, 'end')
+            self.dns_result_label.insert('end', 'Vvedite domen\n')
+            return
+        self.dns_result_label.delete(1.0, 'end')
+        self.dns_result_label.insert('end', f'DNS: {domain} ({record_type})\n')
+        try:
+            try:
+                import dns.resolver
+                answers = dns.resolver.resolve(domain, record_type)
+                for r in answers:
+                    self.dns_result_label.insert('end', f'{r}\n')
+            except ImportError:
+                if record_type == 'A':
+                    ip = socket.gethostbyname(domain)
+                    self.dns_result_label.insert('end', f'A: {ip}\n')
+                else:
+                    self.dns_result_label.insert('end', 'Need dnspython\n')
+        except Exception as e:
+            self.dns_result_label.insert('end', f'Error: {e}\n')
+    
+    def analyze_ssl(self):
+        import ssl, socket
+        host_input = self.ssl_host_input.get().strip()
+        if not host_input:
+            self.ssl_result_label.delete(1.0, 'end')
+            self.ssl_result_label.insert('end', 'Vvedite URL\n')
+            return
+        if host_input.startswith('http://'):
+            self.ssl_result_label.delete(1.0, 'end')
+            self.ssl_result_label.insert('end', 'Need HTTPS\n')
+            return
+        host = host_input.replace('https://', '').split('/')[0].split(':')[0]
+        self.ssl_result_label.delete(1.0, 'end')
+        self.ssl_result_label.insert('end', f'SSL: {host}\n')
+        try:
+            ctx = ssl.create_default_context()
+            with socket.create_connection((host, 443), timeout=10) as sock:
+                with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                    cert = ssock.getpeercert()
+                    self.ssl_result_label.insert('end', f'Version: {ssock.version()}\n')
+                    subject = dict(x[0] for x in cert.get('subject', []))
+                    issuer = dict(x[0] for x in cert.get('issuer', []))
+                    self.ssl_result_label.insert('end', f'Owner: {subject.get("CN", "N/A")}\n')
+                    self.ssl_result_label.insert('end', f'Issuer: {issuer.get("CN", "N/A")}\n')
+                    not_after = cert.get('notAfter', '')
+                    self.ssl_result_label.insert('end', f'Valid until: {not_after}\n')
+        except Exception as e:
+            self.ssl_result_label.insert('end', f'Error: {e}\n')
+    
+    def get_http_headers(self):
+        import urllib.request, urllib.error
+        url = self.http_url_input.get().strip()
+        method = self.http_method.get()
+        if not url:
+            self.http_result_label.delete(1.0, 'end')
+            self.http_result_label.insert('end', 'Vvedite URL\n')
+            return
+        if not url.startswith('http'): url = 'https://' + url
+        self.http_result_label.delete(1.0, 'end')
+        self.http_result_label.insert('end', f'Request {method}: {url}\n')
+        try:
+            req = urllib.request.Request(url, method=method)
+            req.add_header('User-Agent', 'Mozilla/5.0')
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                self.http_result_label.insert('end', f'Status: {resp.status}\n')
+                for h, v in resp.getheaders():
+                    self.http_result_label.insert('end', f'{h}: {v}\n')
+        except Exception as e:
+            self.http_result_label.insert('end', f'Error: {e}\n')
+    
+    def whois_lookup(self):
+        import socket
+        domain = self.whois_input.get().strip()
+        if not domain:
+            self.whois_result_label.delete(1.0, 'end')
+            self.whois_result_label.insert('end', 'Vvedite domen\n')
+            return
+        self.whois_result_label.delete(1.0, 'end')
+        self.whois_result_label.insert('end', f'WHOIS: {domain}\n')
+        try:
+            try:
+                import whois
+                w = whois.whois(domain)
+                self.whois_result_label.insert('end', f'Domain: {w.domain_name}\n')
+                self.whois_result_label.insert('end', f'Registrar: {w.registrar}\n')
+            except ImportError:
+                self.whois_result_label.insert('end', 'No whois module\n')
+        except Exception as e:
+            self.whois_result_label.insert('end', f'Error: {e}\n')
+    
+    def calculate_subnet(self):
+        import ipaddress
+        cidr = self.subnet_input.get().strip()
+        if not cidr:
+            self.subnet_result_label.delete(1.0, 'end')
+            self.subnet_result_label.insert('end', 'Vvedite IP/CIDR\n')
+            return
+        self.subnet_result_label.delete(1.0, 'end')
+        try:
+            if '/' not in cidr: cidr += '/24'
+            net = ipaddress.ip_network(cidr, strict=False)
+            self.subnet_result_label.insert('end', f'Network: {net.network_address}\n')
+            self.subnet_result_label.insert('end', f'Netmask: {net.netmask}\n')
+            self.subnet_result_label.insert('end', f'Broadcast: {net.broadcast_address}\n')
+            self.subnet_result_label.insert('end', f'Hosts: {net.num_addresses - 2}\n')
+        except Exception as e:
+            self.subnet_result_label.insert('end', f'Error: {e}\n')
+
+    # =========================================================================
+    # СЕТЕВЫЕ ИНСТРУМЕНТЫ
+    # =========================================================================
+    
+    def scan_ports(self):
+        import socket, threading
+        host = self.port_scan_host.get().strip()
+        port_range = self.port_scan_range.get().strip()
+        timeout = float(self.port_scan_timeout.get().strip() or '1')
+        if not host:
+            self.port_scan_result.delete(1.0, 'end')
+            self.port_scan_result.insert('end', 'Vvedite host\n')
+            return
+        ports = []
+        try:
+            if '-' in port_range:
+                start, end = map(int, port_range.split('-'))
+                ports = list(range(start, end + 1))
+            elif ',' in port_range:
+                ports = [int(p.strip()) for p in port_range.split(',')]
+            else:
+                ports = [int(port_range)]
+        except ValueError:
+            self.port_scan_result.delete(1.0, 'end')
+            self.port_scan_result.insert('end', 'Neverniy format\n')
+            return
+        self.port_scan_result.delete(1.0, 'end')
+        self.port_scan_result.insert('end', f'Scan {host}...\nPorts: {len(ports)}\n\n')
+        self.port_scan_progress.start()
+        self.scan_running = True
+        open_ports = []
+        def scan_port(port):
+            if not self.scan_running: return
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                if sock.connect_ex((host, port)) == 0:
+                    open_ports.append(port)
+                    self.root.after(0, lambda p=port: self.port_scan_result.insert('end', f'Порт {p}: OPEN
+'))
+                sock.close()
+            except: pass
+        def run():
+            for p in ports:
+                if not self.scan_running: break
+                t = threading.Thread(target=scan_port, args=(p,))
+                t.start()
+                t.join(timeout+0.5)
+            self.root.after(0, lambda: self.finish_scan(open_ports))
+        threading.Thread(target=run, daemon=True).start()
+    
+    def finish_scan(self, open_ports):
+        self.port_scan_progress.stop()
+        self.port_scan_result.insert('end', f'
+Открытые: {open_ports}
+')
+    
+    def stop_port_scan(self):
+        self.scan_running = False
+        self.port_scan_progress.stop()
+        self.port_scan_result.insert('end', 'Остановлено
+')
+    
+    def dns_lookup(self):
+        import socket
+        domain = self.dns_lookup_input.get().strip()
+        record_type = self.dns_record_type.get()
+        if not domain:
+            self.dns_result_label.delete(1.0, 'end')
+            self.dns_result_label.insert('end', 'Введите домен
+')
+            return
+        self.dns_result_label.delete(1.0, 'end')
+        self.dns_result_label.insert('end', f'DNS запрос: {domain} ({record_type})
+')
+        try:
+            try:
+                import dns.resolver
+                answers = dns.resolver.resolve(domain, record_type)
+                for r in answers:
+                    self.dns_result_label.insert('end', f'{r}
+')
+            except ImportError:
+                if record_type == 'A':
+                    ip = socket.gethostbyname(domain)
+                    self.dns_result_label.insert('end', f'A: {ip}
+')
+                else:
+                    self.dns_result_label.insert('end', 'Нужен dnspython
+')
+        except Exception as e:
+            self.dns_result_label.insert('end', f'Ошибка: {e}
+')
+    
+    def analyze_ssl(self):
+        import ssl, socket, datetime
+        host_input = self.ssl_host_input.get().strip()
+        if not host_input:
+            self.ssl_result_label.delete(1.0, 'end')
+            self.ssl_result_label.insert('end', 'Введите URL
+')
+            return
+        if host_input.startswith('http://'):
+            self.ssl_result_label.delete(1.0, 'end')
+            self.ssl_result_label.insert('end', 'Нужен HTTPS
+')
+            return
+        host = host_input.replace('https://', '').split('/')[0].split(':')[0]
+        self.ssl_result_label.delete(1.0, 'end')
+        self.ssl_result_label.insert('end', f'Анализ SSL: {host}
+')
+        try:
+            ctx = ssl.create_default_context()
+            with socket.create_connection((host, 443), timeout=10) as sock:
+                with ctx.wrap_socket(sock, server_hostname=host) as ssock:
+                    cert = ssock.getpeercert()
+                    self.ssl_result_label.insert('end', f'Версия: {ssock.version()}
+')
+                    subject = dict(x[0] for x in cert.get('subject', []))
+                    issuer = dict(x[0] for x in cert.get('issuer', []))
+                    self.ssl_result_label.insert('end', f'Владелец: {subject.get("CN", "N/A")}
+')
+                    self.ssl_result_label.insert('end', f'Издатель: {issuer.get("CN", "N/A")}
+')
+                    not_after = cert.get('notAfter', '')
+                    self.ssl_result_label.insert('end', f'Действителен до: {not_after}
+')
+        except Exception as e:
+            self.ssl_result_label.insert('end', f'Ошибка: {e}
+')
+    
+    def get_http_headers(self):
+        import urllib.request, urllib.error
+        url = self.http_url_input.get().strip()
+        method = self.http_method.get()
+        if not url:
+            self.http_result_label.delete(1.0, 'end')
+            self.http_result_label.insert('end', 'Введите URL
+')
+            return
+        if not url.startswith('http'): url = 'https://' + url
+        self.http_result_label.delete(1.0, 'end')
+        self.http_result_label.insert('end', f'Запрос {method}: {url}
+')
+        try:
+            req = urllib.request.Request(url, method=method)
+            req.add_header('User-Agent', 'Mozilla/5.0')
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                self.http_result_label.insert('end', f'Статус: {resp.status}
+')
+                for h, v in resp.getheaders():
+                    self.http_result_label.insert('end', f'{h}: {v}
+')
+        except Exception as e:
+            self.http_result_label.insert('end', f'Ошибка: {e}
+')
+    
+    def whois_lookup(self):
+        import socket
+        domain = self.whois_input.get().strip()
+        if not domain:
+            self.whois_result_label.delete(1.0, 'end')
+            self.whois_result_label.insert('end', 'Введите домен
+')
+            return
+        self.whois_result_label.delete(1.0, 'end')
+        self.whois_result_label.insert('end', f'WHOIS: {domain}
+')
+        try:
+            try:
+                import whois
+                w = whois.whois(domain)
+                self.whois_result_label.insert('end', f'Домен: {w.domain_name}
+')
+                self.whois_result_label.insert('end', f'Регистратор: {w.registrar}
+')
+            except ImportError:
+                self.whois_result_label.insert('end', 'Нет модуля whois
+')
+        except Exception as e:
+            self.whois_result_label.insert('end', f'Ошибка: {e}
+')
+    
+    def calculate_subnet(self):
+        import ipaddress
+        cidr = self.subnet_input.get().strip()
+        if not cidr:
+            self.subnet_result_label.delete(1.0, 'end')
+            self.subnet_result_label.insert('end', 'Введите IP/CIDR
+')
+            return
+        self.subnet_result_label.delete(1.0, 'end')
+        try:
+            if '/' not in cidr: cidr += '/24'
+            net = ipaddress.ip_network(cidr, strict=False)
+            self.subnet_result_label.insert('end', f'Network: {net.network_address}
+')
+            self.subnet_result_label.insert('end', f'Netmask: {net.netmask}
+')
+            self.subnet_result_label.insert('end', f'Broadcast: {net.broadcast_address}
+')
+            self.subnet_result_label.insert('end', f'Хостов: {net.num_addresses - 2}
+')
+        except Exception as e:
+            self.subnet_result_label.insert('end', f'Ошибка: {e}
+')
+
                 getattr(self.app, 'show_toast', lambda x: None)("✅ История очищена")
 
     @property
