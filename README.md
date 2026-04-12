@@ -403,7 +403,7 @@ python stegoproexp.py
 
 > 💡 **Pro Tip**: For maximum security, encrypt data FIRST, then hide the encrypted payload using steganography. This creates dual-layer protection where even if steganalysis detects hidden data, the attacker still faces 256-bit encryption.
 
-### 🛡️ Using InfoSec Tools (NEW in 2.5.1)
+### 🛡️ Using InfoSec Tools (NEW in )
 
 #### Hash Calculator Workflow
 ```
@@ -655,7 +655,7 @@ stegoproexp/
 ├── requirements.txt        # Python dependencies
 ├── README.md               # This documentation
 ├── stego_settings_pro.json # User configuration (auto-created)
-├── ib_tools.py            # InfoSec Tools module (NEW in 2.5.1)
+├── ib_tools.py            # InfoSec Tools module (NEW in )
 └── analysis/
     ├── file_analyzer.py    # Core steganalysis engine (15+ tests)
     └── visualization.py    # Interactive plot generation
@@ -894,7 +894,7 @@ For commercial use, please contact: **tudubambam@yandex.ru**
 **Author**: MustaNG  
 **GitHub**: [https://github.com/Proffessor2008/-ccultoNG](https://github.com/Proffessor2008/-ccultoNG)  
 **Email**: tudubambam@yandex.ru  
-**Version**: 2.5.1 (February 28, 2026)
+**Version**: 2.6.1 (February 28, 2026)
 
 ## 🙏 Support the Project
 
